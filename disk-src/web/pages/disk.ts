@@ -1663,6 +1663,8 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
     });
   },{passive:true});
   renderFiles();
-  void loadCatalog();
+  // Route shell evaluates diskPage() before appending its result. Wait until
+  // the next frame so the first catalog request belongs to a mounted page.
+  requestAnimationFrame(()=>{if(page.isConnected)void loadCatalog();});
   return page;
 }
