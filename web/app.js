@@ -704,7 +704,15 @@ function sectionCard(sec) {
     sectionPrefs.collapsed=[...set];writeLocal(KEY_SETTINGS,sectionPrefs);
   },'icon-btn sm set-collapse');
   collapse.setAttribute('aria-expanded',String(!collapsed));
-  head.append(ic,copy,collapse);
+  const states={conn:['partial','Подключение без чата'],model:['partial','Модели без чата'],
+    persona:['pending','Ожидает ИИ'],memory:['partial','Заметки работают'],
+    tools:['pending','Инструменты недоступны'],quick:['partial','Сохраняет шаблоны'],
+    look:['ready','Работает'],chat:['pending','Ожидает ИИ'],
+    data:['ready','SQLite работает'],about:['ready','Информация']};
+  const [state,label]=states[sec.id]||['pending','Не подключено'];
+  const flag=el('small','set-cap-state '+state,label);
+  flag.setAttribute('title','Функциональная доступность раздела');
+  head.append(ic,copy,flag,collapse);
   const body=el('div','set-card-body');body.hidden=collapsed;
   section.append(head,body);
   return {section,body};
@@ -784,6 +792,26 @@ function setupCard(id,body) {
         (data.backupCreated?' · исходная копия: '+data.backupCreated:'');
     }).catch(()=>{if(storage.isConnected)storage.textContent='Не удалось проверить SQLite';});
     text(body,'Экспорт включает настройки, заметки, их ссылки по ID и параметры просмотра Диска — без ключей API. Содержимое файлов и версии нужно сохранить отдельно в разделе «Диск».','set-note');
+    const diagnostic=el('div','set-diagnostics');
+    const inspect=btn('Проверить целостность SQLite',async()=>{
+      inspect.disabled=true;
+      diagnostic.textContent='Проверяю SQLite, размер и резервные копии…';
+      try{
+        const report=await tsApi('/api/storage/diagnostics');
+        diagnostic.replaceChildren(
+          line('Проверка базы',report.integrity==='ok'?'Ошибок не обнаружено':report.integrity,
+            el('span','set-state '+(report.integrity==='ok'?'ready':'error'),report.integrity==='ok'?'Порядок':'Проверить')),
+          line('Размер SQLite',Math.round(report.sizeBytes/1024).toLocaleString('ru-RU')+' КБ'),
+          line('Схема / таблицы',report.schema+' / '+report.tables),
+          line('Записей',report.counts.files+' файлов · '+report.counts.notes+
+            ' заметок · '+report.counts.preferences+' настроек · '+report.counts.versions+' редакций'),
+          line('Резервные копии',report.backups.length+' найдено в папке data/backups'),
+          el('p','set-note',report.backups.slice(0,5).join(' · ')||'Резервных копий пока нет.')
+        );
+      }catch(error){diagnostic.textContent='Диагностика не завершена: '+error.message;}
+      finally{inspect.disabled=false;}
+    },'btn');
+    body.append(inspect,diagnostic);
     const actions=el('div','section-actions');
     actions.append(btn('Скачать резервную копию',()=>void downloadBackup(),'btn primary'));
     const input=el('input');input.type='file';input.accept='application/json,.json';input.setAttribute('aria-label','Импорт файла резервной копии');
@@ -796,7 +824,7 @@ function setupCard(id,body) {
     actions.append(input);
     actions.append(btn('Резервная копия файлов Диска',()=>go('disk')));
     body.append(actions);
-    text(body,'Основное хранилище: data/tsukimera.db. Файлы остаются в data/disk/; прежние JSON сохранены для совместимости. Ключи API не сохраняются.','set-note');
+    text(body,'Основное хранилище: data/tsukimera.db. Файлы и их версии остаются в data/disk/. Импорт создаёт копию SQLite перед изменением, но не переносит бинарные файлы. Ключ Cloud.ru не сохраняется.','set-note');
   } else if(id==='about') {
     body.append(line('Проект','Tsukimera',el('span','', 'Версия 0.1.0')));
     body.append(line('Образец интерфейса','Оформление и концепция меню — JUUNIBI.',
