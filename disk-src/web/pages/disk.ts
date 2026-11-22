@@ -27,6 +27,7 @@ import {
   openDiskCommands,copyDiskLink,
   type SmartRule,type TableColumns,type RenamePlan
 } from "./disk-extras";
+import {createDiskSplitters,tileSize,TILE_KEY} from "./disk-layout";
 import "./disk.css";
 
 export interface DiskDeps {
@@ -138,6 +139,8 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
   let shown: DiskFile[] = [];
 
   const page = el("div", { cls: "page disk-page" });
+  let zoom=tileSize(store.get(TILE_KEY));
+  page.style.setProperty("--dk-tile-size",zoom+"px");
   const byId = (id: string) => all.find((f) => f.id === id) ?? trash.find((f) => f.id === id);
   const uploadFolder = () => (view === "all" && virtual === "none" ? current : "");
 
@@ -258,12 +261,26 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
   sortSel.addEventListener("change", () => animateChange(() => {
     sort = sortSel.value as SortKey; store.set("juunibi.disk.sort", sort); renderFiles();
   }));
+  const zoomRange=el("input",{type:"range",min:160,max:360,step:10,value:String(zoom),
+    attrs:{"aria-label":"Размер плиток","aria-valuetext":zoom+" пикселей"}});
+  const zoomValue=el("output",{textContent:zoom+" px"});
+  const zoomControl=el("label",{cls:"dk-tile-scale",attrs:{title:"Размер плиток"}},
+    dIcon("tiles",16),zoomRange,zoomValue);
+  zoomControl.hidden=mode!=="tiles"&&mode!=="large";
+  zoomRange.addEventListener("input",()=>{
+    zoom=tileSize(zoomRange.value);
+    page.style.setProperty("--dk-tile-size",zoom+"px");
+    zoomValue.textContent=zoom+" px";
+    zoomRange.setAttribute("aria-valuetext",zoom+" пикселей");
+    store.set(TILE_KEY,String(zoom));
+  });
   const modeBox = el("div", { cls: "dk-modes", attrs: { role: "group", "aria-label": "Вид" } },
     ...MODES.map((m) => {
       const b = el("button", { type: "button", cls: "icon-btn", title: m.label, attrs: { "aria-label": "Вид: " + m.label, "aria-pressed": String(mode === m.id), "data-mode": m.id } }, dIcon(m.icon, 18));
       b.addEventListener("click", () => animateChange(() => {
         mode = m.id; store.set("juunibi.disk.view", mode);
         for (const x of modeBox.children) x.setAttribute("aria-pressed", String((x as HTMLElement).dataset.mode === mode));
+        zoomControl.hidden=mode!=="tiles"&&mode!=="large";
         renderFiles();
       }));
       return b;
@@ -293,7 +310,7 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
   };
   for (const x of [minIn, maxIn, afterIn, extIn]) x.addEventListener("input", readFilters);
   groupSel.addEventListener("change", readFilters);
-  const head = el("div", { cls: "dk-head" }, el("div", { cls: "dk-head-path" }, crumbs, countNote), el("div", { cls: "dk-head-tools" }, sortSel, filters, modeBox));
+  const head = el("div", { cls: "dk-head" }, el("div", { cls: "dk-head-path" }, crumbs, countNote), el("div", { cls: "dk-head-tools" }, sortSel, filters, modeBox,zoomControl));
 
   /* ---------------------------------------------------------------- selection bar and trash bar */
   const selBar = el("div", { cls: "dk-selbar", hidden: true, attrs: { role: "toolbar", "aria-label": "Выбранные файлы" } });
@@ -1522,7 +1539,9 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
 
   /* ---------------------------------------------------------------- assemble */
   const life = diskLifePanel(() => loaded && !all.length && !trash.length);
-  const layout = el("div", { cls: "dk-layout" + (treeHidden ? " no-tree" : "") }, side, main, life.root, info);
+  const layout = el("div", { cls: "dk-layout" + (treeHidden ? " no-tree" : "") });
+  const panes=createDiskSplitters(layout);
+  layout.append(side,panes.left,main,panes.right,life.root,info);
   page.append(el("h1", { cls: "sr-only", textContent: "Диск" }), bar, layout, scrim, uploader.root, picker, folderPicker, restorePicker, chatDrop);
   renderFiles();
   void loadCatalog();
