@@ -17,6 +17,24 @@ export function areaForGroup(group:string):string {
 export function allGroupIds():string[]{
   return LIFE_AREAS.flatMap(area=>[...area.groups]);
 }
+/** Search across all 15 groups; filtering affects only what is shown,
+ * never the 150 source metrics or the server response. */
+export type LifeAvailability = "all" | "ready" | "empty";
+export function searchLifeMetrics(
+  metrics:DiskLifeMetric[], groups:DiskLife["groups"],
+  query:string, availability:LifeAvailability="all"
+):DiskLifeMetric[]{
+  const normalize=(value:string)=>value.toLocaleLowerCase("ru-RU").replaceAll("ё","е");
+  const terms=normalize(query.trim()).split(/\s+/).filter(Boolean);
+  const titles=new Map(groups.map(group=>[group.id,group.title]));
+  return metrics.filter(m=>{
+    if(availability==="ready"&&m.empty)return false;
+    if(availability==="empty"&&!m.empty)return false;
+    const hay=normalize([m.title,m.hint,m.value,m.detail??"",titles.get(m.group)??""].join(" "));
+    return terms.every(term=>hay.includes(term));
+  });
+}
+
 /** For rendering only; the original 150 metrics are never filtered from API data. */
 export function tileClass(m:DiskLifeMetric):"small"|"medium"|"large" {
   if(m.kind==="list"||m.kind==="calendar"||m.kind==="hours"||
