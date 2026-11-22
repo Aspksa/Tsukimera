@@ -1,3 +1,4 @@
+import {openLiveDiskMap} from "./disk-map";
 import {writePreference} from "../preferences";
 import {el,iconButton,copyText} from "../dom";
 import {btn} from "./kit";
@@ -107,29 +108,10 @@ export function openSmartManager({onApply,onChanged}:{onApply:(rule:SmartRule)=>
   const sheet=openSheet({title:"Умные папки",icon:"folder",content:panel});
   render();
 }
-export function openDiskMap(files:DiskFile[],onOpen:(folder:string)=>void){
-  const groups=new Map<string,number>();
-  for(const file of files) {
-    const root=file.folder.split("/")[0]||"Корень";
-    groups.set(root,(groups.get(root)||0)+file.size);
-  }
-  const sorted=[...groups].sort((a,b)=>b[1]-a[1]);
-  const total=files.reduce((n,f)=>n+f.size,0);
-  const panel=el("div",{cls:"dkx-stack"});
-  panel.append(el("p",{cls:"muted",textContent:"Распределение места внутри Tsukimera. Это размеры сохранённых файлов, а не свободное место всего SSD."}),
-    el("strong",{textContent:"Файлов: "+files.length+" · "+human(total)}));
-  if(!sorted.length)panel.append(el("p",{textContent:"Диск пока пуст."}));
-  for(const [folder,bytes] of sorted.slice(0,30)){
-    const percent=total?Math.round(bytes/total*100):0;
-    const meter=el("span",{cls:"dkx-map-fill"});
-    meter.style.width=Math.max(.5,percent)+"%";
-    const b=btn(folder+" · "+human(bytes)+" · "+percent+"%",()=>{
-      sheet.close();onOpen(folder==="Корень"?"":folder);
-    },{});
-    b.classList.add("dkx-map-row");
-    b.append(el("span",{cls:"dkx-map-track"},meter));panel.append(b);
-  }
-  const sheet=openSheet({title:"Карта пространства",icon:"folder",content:panel});
+/** Keep the existing entry point while the map becomes an interactive Canvas view. */
+export function openDiskMap(files:DiskFile[],folders:string[],
+  onOpen:(folder:string)=>void,onFile?:(id:string)=>void){
+  openLiveDiskMap(files,folders,onOpen,onFile);
 }
 export function openBatchRename(files:DiskFile[],all:DiskFile[],onApply:(plan:RenamePlan[])=>Promise<void>){
   const panel=el("div",{cls:"dkx-stack"});
