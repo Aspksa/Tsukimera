@@ -168,6 +168,24 @@ try{
   console.log("Disk Life 4.0 verified: 6 highlights, 5 directions, 15 groups, 10 metrics per group, full-width layout, source link.");
 
   console.log("Disk layout verified at 1920, 1366 and 390px; pointer drag and tile zoom persist.");
+
+  // Real-browser migration from the older localStorage-only notes. This runs
+  // through web/app.js, not just the notes HTTP API used by the unit tests.
+  await evaluate("(()=>{localStorage.setItem('tsukimera:notes:v1',JSON.stringify([{id:'browser-legacy-note',text:'Старая заметка из браузера'}]));localStorage.removeItem('tsukimera:notes:sqlite-instance:v1');})()");
+  await send("Page.reload",{ignoreCache:true});
+  let imported=false;
+  for(let i=0;i<40;i++){
+    const reply=await fetch(origin+"/api/notes");
+    if(reply.ok){
+      const value=await reply.json();
+      if(value.notes.some(note=>note.id==="browser-legacy-note")){imported=true;break;}
+    }
+    await pause(150);
+  }
+  assert.ok(imported,"Legacy browser-only notes were not safely imported into SQLite");
+  const savedCopy=await evaluate("localStorage.getItem('tsukimera:notes:v1')");
+  assert.ok(savedCopy.includes('browser-legacy-note'),"Migration must retain the browser safety copy");
+  console.log("SQLite browser migration verified: old note survived in DB and local backup.");
 }finally{
   socket?.close();
   chrome.kill("SIGTERM");

@@ -91,13 +91,19 @@ export const api={
   diskZip:(req:{ids:string[]}|{folder:string})=>attemptAsync(()=>call<{url:string;name:string;files:number;bytes:number}>("/api/disk/zip",post(req))),
   diskText:(id:string)=>attemptAsync(()=>call<{name:string;text:string;truncated:boolean}>("/api/disk/files/"+encodeURIComponent(id)+"/text")),
   diskDelete:(id:string)=>attemptAsync(()=>call<any>("/api/disk/files/"+encodeURIComponent(id),{method:"DELETE"})),
-  // The existing Tsukimera Tasks area keeps notes in localStorage.
-  organizer:()=>attemptAsync(async()=>({notes:allNotes(),projects:localList(PROJECTS_KEY) as ProjectMeta[]})),
+  // Notes and their links are stored in SQLite; localStorage is retained
+  // only as a non-authoritative migration/compatibility copy.
+  organizer:()=>attemptAsync(async()=>{
+    const response=await call<{notes:Note[]}>("/api/notes");
+    return {notes:response.notes,projects:localList(PROJECTS_KEY) as ProjectMeta[]};
+  }),
   updateTask:(id:string,patch:{files?:FileLink[]|null})=>attemptAsync(async()=>{
-    const items=allNotes();const note=items.find(n=>n.id===id);
-    if(!note)throw new Error("Заметка не найдена");
-    note.files=patch.files||[];storeList(NOTE_KEY,items);
-    return note;
+    const response=await call<{note:Note}>("/api/notes/"+encodeURIComponent(id)+"/files",{
+      method:"PATCH",body:JSON.stringify({files:patch.files??[]})});
+    const items=allNotes(),index=items.findIndex(n=>n.id===id);
+    if(index>=0){items[index]=response.note;storeList(NOTE_KEY,items);}
+    else dispatchEvent(new CustomEvent("tsukimera:notes-changed"));
+    return response.note;
   }),
   setProject:(name:string,patch:{files?:FileLink[]|null})=>attemptAsync(async()=>{
     const items=localList(PROJECTS_KEY) as ProjectMeta[];

@@ -4,6 +4,7 @@ import { resolve, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { prepareDisk } from "./build-disk.mjs";
 import { createDiskRouter } from "./disk-routes.mjs";
+import { initializeDatabase } from "./tsukimera-db.mjs";
 
 const FILES = new Map([
   ["/", ["web/index.html", "text/html; charset=utf-8"]],
@@ -102,14 +103,19 @@ export function createAppServer({ root, dataDir = join(root, "data") }) {
   let writeQueue = Promise.resolve();
   let diskRouter = null;
   let diskStore = null;
+  let database = null;
 
   async function load() {
+    // The migration copies the complete old vault before creating SQLite.
+    database = await initializeDatabase(dataDir);
+    const sqliteSettings = database.readSettings();
     try {
-      const parsed = JSON.parse(await readFile(file, "utf8"));
+      const parsed = sqliteSettings ?? JSON.parse(await readFile(file, "utf8"));
       config = patchSettings(DEFAULTS, parsed);
     } catch (error) {
       if (error.code !== "ENOENT") console.error("Настройки не загружены: ", error.message);
     }
+    if (sqliteSettings === null) database.writeSettings(config);
     await prepareDisk(root);
     const built=join(root,".runtime","disk-built","server");
     const [{LocalDisk},{zipStream,zipLength},{collectLife}]=await Promise.all([
@@ -117,7 +123,7 @@ export function createAppServer({ root, dataDir = join(root, "data") }) {
       import(pathToFileURL(join(built,"zip-write.js")).href),
       import(pathToFileURL(join(built,"disk-life.js")).href),
     ]);
-    diskStore=new LocalDisk(join(dataDir,"disk"));
+    diskStore=new LocalDisk(join(dataDir,"disk"),database);
     await diskStore.load();
     diskRouter=createDiskRouter({disk:diskStore,zipStream,zipLength,collectLife,
       uploadDir:join(dataDir,"uploads")});
@@ -125,10 +131,17 @@ export function createAppServer({ root, dataDir = join(root, "data") }) {
   }
     // No background service or separate port: disk lives in this same loopback app.
   async function save() {
-    await mkdir(dataDir, { recursive: true });
-    const tmp = join(dataDir, "settings.tmp-" + process.pid);
-    await writeFile(tmp, JSON.stringify(config, null, 2) + "\n", { encoding: "utf8", mode: 0o600 });
-    await rename(tmp, file);
+    // The DB is the committed source of truth. settings.json is kept as an
+    // optional, readable compatibility copy for existing backups and tools.
+    database.writeSettings(config);
+    try {
+      await mkdir(dataDir, { recursive: true });
+      const tmp = join(dataDir, "settings.tmp-" + process.pid);
+      await writeFile(tmp, JSON.stringify(config, null, 2) + "\n", { encoding: "utf8", mode: 0o600 });
+      await rename(tmp, file);
+    } catch (error) {
+      console.error("Не удалось обновить дополнительный settings.json:", error);
+    }
   }
   const headers = {
     "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff",
@@ -139,12 +152,12 @@ export function createAppServer({ root, dataDir = join(root, "data") }) {
     res.writeHead(status, { ...headers, "Content-Type": "application/json; charset=utf-8" });
     res.end(JSON.stringify(body));
   }
-  async function body(req) {
+  async function body(req, maximum = 65536) {
     if (!req.headers["content-type"]?.startsWith("application/json")) bad("Требуется application/json");
     let size = 0, raw = "";
     for await (const chunk of req) {
       size += chunk.length;
-      if (size > 65536) bad("Слишком большой запрос");
+      if (size > maximum) bad("Слишком большой запрос");
       raw += chunk;
     }
     try { return JSON.parse(raw); } catch { bad("Некорректный JSON"); }
@@ -174,7 +187,44 @@ export function createAppServer({ root, dataDir = join(root, "data") }) {
         return res.end(req.method==="HEAD"?undefined:body);
       }
       if (pathname === "/api/status" && req.method === "GET") {
-        return json(res, 200, { project: "Tsukimera", ready: true, aiConnected: false, version: "0.1.0" });
+        return json(res, 200, { project: "Tsukimera", ready: true, aiConnected: false,
+          version: "0.1.0", storage: "sqlite" });
+      }
+      if (pathname === "/api/storage" && req.method === "GET") {
+        return json(res, 200, { engine: "sqlite", file: "data/tsukimera.db",
+          instanceId: database.instanceId, counts: database.counts(),
+          backupCreated: database.backupPath ? "data/" + database.backupPath.split(/[\\/]/).slice(-2).join("/") : null });
+      }
+      if (pathname === "/api/notes" && req.method === "GET") {
+        return json(res, 200, { notes: database.listNotes(), instanceId: database.instanceId });
+      }
+      if (pathname === "/api/notes/import" && req.method === "POST") {
+        if (req.headers["x-tsukimera-request"] !== "1") return json(res, 403, {error:"Недопустимый запрос"});
+        const input = await body(req, 1024 * 1024);
+        if (!isRecord(input) || !["notes","replace"].includes(input.action ?? "notes") ||
+          Object.keys(input).some(key => !["notes","action"].includes(key))) bad("Неверный импорт заметок");
+        const notes = input.action === "replace"
+          ? database.replaceNotes(input.notes) : database.importNotes(input.notes);
+        return json(res, 200, {notes, instanceId:database.instanceId});
+      }
+      if (pathname === "/api/notes" && req.method === "POST") {
+        if (req.headers["x-tsukimera-request"] !== "1") return json(res, 403, {error:"Недопустимый запрос"});
+        const input = await body(req);
+        const note = database.addNote(input);
+        return json(res, 201, {note});
+      }
+      const noteFiles = /^\/api\/notes\/([a-zA-Z0-9_-]{1,100})\/files$/.exec(pathname);
+      if (noteFiles && req.method === "PATCH") {
+        if (req.headers["x-tsukimera-request"] !== "1") return json(res,403,{error:"Недопустимый запрос"});
+        const input = await body(req);
+        if (!isRecord(input) || Object.keys(input).some(key=>key!=="files")) bad("Неверные ссылки");
+        const note = database.attachNoteFiles(noteFiles[1],input.files);
+        return json(res,200,{note});
+      }
+      const noteDelete = /^\/api\/notes\/([a-zA-Z0-9_-]{1,100})$/.exec(pathname);
+      if (noteDelete && req.method === "DELETE") {
+        if (req.headers["x-tsukimera-request"] !== "1") return json(res,403,{error:"Недопустимый запрос"});
+        return json(res,200,database.deleteNote(noteDelete[1]));
       }
       if (pathname === "/api/settings" && req.method === "GET") return json(res, 200, { settings: config });
       if (pathname === "/api/settings" && req.method === "PUT") {
