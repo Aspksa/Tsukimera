@@ -151,7 +151,7 @@ try{
   await evaluate("document.querySelector('.dkl-detail-sheet .btn.primary').click()");
   let linked;
   for(let attempt=0;attempt<25;attempt++){
-    linked=await evaluate("(()=>({panel:!!document.querySelector('.dk-info:not([hidden])'),expanded:document.querySelector('.disk-page').classList.contains('dk-life-expanded'),infoHidden:document.querySelector('.dk-info')?.hidden,layoutClasses:document.querySelector('.dk-layout')?.className,visibleCards:document.querySelectorAll('.dk-file').length,toast:document.querySelector('.toast-ts')?.textContent,files:document.querySelector('.dk-count')?.textContent}))()");
+    linked=await evaluate("(()=>({panel:!!document.querySelector('.dk-info:not([hidden])'),expanded:document.querySelector('.disk-page').classList.contains('dk-life-expanded'),infoHidden:document.querySelector('.dk-info')?.hidden,layoutClasses:document.querySelector('.dk-layout')?.className,visibleCards:document.querySelectorAll('.dk-file').length,toast:document.querySelector('.toast-ts')?.textContent,files:document.querySelector('.dk-count')?.textContent,catalogStage:document.querySelector('.disk-page')?.dataset.catalogStage}))()");
     if(linked?.panel&&!linked.expanded)break;
     await pause(120);
   }
