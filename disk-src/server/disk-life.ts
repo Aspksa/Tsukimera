@@ -10,7 +10,7 @@ import type { DiskEntry, LocalDisk } from "./local-disk";
 export type LifeKind = "line" | "spark" | "split" | "dots" | "hours" | "calendar" | "list" | "swatches";
 export type LifeMetric = {
   id: string; group: string; icon: string; title: string; hint: string; value: string;
-  detail?: string; kind?: LifeKind; series?: number[]; labels?: string[]; list?: string[]; ring?: number; empty?: boolean;
+  detail?: string; kind?: LifeKind; series?: number[]; labels?: string[]; list?: string[]; ring?: number; empty?: boolean; sourceFileId?: string;
 };
 export type LifeGroup = { id: string; title: string; icon: string; color: string; note: string };
 export type DiskLife = {
@@ -290,7 +290,7 @@ export function buildLife(src: LifeSource): DiskLife {
     { kind: "spark", series: monthAvg.series.map((v, i) => (monthCnt.series[i] ? Math.round(v / monthCnt.series[i]!) : 0)), labels: monthAvg.labels }, "файлов пока нет");
   const biggest = [...active].sort((a, b) => b.size - a.size)[0];
   add("core", "biggest", "whale", "Самый крупный файл", biggest ? biggest.name : "", biggest ? bytes(biggest.size) : null,
-    { ring: activeBytes ? biggest!.size / activeBytes : 0, detail: "доля от всех файлов" }, "файлов пока нет");
+    { ring: activeBytes ? biggest!.size / activeBytes : 0, detail: "доля от всех файлов", sourceFileId: biggest!.id }, "файлов пока нет");
   const big = active.filter((e) => e.size >= 10485760);
   add("core", "big", "weight", "Крупные файлы", "от 10 МБ, доля в объёме", nFiles(big.length),
     { ring: activeBytes ? big.reduce((n, e) => n + e.size, 0) / activeBytes : 0 });
@@ -299,7 +299,7 @@ export function buildLife(src: LifeSource): DiskLife {
   add("core", "exts", "puzzle", "Разных расширений", extTop[0] ? `чаще всего .${extTop[0][0]}` : "", exts.size ? fmt(exts.size) : null,
     { kind: "split", series: extTop.slice(0, 5).map((x) => x[1]), labels: extTop.slice(0, 5).map((x) => "." + x[0]) }, "файлов пока нет");
   const smallest = [...active].sort((a, b) => a.size - b.size)[0];
-  add("core", "smallest", "feather", "Самый лёгкий файл", smallest?.name ?? "", smallest ? bytes(smallest.size) : null, {}, "файлов пока нет");
+  add("core", "smallest", "feather", "Самый лёгкий файл", smallest?.name ?? "", smallest ? bytes(smallest.size) : null, smallest ? { sourceFileId: smallest.id } : {}, "файлов пока нет");
   const firstT = times.length ? Math.min(...times) : now;
   const weeksAlive = Math.max(1, (now - firstT) / (7 * DAY));
   add("core", "pace", "speed", "Скорость наполнения", "файлов в неделю за всю жизнь Диска", times.length ? dec(uploads.length / weeksAlive) : null,
@@ -369,8 +369,8 @@ export function buildLife(src: LifeSource): DiskLife {
   add("time", "avgage", "sandclock", "Средний возраст файла", "сколько дней файлы уже лежат", ages.length ? nDays(ages.reduce((a, b) => a + b, 0) / ages.length) : null,
     { kind: "spark", series: ageB, labels: ["до недели", "до месяца", "до 3 мес", "до года", "старше года"] }, "файлов пока нет");
   const oldest = [...activeBorn].sort((a, b) => a.t - b.t)[0], newest = [...activeBorn].sort((a, b) => b.t - a.t)[0];
-  add("time", "oldest", "fossil", "Старожил", oldest ? `с ${dateText(oldest.t)}` : "", oldest ? oldest.e.name : null, oldest ? { detail: nDays((now - oldest.t) / DAY) + " на Диске" } : {}, "файлов пока нет");
-  add("time", "newest", "seedling", "Новичок", newest ? ago(now - newest.t) : "", newest ? newest.e.name : null, {}, "файлов пока нет");
+  add("time", "oldest", "fossil", "Старожил", oldest ? `с ${dateText(oldest.t)}` : "", oldest ? oldest.e.name : null, oldest ? { detail: nDays((now - oldest.t) / DAY) + " на Диске", sourceFileId: oldest.e.id } : {}, "файлов пока нет");
+  add("time", "newest", "seedling", "Новичок", newest ? ago(now - newest.t) : "", newest ? newest.e.name : null, newest ? { sourceFileId: newest.e.id } : {}, "файлов пока нет");
   const old90 = ages.filter((a) => a >= 90).length;
   add("time", "old90", "leaf", "Старше трёх месяцев", "файлы, которые лежат 90 дней и больше", nFiles(old90), { ring: ages.length ? old90 / ages.length : 0 });
   const year = perMonth(uploads.map((u) => ({ t: u.t, v: 1 })), now, 12);
@@ -551,7 +551,7 @@ export function buildLife(src: LifeSource): DiskLife {
   const minutes = W / 200;
   add("words", "reading", "readTime", "Время чтения", "при скорости 200 слов в минуту", tx(minutes < 60 ? `${fmt(Math.max(1, minutes))} мин` : `${fmt(Math.floor(minutes / 60))} ч ${fmt(minutes % 60)} мин`),
     { kind: "spark", series: byWords.slice(0, 10).map((x) => Math.max(1, Math.round(x.p.text.words / 200))), labels: byWords.slice(0, 10).map((x) => `${x.e.name}, мин`) }, noText);
-  add("words", "longest", "scroll", "Самый длинный документ", byWords[0] ? `${fmt(byWords[0].p.text.words)} слов` : "", tx(byWords[0]?.e.name ?? ""), { ring: W ? (byWords[0]?.p.text.words ?? 0) / W : 0, detail: "доля всех слов" }, noText);
+  add("words", "longest", "scroll", "Самый длинный документ", byWords[0] ? `${fmt(byWords[0].p.text.words)} слов` : "", tx(byWords[0]?.e.name ?? ""), { ring: W ? (byWords[0]?.p.text.words ?? 0) / W : 0, detail: "доля всех слов", sourceFileId: byWords[0]?.e.id }, noText);
   const wb = [0, 0, 0, 0, 0];
   for (const x of read) { const w = x.p.text.words; wb[w < 300 ? 0 : w < 1000 ? 1 : w < 3000 ? 2 : w < 10000 ? 3 : 4]!++; }
   add("words", "avgdoc", "ruler", "Средний документ", "слов в одном документе", tx(fmt(W / Math.max(1, read.length))), { kind: "spark", series: wb, labels: ["до 300", "300–1000", "1–3 тыс.", "3–10 тыс.", "больше 10 тыс."] }, noText);
@@ -571,8 +571,8 @@ export function buildLife(src: LifeSource): DiskLife {
   for (const x of read) for (const [t, n] of x.p.text.terms) terms.set(t, (terms.get(t) ?? 0) + n);
   const topTerms = [...terms].sort((a, b) => b[1] - a[1]).slice(0, 5);
   add("style", "topwords", "heartWord", "Любимые слова", "чаще всего встречаются", tx(topTerms[0]?.[0] ?? "—"), { kind: "list", list: topTerms.map(([t, n]) => `${t} · ${fmt(n)}`) }, noText);
-  const lw = read.map((x) => ({ w: x.p.text.longestWord, n: x.e.name })).sort((a, b) => b.w.length - a.w.length)[0];
-  add("style", "longword", "longWord", "Самое длинное слово", lw ? `${lw.w.length} букв · ${lw.n}` : "", tx(lw?.w ?? ""), {}, noText);
+  const lw = read.map((x) => ({ w: x.p.text.longestWord, n: x.e.name, id: x.e.id })).sort((a, b) => b.w.length - a.w.length)[0];
+  add("style", "longword", "longWord", "Самое длинное слово", lw ? `${lw.w.length} букв · ${lw.n}` : "", tx(lw?.w ?? ""), lw ? {sourceFileId:lw.id} : {}, noText);
   const wl = Array.from({ length: 13 }, (_, i) => sum((t) => t.wordLen[i]!));
   add("style", "wordlen", "letters", "Средняя длина слова", "букв в слове", tx(dec(sum((t) => t.letters) / Math.max(1, sum((t) => t.letterWords)))),
     { kind: "spark", series: wl, labels: wl.map((_, i) => (i === 12 ? "13+ букв" : `${i + 1} ${plural(i + 1, "буква", "буквы", "букв")}`)) }, noText);
@@ -583,8 +583,8 @@ export function buildLife(src: LifeSource): DiskLife {
   add("style", "questions", "questionBubble", "Вопросы", `${dec((1000 * Q) / Math.max(1, W))} на тысячу слов`, tx(fmt(Q)), { kind: "spark", series: byWords.slice(0, 10).map((x) => x.p.text.questions), labels: byWords.slice(0, 10).map((x) => x.e.name) }, noText);
   const X = sum((t) => t.exclaims);
   add("style", "exclaims", "exclaim", "Восклицания", `${dec((1000 * X) / Math.max(1, W))} на тысячу слов`, tx(fmt(X)), { kind: "spark", series: byWords.slice(0, 10).map((x) => x.p.text.exclaims), labels: byWords.slice(0, 10).map((x) => x.e.name) }, noText);
-  const ls = read.map((x) => ({ n: x.p.text.longestSentence, name: x.e.name })).sort((a, b) => b.n - a.n)[0];
-  add("style", "longsent", "snake", "Самое длинное предложение", ls?.name ?? "", tx(`${fmt(ls?.n ?? 0)} знаков`), {}, noText);
+  const ls = read.map((x) => ({ n: x.p.text.longestSentence, name: x.e.name, id: x.e.id })).sort((a, b) => b.n - a.n)[0];
+  add("style", "longsent", "snake", "Самое длинное предложение", ls?.name ?? "", tx(`${fmt(ls?.n ?? 0)} знаков`), ls ? {sourceFileId:ls.id} : {}, noText);
   const N = sum((t) => t.numbers);
   add("style", "numbers", "digits", "Чисел в тексте", `${dec((1000 * N) / Math.max(1, W))} на тысячу слов`, tx(fmt(N)), { ring: W + N ? N / (W + N) : 0 }, noText);
   const E = sum((t) => t.ellipses);

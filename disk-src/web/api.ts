@@ -2,7 +2,7 @@
  * The storage, preview and life endpoints keep JUUNIBI's API names and shapes.
  * Tasks are mapped to Tsukimera's existing local notes. No cloud requests. */
 export interface DiskFile {id:string;name:string;folder:string;size:number;uploadedAt:string;sha256:string;favorite?:boolean;deletedAt?:string;tags?:string[];color?:string;note?:string;revision?:number;thumb?:true}
-export interface DiskLifeMetric {id:string;group:string;icon:string;title:string;hint:string;value:string;detail?:string;kind?:string;series?:number[];labels?:string[];list?:string[];ring?:number;empty?:boolean}
+export interface DiskLifeMetric {id:string;group:string;icon:string;title:string;hint:string;value:string;detail?:string;kind?:string;series?:number[];labels?:string[];list?:string[];ring?:number;empty?:boolean;sourceFileId?:string}
 export interface DiskLife {generatedAt:string;groups:{id:string;title:string;icon:string;color:string;note:string}[];metrics:DiskLifeMetric[];highlights:string[];analysis:{documents:number;read:number;scans:number;unreadable:number;images:number;measured:number}}
 export type DiskRun={t:string;b?:true;i?:true};
 export type DiskPreview=

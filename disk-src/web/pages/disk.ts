@@ -1539,6 +1539,20 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
 
   /* ---------------------------------------------------------------- assemble */
   const life = diskLifePanel(() => loaded && !all.length && !trash.length);
+  // A metric can navigate to a document only when the backend supplied its
+  // exact, verified sourceFileId. Aggregate metrics never manufacture links.
+  life.root.addEventListener("tsukimera:life-open-file",(event)=>{
+    const id=(event as CustomEvent<{id:string}>).detail?.id;
+    if(!id)return;
+    const file=byId(id);
+    if(!file||file.deletedAt){
+      showToast("Документ-источник больше не находится на Диске");return;
+    }
+    go({folder:file.folder});
+    reveal(file.id);
+    openInfo(file.id);
+  });
+
   const layout = el("div", { cls: "dk-layout" + (treeHidden ? " no-tree" : "") });
   const panes=createDiskSplitters(layout);
   layout.append(side,panes.left,main,panes.right,life.root,info);
