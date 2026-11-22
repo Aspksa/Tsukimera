@@ -23,6 +23,11 @@ export async function prepareDisk(root) {
       await mkdir(dirname(dest), { recursive: true });
       const typescript = await readFile(source, "utf8");
       let code = stripTypeScriptTypes(typescript, { mode: "transform", sourceUrl: source });
+      // JUUNIBI is the source project, Tsukimera is the running product.
+      // Apply the same rename across all modules so events and storage keys match.
+      if(relative(sourceRoot,source).startsWith("web/")){
+        code=code.replaceAll("JUUNIBI","Tsukimera").replaceAll("juunibi","tsukimera");
+      }
       // CSS is served as a real stylesheet, not as a JS module.
       code = code.replace(/^\s*import\s*["']\.\/disk\.css["'];?\s*$/gm, "");
       // Neither native Node nor browsers resolve extensionless JS ESM imports.
