@@ -5,6 +5,7 @@ import { pathToFileURL } from "node:url";
 import { prepareDisk } from "./build-disk.mjs";
 import { createDiskRouter } from "./disk-routes.mjs";
 import { initializeDatabase } from "./tsukimera-db.mjs";
+import { createCloudConnection } from "./cloudru.mjs";
 
 const FILES = new Map([
   ["/", ["web/index.html", "text/html; charset=utf-8"]],
@@ -97,13 +98,15 @@ export function patchSettings(current, patch) {
   }
   return next;
 }
-export function createAppServer({ root, dataDir = join(root, "data") }) {
+export function createAppServer({root,dataDir=join(root,"data"),cloudRequest,cloudKey}={}) {
   let config = structuredClone(DEFAULTS);
   const file = join(dataDir, "settings.json");
   let writeQueue = Promise.resolve();
   let diskRouter = null;
   let diskStore = null;
   let database = null;
+  const cloud=createCloudConnection({request:cloudRequest??globalThis.fetch,
+    envKey:cloudKey??process.env.CLOUD_RU_FOUNDATION_MODELS_API_KEY??""});
 
   async function load() {
     // The migration copies the complete old vault before creating SQLite.
@@ -190,6 +193,25 @@ export function createAppServer({ root, dataDir = join(root, "data") }) {
         return json(res, 200, { project: "Tsukimera", ready: true, aiConnected: false,
           version: "0.1.0", storage: "sqlite" });
       }
+      if (pathname === "/api/storage/diagnostics" && req.method === "GET") {
+        return json(res,200,database.diagnostics());
+      }
+      if (pathname === "/api/cloud/status" && req.method === "GET") {
+        return json(res,200,cloud.status());
+      }
+      if (pathname === "/api/cloud/models" && req.method === "GET") {
+        return json(res,200,await cloud.list());
+      }
+      if (pathname === "/api/cloud/key" && req.method === "POST") {
+        if(req.headers["x-tsukimera-request"]!=="1")return json(res,403,{error:"Недопустимый запрос"});
+        const input=await body(req,8192);
+        if(!isRecord(input)||typeof input.key!=="string"||Object.keys(input).some(k=>k!=="key"))bad("Неверный ключ");
+        return json(res,200,cloud.changeKey(input.key));
+      }
+      if (pathname === "/api/cloud/clear" && req.method === "POST") {
+        if(req.headers["x-tsukimera-request"]!=="1")return json(res,403,{error:"Недопустимый запрос"});
+        return json(res,200,cloud.clear());
+      }
       if (pathname === "/api/storage" && req.method === "GET") {
         return json(res, 200, { engine: "sqlite", file: "data/tsukimera.db",
           instanceId: database.instanceId, counts: database.counts(),
@@ -243,7 +265,50 @@ export function createAppServer({ root, dataDir = join(root, "data") }) {
         if (req.headers["x-tsukimera-request"] !== "1") return json(res,403,{error:"Недопустимый запрос"});
         return json(res,200,database.deleteNote(noteDelete[1]));
       }
-      if (pathname === "/api/settings" && req.method === "GET") return json(res, 200, { settings: config });
+      if (pathname === "/api/capabilities" && req.method === "GET"){
+        return json(res,200,{
+          notes:{available:true,engine:"sqlite",stored:database.counts().notes},
+          vectorSearch:{available:false,reason:"Индекс смыслового поиска пока не реализован"},
+          summaries:{available:false,reason:"Нет работающего чат-движка"},
+          aiTools:{available:false,reason:"ИИ-инструменты не подключены"},
+          cloud:cloud.status(),
+          policies:{web:config.tools.web,writeFiles:config.tools.writeFiles,
+            effectiveWeb:false,effectiveWriteFiles:false,
+            note:"Политики сохранены; ИИ не может вызывать инструменты без исполняющего модуля."},
+        });
+      }
+      if (pathname === "/api/settings/restore" && req.method === "POST"){
+        if(req.headers["x-tsukimera-request"]!=="1")return json(res,403,{error:"Недопустимый запрос"});
+        const input=await body(req,1048576);
+        if(!isRecord(input)||input.kind!=="tsukimera-settings-v1"||input.version!==1||
+          !isRecord(input.settings)||!Array.isArray(input.notes)||!isRecord(input.diskPrefs))bad("Некорректный архив настроек");
+        const next=patchSettings(DEFAULTS,input.settings);
+        if(input.notes.length>200||!isRecord(input.menu)||!isRecord(input.ui)||!isRecord(input.sections))bad("Некорректный архив настроек");
+        const allowedPrefs=new Set([..."tsukimera:nav:v1|tsukimera:ui:v1|tsukimera:settings:v1".split("|"),
+          ...Object.keys(database.readPreferences().preferences),
+          "tsukimera.disk.smart.v1","tsukimera.disk.columns.v1",
+          "tsukimera.disk.layout.left.v1","tsukimera.disk.layout.right.v1",
+          "tsukimera.disk.tiles.v1","tsukimera.disk.view","tsukimera.disk.sort",
+          "tsukimera.disk.open","tsukimera.disk.tree","tsukimera.disk.life.group",
+          "tsukimera.disk.mdRaw"]);
+        if(Object.entries(input.diskPrefs).some(([k,v])=>!allowedPrefs.has(k)||typeof v!=="string"||v.length>16000))bad("Недопустимые настройки Диска");
+        const prefs={...input.diskPrefs,
+          "tsukimera:nav:v1":JSON.stringify(input.menu),
+          "tsukimera:ui:v1":JSON.stringify(input.ui),
+          "tsukimera:settings:v1":JSON.stringify(input.sections)};
+        // Serialise against ongoing server setting updates, and snapshot the
+        // *whole database* before committing all restored values at once.
+        const output=await (writeQueue=writeQueue.catch(()=>{}).then(async()=>{
+          const backup=await database.backupSettingsRestore();
+          const saved=database.restoreSettingsBundle({settings:next,preferences:prefs,notes:input.notes});
+          config=next;
+          await save();
+          return {backup:"data/"+backup,notes:saved.notes,preferences:saved.preferences,
+            settings:structuredClone(next)};
+        }));
+        return json(res,200,output);
+      }
+            if (pathname === "/api/settings" && req.method === "GET") return json(res, 200, { settings: config });
       if (pathname === "/api/settings" && req.method === "PUT") {
         if (req.headers["x-tsukimera-request"] !== "1") return json(res, 403, { error: "Недопустимый запрос" });
         const incoming = await body(req);
