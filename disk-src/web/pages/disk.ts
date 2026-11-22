@@ -28,6 +28,7 @@ import {
   type SmartRule,type TableColumns,type RenamePlan
 } from "./disk-extras";
 import {createDiskSplitters,tileSize,TILE_KEY} from "./disk-layout";
+import {writePreference} from "../preferences";
 import "./disk.css";
 
 export interface DiskDeps {
@@ -62,7 +63,7 @@ const ib = (ic: DiskIconName, label: string, run: () => void) => {
 };
 const store = {
   get: (k: string) => { try { return localStorage.getItem(k); } catch { return null; } },
-  set: (k: string, v: string) => { try { localStorage.setItem(k, v); } catch { /* private mode */ } },
+  set: (k: string, v: string) => { writePreference(k,v); },
 };
 const fmtDate = (iso: string) => new Date(iso).toLocaleDateString("ru-RU", { day: "numeric", month: "short", year: "numeric" });
 const fmtTime = (iso: string) => new Date(iso).toLocaleString("ru-RU", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
