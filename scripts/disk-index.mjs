@@ -60,13 +60,16 @@ export function saveDiskState(db,state){
     entryUp.run(e.id,serialized);
     fileUp.run(e.id,e.name,e.folder,e.size,e.sha256,e.deletedAt??null,e.uploadedAt);
     // Revision replacement or trash must never leave stale search hits.
-    if(!before||before.sha256!==e.sha256||!!before.deletedAt!==!!e.deletedAt)ftsDelete.run(e.id);
+    if(!before||before.sha256!==e.sha256||!!before.deletedAt!==!!e.deletedAt){
+      ftsDelete.run(e.id);
+      db.prepare("DELETE FROM disk_audit WHERE target=?").run("file:"+e.id);
+    }
     changed++;
   }
   for(const id of old.keys()){
     if(next.has(id))continue;
     ftsDelete.run(id);fileDelete.run(id);entryDelete.run(id);deleted++;
-    db.prepare("DELETE FROM disk_audit WHERE target=?").run("file:"+id);
+    db.prepare("DELETE FROM disk_audit WHERE target=? OR target LIKE ?").run("file:"+id,"version:"+id+":%");
   }
   const previous=new Map();
   for(const r of db.prepare("SELECT file_id,revision,object_id,size,sha256,at FROM disk_versions ORDER BY file_id,revision").all()){
@@ -81,6 +84,7 @@ export function saveDiskState(db,state){
     const wanted=histories[id]??[];
     if(value(previous.get(id)??[])===value(wanted))continue;
     removeHistory.run(id);
+    db.prepare("DELETE FROM disk_audit WHERE target LIKE ?").run("version:"+id+":%");
     for(const v of wanted)addHistory.run(id,v.revision,v.objectId,v.size,v.sha256,v.at);
   }
   const folders=new Map(db.prepare("SELECT name,style_json FROM disk_folders").all().map(x=>[x.name,x.style_json]));
