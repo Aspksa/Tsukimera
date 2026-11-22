@@ -919,7 +919,7 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
       if (folder && !matches(folder)) return null;
       const children = (kids.get(folder) ?? []).sort(order);
       const open = !folder || expanded.has(folder) || !!treeQuery;
-      const isCur = view === "all" && virtual === "none" && current === folder;
+      const isCur = !smartCurrent && view === "all" && virtual === "none" && current === folder;
       const t = totals.get(folder);
       const st = styles[folder];
       const row = el("div", { cls: "dk-node" + (isCur ? " current" : ""), attrs: { role: "treeitem", "aria-level": String(depth + 1) } });
@@ -977,6 +977,23 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
       if (s.id === "trash") dropFiles(b, TRASH_DROP);
       return b;
     }));
+    const rules=readSmartRules();
+    const smartHeader=el("button",{type:"button",cls:"dkx-smart-head"},
+      el("span",{textContent:"Умные папки"}),el("span",{textContent:"+ · изменить"}));
+    smartHeader.addEventListener("click",editSmartFolders);
+    sections.append(smartHeader);
+    for(const rule of rules){
+      const n=all.filter(f=>matchesSmartRule(f,rule)).length;
+      const button=el("button",{type:"button",cls:"dk-section dkx-smart"+(smartCurrent===rule.id?" current":"")},
+        el("span",{cls:"dk-node-ic"},dIcon("folder",17)),
+        el("span",{cls:"dk-node-name",textContent:rule.name}),
+        el("small",{cls:"dk-node-n",textContent:String(n)}));
+      button.addEventListener("click",()=>{
+        smartCurrent=rule.id;view="all";virtual="none";everywhere=true;
+        selected.clear();redraw();setDrawer(false);
+      });
+      sections.append(button);
+    }
   };
 
   /* ---------------------------------------------------------------- «Сведения» side panel */
@@ -1345,7 +1362,12 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
 
   /* ---------------------------------------------------------------- navigation and loading */
   function go(to: { folder?: string; view?: View; virtual?: Virtual }) {
-    if (to.folder !== undefined) { current = to.folder; view = "all"; virtual = "none"; for (let p = parentOf(current); p; p = parentOf(p)) expanded.add(p); saveOpen(); }
+    smartCurrent=null;
+    if (to.folder !== undefined) {
+      current=to.folder;view="all";virtual="none";
+      for (let p=current; p; p=parentOf(p)) expanded.add(p);
+      saveOpen();
+    }
     if (to.view) { view = to.view; virtual = "none"; }
     if (to.virtual) { view = "all"; virtual = to.virtual; }
     selected.clear(); limit = PAGE; focusId = null;
@@ -1357,6 +1379,10 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
     const sep = () => el("span", { cls: "dk-crumb-sep", attrs: { "aria-hidden": "true" } }, dIcon("chevronRight", 14));
     const parts: HTMLElement[] = [];
     if (view === "trash") parts.push(part("Корзина"));
+    else if (smartCurrent) {
+      const rule=readSmartRules().find(r=>r.id===smartCurrent);
+      parts.push(part(rule?.name||"Умная папка"));
+    }
     else if (view === "favorites") parts.push(part("Избранное"));
     else if (virtual !== "none") parts.push(part(VIRTUAL_TITLE[virtual]));
     else {
@@ -1389,17 +1415,19 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
     if (st?.ok) styles = st.value;
     if (tr?.ok) keepDays = tr.value.days;
     if (current && !folders.includes(current)) current = "";
+    if(smartCurrent&&!readSmartRules().some(r=>r.id===smartCurrent))smartCurrent=null;
     loaded = true;
     redraw();
     showLinked();
   }
   /** A file opened from «Дела»: its folder, the file flashed, and the preview or «Сведения». */
   function showLinked() {
-    const id = takeDiskLink(); if (!id) return;
+    const linked=/^#\/disk\/([0-9a-f-]{36})$/.exec(location.hash);
+    const id=linked?.[1]||takeDiskLink(); if(!id)return;
     const f = all.find((x) => x.id === id);
     if (!f) { showToast(trash.some((x) => x.id === id) ? "Этот файл в корзине" : "Файла больше нет на Диске"); return; }
     go({ folder: f.folder }); reveal(f.id);
-    if (previewKind(f.name)) openViewer(f); else openInfo(f.id);
+    openInfo(f.id);
   }
   const onLink = () => { if (!page.isConnected) { removeEventListener("tsukimera:disk-link", onLink); return; } if (loaded) showLinked(); };
   addEventListener("tsukimera:disk-link", onLink);
