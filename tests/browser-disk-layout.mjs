@@ -155,6 +155,10 @@ try{
     if(linked?.panel&&!linked.expanded)break;
     await pause(120);
   }
+  if(!linked.panel){
+    const probe=await evaluate("(async()=>{const paths=['/api/disk','/api/disk/folders/styles','/api/disk/trash','/api/disk/automation'];return await Promise.all(paths.map(async p=>{try{const r=await fetch(p,{signal:AbortSignal.timeout(4000)});const data=await r.json();return {path:p,status:r.status,files:data.files?.length,folders:data.folders?.length,error:data.error,body:JSON.stringify(data).slice(0,180)};}catch(e){return {path:p,error:String(e)};}}))})()");
+    console.log("Disk catalog browser fetch diagnostics:",JSON.stringify(probe));
+  }
   console.log("Verified life-file navigation:",JSON.stringify(linked));
   assert.ok(linked.panel&&!linked.expanded,"Verified source document did not open in the Disk inspector: "+JSON.stringify(linked));
   await evaluate("document.querySelector('.dkl-expand').click()");
