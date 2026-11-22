@@ -1074,9 +1074,37 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
         btn("Прикрепить к делу", () => void attachToTask([f.id]), { small: true, icon: "plus" }));
       linked.hidden = false;
     });
+    const quick=el("section",{cls:"dk-info-block dkx-quick-preview"});
+    if(!f.deletedAt){
+      quick.append(el("h4",{textContent:"Быстрый просмотр"}));
+      const kind=previewKind(f.name);
+      if(kind==="image")quick.append(el("img",{
+        src:diskRawUrl(f),alt:f.name,loading:"lazy",cls:"dkx-quick-image"
+      }));
+      else if(kind==="pdf")quick.append(el("iframe",{
+        src:diskRawUrl(f),title:"Предпросмотр: "+f.name,loading:"lazy",cls:"dkx-quick-pdf"
+      }));
+      else if(kind==="video")quick.append(el("video",{
+        src:diskRawUrl(f),controls:true,preload:"metadata",cls:"dkx-quick-media"
+      }));
+      else if(kind==="audio")quick.append(el("audio",{
+        src:diskRawUrl(f),controls:true,preload:"metadata",cls:"dkx-quick-media"
+      }));
+      else if(kind==="text"||kind==="markdown"||kind==="table"||kind==="office"){
+        const summary=el("pre",{cls:"dkx-quick-text",textContent:"Читаю файл…"});
+        quick.append(summary);
+        void api.diskText(f.id).then(result=>{
+          if(infoId!==f.id||!summary.isConnected)return;
+          summary.textContent=result.ok?
+            (result.value.text.slice(0,12000)||"Нет извлекаемого текста"):
+            result.error.message;
+        });
+      }else quick.append(el("p",{cls:"muted",textContent:"Предпросмотр для этого формата недоступен"}));
+      quick.append(btn("Открыть полностью",()=>openViewer(f),{small:true,icon:"eye"}));
+    }
     info.replaceChildren(
       el("header", { cls: "dk-info-head" }, el("strong", { textContent: "Сведения" }), iconButton("x", "Закрыть сведения", closeInfo, "icon-btn sm")),
-      big, el("h3", { cls: "dk-info-name", textContent: f.name }), actions,
+      big, el("h3", { cls: "dk-info-name", textContent: f.name }), quick, actions,
       el("div", { cls: "dk-info-rows" }, row("Папка", folderLink), row("Размер", human(f.size)), row("Загружен", fmtTime(f.uploadedAt)), row("Тип", f.name.split(".").pop()?.toUpperCase() ?? "—"),
         row("Контрольная сумма", el("code", { textContent: f.sha256.slice(0, 16) + "…", title: "SHA-256: " + f.sha256 }))),
       ...(!f.deletedAt ? [
