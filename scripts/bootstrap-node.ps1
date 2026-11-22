@@ -1,5 +1,5 @@
 # Downloads a portable Node.js (checksum-verified) into -Dest\node. No admin rights needed.
-param([Parameter(Mandatory)][string]$Dest, [string]$Version = "22.12.0")
+param([Parameter(Mandatory)][string]$Dest, [string]$Version = "24.11.1")
 $ErrorActionPreference = "Stop"
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 $arch = if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") { "arm64" } else { "x64" }
