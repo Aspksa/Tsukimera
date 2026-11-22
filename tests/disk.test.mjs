@@ -106,6 +106,56 @@ test("Disk HTTP: folders, binary uploads, preview, metadata, ZIP, versions, tras
  });
 });
 
+test("Disk backup restores stable file IDs, revisions and verified bytes into an empty vault",async()=>{
+  await withServer(async({origin})=>{
+    const original=Buffer.from("Первая версия Tsukimera","utf8");
+    const upload=await fetch(origin+"/api/disk/files/binary?name=history.txt&folder=",{
+      method:"POST",headers:{"X-Tsukimera-Request":"1","Content-Type":"application/octet-stream"},body:original
+    });
+    assert.equal(upload.status,201);
+    const saved=await upload.json();
+    const next=Buffer.from("Вторая версия Tsukimera","utf8");
+    const update=await fetch(origin+"/api/disk/files/"+saved.id+"/versions/binary?expected="+saved.sha256,{
+      method:"POST",headers:{"X-Tsukimera-Request":"1","Content-Type":"application/octet-stream"},body:next
+    });
+    assert.equal(update.status,200);
+    const updated=await update.json();
+    const backup=await fetch(origin+"/api/disk/backup");
+    assert.equal(backup.status,200);
+    const archive=await backup.text();
+    assert.match(archive,/"type":"complete"/);
+
+    const restoredData=await mkdtemp(join(tmpdir(),"tsukimera-roundtrip-"));
+    const imported=createAppServer({root,dataDir:restoredData});
+    await imported.load();
+    await new Promise(done=>imported.server.listen(0,"127.0.0.1",done));
+    const targetUrl="http://127.0.0.1:"+imported.server.address().port;
+    try {
+      const restore=await fetch(targetUrl+"/api/disk/backup/restore",{
+        method:"POST",headers:{"X-Tsukimera-Request":"1","Content-Type":"application/x-ndjson"},body:archive
+      });
+      assert.equal(restore.status,200,await restore.text().catch(()=>""));
+      const state=await (await fetch(targetUrl+"/api/disk")).json();
+      assert.equal(state.files.length,1);
+      assert.equal(state.files[0].id,saved.id,"Links by file ID must survive backup restore");
+      assert.equal(state.files[0].sha256,updated.sha256);
+      const versions=await (await fetch(targetUrl+"/api/disk/files/"+saved.id+"/versions")).json();
+      assert.equal(versions.versions.length,2);
+      const raw=await fetch(targetUrl+"/api/disk/files/"+saved.id+"/raw");
+      assert.deepEqual(Buffer.from(await raw.arrayBuffer()),next);
+      const rollback=await fetch(targetUrl+"/api/disk/files/"+saved.id+"/versions/restore",{
+        method:"POST",headers,body:JSON.stringify({revision:1})
+      });
+      assert.equal(rollback.status,200);
+      const oldBytes=await fetch(targetUrl+"/api/disk/files/"+saved.id+"/raw");
+      assert.deepEqual(Buffer.from(await oldBytes.arrayBuffer()),original);
+    }finally{
+      await new Promise(done=>imported.server.close(done));
+      await rm(restoredData,{recursive:true,force:true});
+    }
+  });
+});
+
 test("Disk HTTP rejects path escapes, foreign origins and hidden server runtime",async()=>{
   await withServer(async({origin,request})=>{
     let r=await request("/api/disk/folders","POST",{name:"../escape"});

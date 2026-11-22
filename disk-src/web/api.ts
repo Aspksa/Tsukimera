@@ -13,6 +13,16 @@ export type DiskPreview=
 export interface DiskUploaded extends DiskFile {duplicates:{id:string;name:string;folder:string}[]}
 export interface DiskListing {folders:string[];files:DiskFile[];trash:DiskFile[];usedBytes:number;maxFileBytes:number}
 export interface FileLink{id:string;name:string}
+/** Stable file IDs are the single join key for notes, the Disk and future chat.
+ * Cached file names are only labels, never identifiers. */
+export function resolveFileLink(link:FileLink, listing:Pick<DiskListing,"files"|"trash">):
+  {id:string;name:string;status:"active"|"trash"|"missing"}{
+  const active=listing.files.find(f=>f.id===link.id);
+  if(active)return {id:link.id,name:active.name,status:"active"};
+  const removed=listing.trash.find(f=>f.id===link.id);
+  if(removed)return {id:link.id,name:removed.name,status:"trash"};
+  return {id:link.id,name:link.name,status:"missing"};
+}
 export interface Note{id:string;kind:"note"|"todo";text:string;done:boolean;createdAt:string;files?:FileLink[];project?:string;priority?:"low"|"normal"|"high"}
 export interface ProjectMeta{name:string;color?:string;files?:FileLink[]}
 export interface ProjectMetric{id:string;title:string;value:string;group:string;icon:string;hint:string;series?:number[];labels?:string[];kind?:string}

@@ -50,6 +50,17 @@ export function createUploader(o: { onUploaded: (f: DiskUploaded) => void; onIdl
    * The file is not available in the catalog until the last chunk is committed. */
   const resumableKey=(r:Row)=>"tsukimera.upload."+
     [r.folder,r.file.name,r.file.size,r.file.lastModified].map(encodeURIComponent).join("|");
+  /** A bounded fingerprint rejects a different file with the same name, size
+   * and timestamp. The browser never stores file bytes or uploads the sample. */
+  const fileFingerprint=async(file:File):Promise<string>=>{
+    const sample=64*1024;
+    const first=new Uint8Array(await file.slice(0,sample).arrayBuffer());
+    const last=new Uint8Array(await file.slice(Math.max(0,file.size-sample)).arrayBuffer());
+    const input=new Uint8Array(first.length+last.length);
+    input.set(first);input.set(last,first.length);
+    const hash=new Uint8Array(await crypto.subtle.digest("SHA-256",input));
+    return Array.from(hash,b=>b.toString(16).padStart(2,"0")).join("");
+  };
   const sendResumable=async(r:Row):Promise<void>=>{
     const ctl=new AbortController();r.abort=ctl;
     const key=resumableKey(r);
@@ -61,8 +72,12 @@ export function createUploader(o: { onUploaded: (f: DiskUploaded) => void; onIdl
     };
     mark(r,"run","Подготовка загрузки…");
     try{
+      const fingerprint=await fileFingerprint(r.file);
       let id="";
-      try{id=localStorage.getItem(key)||"";}catch{}
+      try {
+        const saved=JSON.parse(localStorage.getItem(key)||"null");
+        if(saved&&typeof saved.id==="string"&&saved.fingerprint===fingerprint)id=saved.id;
+      }catch{}
       let status:{id:string;offset:number;size:number;name:string;folder:string}|null=null;
       if(id){
         const response=await fetch("/api/disk/uploads/"+encodeURIComponent(id),{signal:ctl.signal});
@@ -78,7 +93,7 @@ export function createUploader(o: { onUploaded: (f: DiskUploaded) => void; onIdl
         });
         status=await readJson(response);
         id=status.id;
-        try{localStorage.setItem(key,id);}catch{}
+        try{localStorage.setItem(key,JSON.stringify({id,fingerprint}));}catch{}
       }
       let offset=status.offset;
       const CHUNK_SIZE=4*1024*1024;

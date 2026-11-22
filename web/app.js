@@ -55,6 +55,12 @@ const KEY_NAV = 'tsukimera:nav:v1';
 const KEY_UI = 'tsukimera:ui:v1';
 const KEY_SETTINGS = 'tsukimera:settings:v1';
 const KEY_NOTES = 'tsukimera:notes:v1';
+const DISK_PREF_KEYS = [
+  'tsukimera.disk.smart.v1','tsukimera.disk.columns.v1',
+  'tsukimera.disk.layout.left.v1','tsukimera.disk.layout.right.v1',
+  'tsukimera.disk.tiles.v1','tsukimera.disk.view','tsukimera.disk.sort',
+  'tsukimera.disk.open','tsukimera.disk.tree','tsukimera.disk.life.group'
+];
 const DEFAULT_CONFIG = {
   model:{primary:'',fallback:'',reasoning:false},
   instructions:{about:'',style:''},
@@ -319,6 +325,29 @@ function heading(label,lead,ic) {
   title.append(el('h1','',label),el('p','',lead));
   head.append(badge,title);return head;
 }
+/** A note stores only the stable file ID and a fallback label. Resolve the
+ * current name/status from the same catalog that powers the Disk. */
+async function refreshNoteFileLinks(root) {
+  const buttons=[...root.querySelectorAll('button[data-disk-file-id]')];
+  if(!buttons.length)return;
+  try {
+    const [response,links]=await Promise.all([
+      fetch('/api/disk'),import('/disk-built/web/api.js')
+    ]);
+    if(!response.ok)throw Error('HTTP '+response.status);
+    const listing=await response.json();
+    if(route!=='tasks'||!root.isConnected)return;
+    for(const button of buttons){
+      const result=links.resolveFileLink(
+        {id:button.dataset.diskFileId,name:button.dataset.diskFileName},listing);
+      button.textContent=(result.status==='trash'?'🗑 ':result.status==='missing'?'⚠ ':'📎 ')+
+        result.name+(result.status==='trash'?' · в корзине':result.status==='missing'?' · отсутствует':'');
+      button.disabled=result.status==='missing';
+      button.title=result.status==='active'?'Открыть файл на Диске':
+        result.status==='trash'?'Документ находится в корзине Диска':'Связанный файл отсутствует в этом Диске';
+    }
+  }catch(error){console.warn('Не удалось проверить ссылки заметок:',error);}
+}
 function renderMain() {
   if(!mainNode)return;
   mainNode.replaceChildren();mainNode.dataset.route=route;
@@ -352,6 +381,8 @@ function renderMain() {
         const links=el('div','set-controls');
         for(const file of n.files){
           const open=btn('📎 '+file.name,()=>{location.hash='#/disk/'+encodeURIComponent(file.id);},'btn sm');
+          open.dataset.diskFileId=file.id;
+          open.dataset.diskFileName=file.name;
           open.title='Открыть Диск: '+file.name;
           links.append(open);
         }
@@ -379,6 +410,7 @@ function renderMain() {
     wrap.append(card);
   }
   mainNode.append(wrap);
+  if(route==='tasks')void refreshNoteFileLinks(wrap);
 }
 async function loadConfig() {
   try{
@@ -527,7 +559,7 @@ function setupCard(id,body) {
       [option('sm','Маленький'),option('md','Обычный'),option('lg','Крупный')],ui.chatFont,v=>{ui.chatFont=v;persistUi();}));
     text(body,'Потоковая генерация и список диалогов ещё не подключены.','set-note');
   } else if(id==='data') {
-    text(body,'Экспорт включает только локальные настройки, заметки и команды. Ключей API и чужой истории чатов в новом проекте нет.','set-note');
+    text(body,'Экспорт включает настройки, заметки, их ссылки по ID и параметры просмотра Диска — без ключей API. Содержимое файлов и версии нужно сохранить отдельно в разделе «Диск».','set-note');
     const actions=el('div','section-actions');
     actions.append(btn('Скачать резервную копию',downloadBackup,'btn primary'));
     const input=el('input');input.type='file';input.accept='application/json,.json';input.setAttribute('aria-label','Импорт файла резервной копии');
@@ -537,7 +569,9 @@ function setupCard(id,body) {
       try {await restoreBackup(JSON.parse(await f.text()));}
       catch(err){toast('Ошибка импорта: '+err.message);}
     });
-    actions.append(input);body.append(actions);
+    actions.append(input);
+    actions.append(btn('Резервная копия файлов Диска',()=>go('disk')));
+    body.append(actions);
     text(body,'Настройки Cloud.ru сохраняются в файле data/settings.json на этом компьютере, без секретов.','set-note');
   } else if(id==='about') {
     body.append(line('Проект','Tsukimera',el('span','', 'Версия 0.1.0')));
@@ -601,8 +635,13 @@ function renderSettings() {
   layout.append(left,main);page.append(layout);mainNode.append(page);
 }
 function downloadBackup() {
+  const diskPrefs={};
+  for(const key of DISK_PREF_KEYS){
+    try{const value=localStorage.getItem(key);if(value!==null)diskPrefs[key]=value;}
+    catch{toast('Не удалось прочитать настройки Диска для копии');return;}
+  }
   const payload={kind:'tsukimera-settings-v1',version:1,created:new Date().toISOString(),
-    menu,ui,sections:sectionPrefs,notes,settings:config};
+    menu,ui,sections:sectionPrefs,notes,settings:config,diskPrefs};
   const blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'});
   const href=URL.createObjectURL(blob);
   const a=el('a');a.href=href;a.download='Tsukimera-settings.json';
@@ -617,6 +656,11 @@ async function restoreBackup(payload) {
     throw Error('Нет настроек');
   if(!Array.isArray(payload.notes)||payload.notes.length>200)
     throw Error('Некорректные заметки');
+  const diskPrefs=payload.diskPrefs??{};
+  if(!diskPrefs||typeof diskPrefs!=='object'||Array.isArray(diskPrefs)||
+    Object.entries(diskPrefs).some(([key,value])=>
+      !DISK_PREF_KEYS.includes(key)||typeof value!=='string'||value.length>16000))
+    throw Error('Некорректные настройки Диска');
   const restored=payload.notes.filter(n=>n&&typeof n.id==='string'&&typeof n.text==='string'&&n.text.length<3000);
   if(restored.length!==payload.notes.length)throw Error('Некорректные заметки');
   // First validate and persist settings on the server; only then change browser preferences.
@@ -627,7 +671,8 @@ async function restoreBackup(payload) {
     payload.sections.collapsed.filter(x=>SECTIONS.some(s=>s.id===x)):[]};
   notes=restored;
   writeLocal(KEY_NAV,menu);writeLocal(KEY_UI,ui);writeLocal(KEY_SETTINGS,sectionPrefs);writeLocal(KEY_NOTES,notes);
-  applyUi();renderMenu();renderMain();toast('Резервная копия восстановлена');
+  for(const [key,value] of Object.entries(diskPrefs))localStorage.setItem(key,value);
+  applyUi();renderMenu();renderMain();toast('Настройки и заметки восстановлены. Для файлов импортируйте отдельную копию Диска.');
 }
 function createModal(title) {
   const overlay=el('div','modal-ts');
@@ -646,7 +691,7 @@ function openAddNote() {
   card.append(input.wrap);
   card.append(btn('Сохранить заметку',()=>{
     const value=input.input.value.trim();if(!value){toast('Введите текст');return;}
-    notes.push({id:String(Date.now())+'-'+String(notes.length),text:value});
+    notes.push({id:crypto.randomUUID(),text:value});
     notes=notes.slice(-200);writeLocal(KEY_NOTES,notes);
     overlay.remove();renderMenu();go('tasks');
   },'btn primary'));

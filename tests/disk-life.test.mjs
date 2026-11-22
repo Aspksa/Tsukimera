@@ -25,6 +25,15 @@ test("The fifteen unchanged source groups map exactly once to five areas, preser
   assert.equal(layout.tileClass({kind:"list",value:"a"}),"large");
   assert.equal(layout.tileClass({kind:"spark",value:"5"}),"medium");
   assert.equal(layout.tileClass({kind:"dots",value:"5"}),"small");
+  const sample=[
+    {id:"one",group:"core",title:"Занято всего",hint:"сумма",value:"42",empty:false},
+    {id:"two",group:"style",title:"Разнообразие слов",hint:"нет данных",value:"—",empty:true},
+    {id:"three",group:"style",title:"Частые слова",hint:"общее число",value:"5",empty:false}
+  ];
+  assert.deepEqual(layout.searchLifeMetrics(sample,backend.LIFE_GROUPS,"слова").map(m=>m.id),["three"]);
+  assert.deepEqual(layout.searchLifeMetrics(sample,backend.LIFE_GROUPS,"ЯЗЫК","empty").map(m=>m.id),["two"]);
+  assert.deepEqual(layout.searchLifeMetrics(sample,backend.LIFE_GROUPS,"","ready").map(m=>m.id),["one","three"]);
+  assert.equal(sample.length,3,"UI filtering must not mutate the source metrics");
   const metric={id:"files",group:"core",hint:"столько лежит сейчас, без корзины",value:"2"};
   const method=layout.methodology(metric);
   assert.equal(method.verified,true);

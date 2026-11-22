@@ -9,7 +9,7 @@ import {openSheet} from "./sheet";
 import {lifeGlyph} from "./disk-life-icons";
 import {barChart,miniChart,ringChart} from "./life-charts";
 import {agoText} from "./project-life";
-import {LIFE_AREAS,areaForGroup,methodology,tileClass} from "./disk-life-layout";
+import {LIFE_AREAS,areaForGroup,methodology,tileClass,searchLifeMetrics,type LifeAvailability} from "./disk-life-layout";
 
 const GROUP_KEY="juunibi.disk.life.group"; // existing saved-group preference
 const HOURS_LABEL=["0","6","12","18","23"];
@@ -54,6 +54,7 @@ export function diskLifePanel(isEmpty:()=>boolean=()=>false):{
   const root=el("section",{cls:"dkl dkl-compact",attrs:{id:"disk-life","aria-label":"Жизнь документов"}});
   let data:DiskLife|null=null,error="",loading=false,stale=true,visible=false,timer=0;
   let group=savedGroup(),expanded=false;
+  let query="",availability:LifeAvailability="all";
   let chartObserver:IntersectionObserver|null=null;
   const body=el("div",{cls:"dkl-body"});
   const refreshBtn=iconButton("refresh","Пересчитать показатели",()=>void load(),"icon-btn dkl-refresh");
@@ -64,12 +65,31 @@ export function diskLifePanel(isEmpty:()=>boolean=()=>false):{
       el("strong",{textContent:"Жизнь Диска"}),
       status),
     el("div",{cls:"dkl-toolbar-actions"},refreshBtn,expandBtn));
-  root.append(heading,body);
+  const search=el("input",{type:"search",cls:"dkl-search",attrs:{
+    placeholder:"Найти показатель из 150…","aria-label":"Поиск по всем показателям Жизни Диска"}});
+  const searchBox=el("div",{cls:"dkl-discover"},
+    el("label",{cls:"dkl-search-label"},icon("search",17),search));
+  const filters=el("div",{cls:"dkl-filters",attrs:{"aria-label":"Фильтр полноты показателей"}});
+  const filterButtons:{value:LifeAvailability;button:HTMLButtonElement}[]=[];
+  for(const [value,label] of [["all","Все"],["ready","С данными"],["empty","Без данных"]] as const){
+    const button=el("button",{type:"button",cls:"dkl-filter",textContent:label,
+      attrs:{"aria-pressed":String(value===availability)}});
+    button.addEventListener("click",()=>{availability=value;render();});
+    filterButtons.push({value,button});filters.append(button);
+  }
+  searchBox.append(filters);
+  const coverage=el("p",{cls:"dkl-coverage"});
+  searchBox.hidden=true;
+  coverage.hidden=true;
+  search.addEventListener("input",()=>{query=search.value;render();});
+  root.append(heading,searchBox,coverage,body);
 
   function expand(value:boolean):void{
     expanded=value;
     root.classList.toggle("dkl-expanded",value);
     root.classList.toggle("dkl-compact",!value);
+    searchBox.hidden=!value;
+    coverage.hidden=!value;
     root.closest(".disk-page")?.classList.toggle("dk-life-expanded",value);
     expandBtn.title=value?"Вернуться к файлам":"Развернуть аналитику на всю ширину";
     expandBtn.setAttribute("aria-label",expandBtn.title);
@@ -81,7 +101,9 @@ export function diskLifePanel(isEmpty:()=>boolean=()=>false):{
   }
   function navigate(id:string){
     if(!data?.groups.some(g=>g.id===id))return;
-    group=id;keepGroup(id);render();
+    group=id;keepGroup(id);
+    query="";search.value="";
+    render();
   }
   function openDetails(m:DiskLifeMetric){
     const meta=methodology(m);
@@ -176,6 +198,7 @@ export function diskLifePanel(isEmpty:()=>boolean=()=>false):{
     chartObserver=null;
     refreshBtn.classList.toggle("spin",loading);
     refreshBtn.disabled=loading;
+    for(const {value,button} of filterButtons)button.setAttribute("aria-pressed",String(availability===value));
     if(isEmpty()){
       body.replaceChildren(el("div",{cls:"dkl-blank"},
         el("span",{cls:"dkl-ic lg"},lifeGlyph("pulse","core",26)),
@@ -199,6 +222,10 @@ export function diskLifePanel(isEmpty:()=>boolean=()=>false):{
     }
     const d=data;
     const a=d.analysis;
+    coverage.textContent="Текст прочитан: "+a.read+" из "+a.documents+
+      " учтённых документов · PDF-сканов: "+a.scans+
+      " · Измерено изображений: "+a.measured+" из "+a.images+
+      ". Анализ содержимого ограничен 500 документами и 3000 изображениями; OCR нет.";
     refreshBtn.title=["Пересчитать показатели","посчитано "+agoText(d.generatedAt),
       a.documents?"прочитано "+a.read+" из "+a.documents+" документов":"",
       a.images?"измерено "+a.measured+" из "+a.images+" изображений":""].filter(Boolean).join(" · ");
@@ -253,12 +280,17 @@ export function diskLifePanel(isEmpty:()=>boolean=()=>false):{
         }));
     const g=d.groups.find(g=>g.id===group)!;
     const groupMetrics=d.metrics.filter(m=>m.group===group);
-    const shown=expanded?groupMetrics:groupMetrics.slice(0,3);
+    const searching=expanded&&!!query.trim();
+    const scoped=searching
+      ?searchLifeMetrics(d.metrics,d.groups,query,availability)
+      :searchLifeMetrics(groupMetrics,d.groups,"",availability);
+    const shown=expanded?scoped:groupMetrics.slice(0,3);
     const groupHeader=el("div",{cls:"dkl-group-head"},
-      el("span",{cls:"dkl-ic lg"},lifeGlyph(g.icon,g.id,24)),
+      el("span",{cls:"dkl-ic lg"},lifeGlyph(searching?"search":g.icon,g.id,24)),
       el("div",{cls:"dkl-group-text"},
-        el("h3",{textContent:g.title}),el("p",{textContent:g.note})),
-      el("small",{cls:"dkl-group-count",textContent:groupMetrics.length+" показателей"}));
+        el("h3",{textContent:searching?"Поиск по всем разделам":g.title}),
+        el("p",{textContent:searching?"Показатели из любых 15 разделов, исходные данные не изменяются":g.note})),
+      el("small",{cls:"dkl-group-count",textContent:shown.length+" из "+(searching?d.metrics.length:groupMetrics.length)}));
     groupHeader.style.setProperty("--g",g.color);
     if(expanded&&typeof IntersectionObserver==="function"){
       chartObserver=new IntersectionObserver(entries=>{
@@ -270,7 +302,14 @@ export function diskLifePanel(isEmpty:()=>boolean=()=>false):{
         }
       },{rootMargin:"220px"});
     }
-    const grid=el("div",{cls:"dkl-grid"},...shown.map((m,i)=>makeTile(m,g.color,i,!expanded)));
+    const grid=shown.length
+      ?el("div",{cls:"dkl-grid"},...shown.map((m,i)=>{
+        const origin=d.groups.find(source=>source.id===m.group);
+        return makeTile(m,origin?.color??g.color,i,!expanded);
+      }))
+      :el("div",{cls:"dkl-blank dkl-no-results"},
+        el("b",{textContent:"Показателей не найдено"}),
+        el("small",{textContent:"Измените запрос или выберите фильтр «Все»."}));
     body.replaceChildren(highlights,areas,tabs,groupHeader,grid);
     if(!expanded){
       const more=el("button",{type:"button",cls:"dkl-show-all",

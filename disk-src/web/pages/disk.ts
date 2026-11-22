@@ -1474,8 +1474,18 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
     go({ folder: f.folder }); reveal(f.id);
     openInfo(f.id);
   }
-  const onLink = () => { if (!page.isConnected) { removeEventListener("tsukimera:disk-link", onLink); return; } if (loaded) showLinked(); };
+  const onLink = () => {
+    if (!page.isConnected) {
+      removeEventListener("tsukimera:disk-link", onLink);
+      removeEventListener("hashchange", onLink);
+      return;
+    }
+    if (loaded && /^#\/disk\/[0-9a-f-]{36}$/.test(location.hash)) showLinked();
+  };
   addEventListener("tsukimera:disk-link", onLink);
+  // Navigating from one linked document to another must work even when the
+  // user is already on the Disk route (the application doesn't remount it).
+  addEventListener("hashchange", onLink);
 
   /* ---------------------------------------------------------------- keyboard */
   page.addEventListener("keydown", (e) => {

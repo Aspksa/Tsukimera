@@ -1067,3 +1067,17 @@ button.dk-crumb:hover{background:var(--hover);color:var(--fg)}
   .disk-page .dkl-expand,.disk-page .dkl-tabs{animation:none!important;transition:none!important}
   .disk-page .dkl-tile:hover,.disk-page .dkl-hl-card:hover{transform:none}
 }
+
+/* Disk Life 5.0: searchable metrics, status filters, coverage disclosure. */
+.dkl-discover{display:flex;flex-wrap:wrap;align-items:center;gap:10px 16px;margin:12px 0 6px}
+.dkl-discover[hidden],.dkl-coverage[hidden]{display:none}
+.dkl-search-label{display:flex;align-items:center;gap:9px;flex:1 1 300px;min-width:190px;padding:9px 13px;border:1px solid var(--line);border-radius:var(--r-md);background:var(--bg);color:var(--muted)}
+.dkl-search-label:focus-within{border-color:var(--brand);outline:2px solid color-mix(in srgb,var(--brand) 18%,transparent)}
+.dkl-search{min-width:0;width:100%;border:0;outline:0;background:transparent;color:var(--fg);font:inherit;font-size:var(--fs-md)}
+.dkl-filters{display:flex;align-items:center;gap:5px;flex-wrap:wrap}
+.dkl-filter{border:1px solid var(--line);border-radius:999px;padding:7px 12px;background:var(--surface);color:var(--muted);font:inherit;font-size:var(--fs-sm);cursor:pointer}
+.dkl-filter[aria-pressed=true]{color:var(--fg);border-color:var(--brand);background:color-mix(in srgb,var(--brand) 13%,var(--surface))}
+.dkl-filter:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
+.dkl-coverage{margin:8px 0 14px;color:var(--muted);font-size:var(--fs-sm);line-height:1.6}
+.dkl-no-results{min-height:120px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;text-align:center}
+@media(max-width:620px){.dkl-discover{align-items:stretch}.dkl-search-label{flex-basis:100%}.dkl-filters{width:100%}.dkl-filter{flex:1 1 auto}}
