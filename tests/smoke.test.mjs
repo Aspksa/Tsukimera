@@ -10,7 +10,7 @@ import { createAppServer, patchSettings, DEFAULTS } from "../scripts/server.mjs"
 const root = resolve(fileURLToPath(new URL("../", import.meta.url)));
 function headers() { return { "X-Tsukimera-Request": "1", "Content-Type": "application/json" }; }
 
-test("JUUNIBI shell assets, all menu items and 10 settings are available", async () => {
+test("JUUNIBI shell has five active menu items and 10 settings; removed modules/phone/updates stay absent", async () => {
   const dir=await mkdtemp(join(tmpdir(),"tsukimera-css-"));
   const app=createAppServer({root,dataDir:dir});await app.load();
   await new Promise(done => app.server.listen(0,"127.0.0.1",done));
@@ -31,10 +31,24 @@ test("JUUNIBI shell assets, all menu items and 10 settings are available", async
       assert.equal(response.headers.get("x-content-type-options"),"nosniff");
     }
     const js=await (await fetch(url+"/app.js")).text();
-    for(const label of ["Беседа","Дела","Диск","Мозг","Модули","Телефон","Обновление","Настройки",
+    for(const label of ["Беседа","Дела","Диск","Мозг","Настройки",
       "Подключение","Модель","Инструкции","Память","Инструменты","Быстрые команды",
       "Внешний вид","Чат","Данные","О программе"])
       assert.ok(js.includes(label),label);
+    // Disabled routes must not exist in the source navigation data, palette, or mobile bar.
+    // Keeping these names out of NAV prevents old localStorage/backup preferences
+    // from silently re-introducing them (cleanMenu filters IDs by the NAV array).
+    for(const name of ["Модули","Телефон","Обновление"]){
+      assert.ok(!js.includes("label:'"+name+"'"),"Removed navigation entry still present: "+name);
+    }
+    for(const id of ["modules","mobile","update"]){
+      assert.doesNotMatch(js,new RegExp("id:'"+id+"'"));
+    }
+    assert.match(js,/filter\(x => IDS\.includes\(x\)\)/);
+    assert.match(js,/filter\(x => IDS\.includes\(x\) && x !== 'settings'\)/);
+    assert.equal((js.match(/group:'main'/g)||[]).length,3);
+    assert.equal((js.match(/group:'brain'/g)||[]).length,1);
+    assert.equal((js.match(/group:'system'/g)||[]).length,1);
     assert.match(js,/tsukimera:nav:v1/);
     assert.match(js,/Ctrl\+K/);
     assert.match(js,/nav-edit-row/);
