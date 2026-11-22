@@ -1,0 +1,57 @@
+name: Tsukimera · проверка оболочки
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  linux-node20:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Проверить синтаксис и локальные настройки
+        run: npm test
+      - name: Проверить справку запуска
+        run: node scripts/launch.mjs --help
+      - name: Браузерный smoke-тест настоящего меню и настроек (Chrome)
+        shell: bash
+        run: |
+          node scripts/launch.mjs --no-open --port 49678 > /tmp/tsukimera-launch.log 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+          for i in 1 2 3 4 5 6 7 8 9 10; do
+            if curl -fsS http://127.0.0.1:49678/api/status >/dev/null; then break; fi
+            sleep 1
+          done
+          timeout 40s google-chrome --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage --virtual-time-budget=4500 --dump-dom http://127.0.0.1:49678/ > /tmp/tsukimera-rendered.html
+          grep -q 'id="set-conn"' /tmp/tsukimera-rendered.html
+          grep -q 'id="set-model"' /tmp/tsukimera-rendered.html
+          grep -q 'id="set-look"' /tmp/tsukimera-rendered.html
+          grep -q 'id="set-about"' /tmp/tsukimera-rendered.html
+          grep -q 'aria-label="Быстрые разделы"' /tmp/tsukimera-rendered.html
+          echo 'Chrome rendered JUUNIBI-style menu and Tsukimera settings.'
+  linux-node24:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Проверки Node 24
+        run: npm test
+  windows-bat:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Проверка интерфейса и API на Windows
+        run: npm test
+      - name: Проверка единого BAT
+        shell: cmd
+        run: Tsukimera.bat --help

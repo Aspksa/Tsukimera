@@ -1,0 +1,13 @@
+{
+  "name": "tsukimera",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node scripts/launch.mjs",
+    "test": "node --test tests/smoke.test.mjs"
+  }
+}
