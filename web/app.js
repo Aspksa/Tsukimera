@@ -593,6 +593,17 @@ function setupCard(id,body) {
       [option('sm','Маленький'),option('md','Обычный'),option('lg','Крупный')],ui.chatFont,v=>{ui.chatFont=v;persistUi();}));
     text(body,'Потоковая генерация и список диалогов ещё не подключены.','set-note');
   } else if(id==='data') {
+    const storage=el('div','set-note','SQLite · Проверяю локальную базу данных…');
+    body.append(storage);
+    void fetch('/api/storage').then(async response=>{
+      if(!response.ok)throw Error('HTTP '+response.status);
+      return response.json();
+    }).then(data=>{
+      if(!storage.isConnected)return;
+      storage.textContent='SQLite · '+data.file+' · файлов: '+data.counts.files+
+        ' · заметок: '+data.counts.notes+' · версий: '+data.counts.versions+
+        (data.backupCreated?' · исходная копия: '+data.backupCreated:'');
+    }).catch(()=>{if(storage.isConnected)storage.textContent='Не удалось проверить SQLite';});
     text(body,'Экспорт включает настройки, заметки, их ссылки по ID и параметры просмотра Диска — без ключей API. Содержимое файлов и версии нужно сохранить отдельно в разделе «Диск».','set-note');
     const actions=el('div','section-actions');
     actions.append(btn('Скачать резервную копию',downloadBackup,'btn primary'));
@@ -606,7 +617,7 @@ function setupCard(id,body) {
     actions.append(input);
     actions.append(btn('Резервная копия файлов Диска',()=>go('disk')));
     body.append(actions);
-    text(body,'Настройки Cloud.ru сохраняются в файле data/settings.json на этом компьютере, без секретов.','set-note');
+    text(body,'Основное хранилище: data/tsukimera.db. Файлы остаются в data/disk/; прежние JSON сохранены для совместимости. Ключи API не сохраняются.','set-note');
   } else if(id==='about') {
     body.append(line('Проект','Tsukimera',el('span','', 'Версия 0.1.0')));
     body.append(line('Образец интерфейса','Оформление и концепция меню — JUUNIBI.',
