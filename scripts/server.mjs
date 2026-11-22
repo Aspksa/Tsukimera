@@ -5,6 +5,7 @@ import { pathToFileURL } from "node:url";
 import { prepareDisk } from "./build-disk.mjs";
 import { createDiskRouter } from "./disk-routes.mjs";
 import { initializeDatabase } from "./tsukimera-db.mjs";
+import { createDiskAutomation } from "./disk-background.mjs";
 import { createCloudConnection } from "./cloudru.mjs";
 
 const FILES = new Map([
@@ -104,6 +105,7 @@ export function createAppServer({root,dataDir=join(root,"data"),cloudRequest,clo
   let writeQueue = Promise.resolve();
   let diskRouter = null;
   let diskStore = null;
+  let automation = null;
   let database = null;
   const cloud=createCloudConnection({request:cloudRequest??globalThis.fetch,
     envKey:cloudKey??process.env.CLOUD_RU_FOUNDATION_MODELS_API_KEY??""});
@@ -126,11 +128,16 @@ export function createAppServer({root,dataDir=join(root,"data"),cloudRequest,clo
       import(pathToFileURL(join(built,"zip-write.js")).href),
       import(pathToFileURL(join(built,"disk-life.js")).href),
     ]);
-    diskStore=new LocalDisk(join(dataDir,"disk"),database);
+    diskStore=new LocalDisk(join(dataDir,"disk"),database,()=>automation?.wake());
     await diskStore.load();
+    automation=createDiskAutomation({
+      database,diskRoot:join(dataDir,"disk"),
+      readText:(id,limit)=>diskStore.readText(id,limit),
+    });
     diskRouter=createDiskRouter({disk:diskStore,zipStream,zipLength,collectLife,
-      uploadDir:join(dataDir,"uploads")});
+      uploadDir:join(dataDir,"uploads"),automation});
     await diskRouter.initUploads();
+    automation.start();
   }
     // No background service or separate port: disk lives in this same loopback app.
   async function save() {
@@ -339,5 +346,6 @@ export function createAppServer({root,dataDir=join(root,"data"),cloudRequest,clo
       json(res, error.status || 500, { error: error.status ? error.message : "Внутренняя ошибка сервера" });
     }
   });
+  server.on("close",()=>automation?.stop());
   return { server, load, getSettings: () => structuredClone(config), getDisk:()=>diskStore };
 }
