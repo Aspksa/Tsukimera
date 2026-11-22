@@ -3,7 +3,8 @@
  * Database remains in data/tsukimera.db next to the existing Disk objects.
  * No npm packages, network services, Python runtime or migration deletion.
  */
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync, backup as sqliteBackup } from "node:sqlite";
+import { statSync, readdirSync } from "node:fs";
 import { cp, copyFile, mkdir, rm, stat, writeFile } from "node:fs/promises";
 import { join, relative } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -21,10 +22,13 @@ export const PREF_KEYS = new Set([
   "tsukimera.disk.layout.left.v1", "tsukimera.disk.layout.right.v1",
   "tsukimera.disk.tiles.v1", "tsukimera.disk.view", "tsukimera.disk.sort",
   "tsukimera.disk.open", "tsukimera.disk.tree", "tsukimera.disk.life.group",
+  "tsukimera.disk.mdRaw",
   "juunibi.disk.view", "juunibi.disk.sort", "juunibi.disk.open",
   "juunibi.disk.tree", "juunibi.disk.mdRaw", "juunibi.disk.life.group",
 ]);
 
+const aliases = Object.fromEntries(["view","sort","open","tree","mdRaw","life.group"].map(x=>
+  ["juunibi.disk."+x,"tsukimera.disk."+x]));
 const cleanPrefs = (input, allowDelete = false) => {
   if (!record(input) || Object.keys(input).length > PREF_KEYS.size)
     throw fail("Некорректные параметры интерфейса");
@@ -34,7 +38,12 @@ const cleanPrefs = (input, allowDelete = false) => {
     if (typeof value !== "string" || value.length > 16000 || value.includes("\0"))
       throw fail("Слишком длинная или некорректная настройка");
   }
-  return input;
+  const output={};
+  for (const [key,value] of Object.entries(input)){
+    const canonical=aliases[key]||key;
+    if(key===canonical || !(canonical in input)) output[canonical]=value;
+  }
+  return output;
 };
 const SCHEMA = [
   "CREATE TABLE IF NOT EXISTS metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
@@ -140,6 +149,14 @@ export async function initializeDatabase(dataDir) {
     db.prepare("UPDATE metadata SET value='2' WHERE key='schema_version'").run();
     if (backupPath) db.prepare("INSERT OR IGNORE INTO metadata(key,value) VALUES('pre_migration_backup',?)")
       .run(relative(dataDir,backupPath));
+    // Collapse obsolete JUUNIBI preference names into the canonical Tsukimera
+    // keys, but do not replace a value that was already migrated.
+    const names=db.prepare("SELECT key,value FROM user_preferences").all();
+    for(const row of names){
+      const target=aliases[row.key];if(!target)continue;
+      db.prepare("INSERT OR IGNORE INTO user_preferences(key,value) VALUES(?,?)").run(target,row.value);
+      db.prepare("DELETE FROM user_preferences WHERE key=?").run(row.key);
+    }
     const integrity = db.prepare("PRAGMA quick_check").get();
     if (integrity.quick_check !== "ok") throw new Error("Повреждена база SQLite");
   });
@@ -164,6 +181,44 @@ export async function initializeDatabase(dataDir) {
   const previousBackup = withDb(db => db.prepare("SELECT value FROM metadata WHERE key='pre_migration_backup'").get()?.value ?? null);
   return {
     path: filename, backupPath: previousBackup ? join(dataDir,previousBackup) : null, instanceId,
+    diagnostics: () => withDb(db => {
+      const integrity=db.prepare("PRAGMA quick_check").get().quick_check;
+      const schema=db.prepare("SELECT value FROM metadata WHERE key='schema_version'").get()?.value??"unknown";
+      const tables=db.prepare("SELECT count(*) AS n FROM sqlite_master WHERE type='table'").get().n;
+      const backups=(() => {try{return readdirSync(join(dataDir,"backups"),{withFileTypes:true});}
+        catch(error){if(error.code==="ENOENT")return [];throw error;}})()
+        .filter(x=>x.name.startsWith("before-")||x.name.startsWith("settings-restore-"))
+        .map(x=>x.name).sort().reverse().slice(0,20);
+      return {engine:"sqlite",integrity,schema,tables,file:"data/tsukimera.db",
+        sizeBytes:statSync(filename).size,backups,counts:{
+          files:db.prepare("SELECT count(*) AS n FROM disk_files WHERE deleted_at IS NULL").get().n,
+          notes:db.prepare("SELECT count(*) AS n FROM notes").get().n,
+          versions:db.prepare("SELECT count(*) AS n FROM disk_versions").get().n,
+          preferences:db.prepare("SELECT count(*) AS n FROM user_preferences").get().n,
+        }};
+    }),
+    backupSettingsRestore: async () => {
+      const dir=join(dataDir,"backups");await mkdir(dir,{recursive:true});
+      const destination=join(dir,"settings-restore-"+new Date().toISOString().replace(/[:.]/g,"-")+"-"+randomUUID().slice(0,8)+".db");
+      const db=new DatabaseSync(filename,{readOnly:true});
+      try{await sqliteBackup(db,destination);}finally{db.close();}
+      return relative(dataDir,destination).replaceAll("\\","/");
+    },
+    restoreSettingsBundle: ({settings,preferences,notes}) => {
+      const prefs=cleanPrefs(preferences),valid=notes.map(normalizedNote);
+      if(valid.length>200||new Set(valid.map(n=>n.id)).size!==valid.length)
+        throw fail("Недопустимый набор заметок");
+      return transaction(db=>{
+        db.prepare("INSERT INTO app_settings(id,data) VALUES(1,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data").run(JSON.stringify(settings));
+        db.prepare("DELETE FROM user_preferences").run();
+        const insert=db.prepare("INSERT INTO user_preferences(key,value) VALUES(?,?)");
+        for(const [key,value] of Object.entries(prefs))insert.run(key,value);
+        db.prepare("INSERT OR IGNORE INTO metadata(key,value) VALUES('preferences_initialized','1')").run();
+        db.prepare("DELETE FROM notes").run();
+        for(const note of valid)writeNote(db,note);
+        return {notes:valid,preferences:prefs};
+      });
+    },
     readPreferences: () => withDb(db => ({
       instanceId,
       initialized: !!db.prepare("SELECT 1 FROM metadata WHERE key='preferences_initialized'").get(),

@@ -517,7 +517,7 @@ async function saveSettings(patch) {
     if(!response.ok)throw Error(json.error||'Ошибка сохранения');
     config=json.settings;serverAvailable=true;
     toast('Настройки сохранены локально');
-    if(route==='settings')renderMain();
+    // Do not destroy unsaved edits elsewhere in the settings form.
     renderMenu();return true;
   }catch(err){toast('Не сохранено: '+err.message);return false;}
 }
@@ -554,6 +554,136 @@ function choices(title,desc,options,value,onSelect) {
   }
   return line(title,desc,container);
 }
+async function tsApi(path,options){
+  const result=await fetch(path,options);
+  const data=await result.json().catch(()=>({}));
+  if(!result.ok)throw Error("HTTP "+result.status+" · "+(data.error||"Ошибка запроса"));
+  return data;
+}
+function tsPost(path,record){
+  return tsApi(path,{method:"POST",headers:{
+    "Content-Type":"application/json","X-Tsukimera-Request":"1"},
+    body:JSON.stringify(record)});
+}
+let cachedCloudModels=[];
+function modelPicker(label,currentField){
+  const box=el("div","set-model-chooser");
+  const search=el("input","set-model-search");search.type="search";
+  search.placeholder="Поиск по списку Cloud.ru";search.setAttribute("aria-label",label+": поиск модели");
+  const select=el("select","set-model-list");select.setAttribute("aria-label",label+": выбрать модель");
+  select.disabled=true;
+  const status=el("small","set-note","Получаю список моделей только при наличии ключа.");
+  const update=()=>{
+    const q=search.value.trim().toLowerCase();
+    const models=cachedCloudModels.filter(model=>model.toLowerCase().includes(q));
+    select.replaceChildren();
+    const placeholder=el("option","",models.length?"Выберите модель из "+models.length:"Нет совпадений");
+    placeholder.value="";select.append(placeholder);
+    for(const name of models){const opt=el("option","",name);opt.value=name;select.append(opt);}
+    select.disabled=models.length===0;
+    status.textContent=cachedCloudModels.length+" доступных моделей · "+models.length+" найдено";
+  };
+  search.addEventListener("input",update);
+  select.addEventListener("change",()=>{if(select.value)currentField.input.value=select.value;});
+  const refresh=btn("Обновить список",async()=>{
+    refresh.disabled=true;
+    try{
+      const out=await tsApi("/api/cloud/models");
+      cachedCloudModels=out.models||[];update();
+    }catch(error){status.textContent=error.message;}
+    finally{refresh.disabled=false;}
+  },"btn");
+  box.append(search,select,refresh,status);
+  void tsApi("/api/cloud/status").then(info=>{
+    if(!box.isConnected)return;
+    if(info.configured)refresh.click();
+    else status.textContent="Добавьте API-ключ в разделе «Подключение».";
+  }).catch(()=>{status.textContent="Сервис Cloud.ru недоступен.";});
+  return box;
+}
+function cloudConnectionPanel(body){
+  const key=el("input","set-cloud-key");key.type="password";key.maxLength=4096;
+  key.autocomplete="off";key.spellcheck=false;
+  key.placeholder="Key Secret Cloud.ru (не сохраняется на диск)";
+  key.setAttribute("aria-label","API-ключ Foundation Models");
+  const status=el("p","set-connection-state","Проверяю Cloud.ru…");
+  status.setAttribute("role","status");
+  const check=btn("Проверить подключение",async()=>{
+    check.disabled=true;status.textContent="Проверяю ключ по GET /v1/models…";
+    try{
+      if(key.value.trim()){await tsPost("/api/cloud/key",{key:key.value});key.value="";}
+      const result=await tsApi("/api/cloud/models");
+      cachedCloudModels=result.models;
+      status.textContent="Подключено · Cloud.ru вернул "+result.models.length+
+        " моделей · "+new Date(result.checkedAt).toLocaleString("ru-RU");
+      status.dataset.state="ok";
+    }catch(error){
+      status.dataset.state="error";
+      status.textContent=error.message+" · модель не вызывалась, расходы на генерацию не создавались.";
+    }finally{check.disabled=false;}
+  },"btn primary");
+  const disconnect=btn("Отключить",async()=>{
+    try{await tsPost("/api/cloud/clear",{});cachedCloudModels=[];
+      status.dataset.state="off";status.textContent="Cloud.ru отключён от этого запуска.";}
+    catch(error){status.textContent=error.message;}
+  });
+  const buttons=el("div","set-controls");buttons.append(check,disconnect);
+  body.append(line("Foundation Models","Официальный endpoint: foundation-models.api.cloud.ru/v1",
+    el("span","set-cloud-endpoint","Только чтение списка моделей")),
+    line("Ключ API","Принимается только локальным сервером. Не записывается в SQLite, JSON или браузерное хранилище.",key),
+    buttons,status);
+  const help=el("p","set-note");
+  const link=el("a","","Документация Cloud.ru");
+  link.href="https://cloud.ru/docs/foundation-models/ug/topics/api-ref__authentication";
+  link.target="_blank";link.rel="noopener noreferrer";
+  help.append("Ключ также можно задать в переменной окружения CLOUD_RU_FOUNDATION_MODELS_API_KEY. ",link,
+    ". Здесь нет платного тестового запроса к LLM.");
+  body.append(help);
+  void tsApi("/api/cloud/status").then(result=>{
+    if(!status.isConnected)return;
+    status.dataset.state=result.verified?"ok":result.lastError?"error":"off";
+    status.textContent=result.verified?"Cloud.ru проверен · моделей: "+result.modelsCount:
+      result.lastError?result.lastError.message:
+        result.configured?"Ключ настроен ("+result.source+"), нажмите «Проверить подключение».":"Ключ не указан.";
+  }).catch(()=>{if(status.isConnected)status.textContent="Локальный сервер Cloud.ru недоступен.";});
+}
+function memoryCenterPanel(body){
+  const summary=el("div","set-health-grid");
+  summary.append(el("p","set-note","Читаю реальное состояние SQLite и возможностей памяти…"));
+  body.append(summary);
+  const actions=el("div","set-controls");
+  actions.append(btn("Открыть заметки",()=>go("tasks"),"btn primary"),
+    btn("Перейти к диагностике",()=>{
+      const node=document.getElementById("set-data");
+      node?.classList.remove("collapsed");const inner=node?.querySelector(".set-card-body");
+      if(inner)inner.hidden=false;
+      node?.scrollIntoView({block:"start",behavior:"smooth"});
+    }));
+  body.append(actions);
+  void tsApi("/api/capabilities").then(info=>{
+    if(!summary.isConnected)return;
+    summary.replaceChildren(
+      line("Локальная память заметок",info.notes.stored+" сохранено в SQLite",el("span","set-state ready","Работает")),
+      line("Семантический поиск",info.vectorSearch.reason,el("span","set-state pending","Не подключён")),
+      line("Сводки длинных диалогов",info.summaries.reason,el("span","set-state pending","Не подключены")),
+      line("Автосохранение фактов","Нет работающего движка извлечения и проверки фактов",
+        el("span","set-state pending","Не подключено"))
+    );
+  }).catch(error=>{summary.textContent="Состояние памяти недоступно: "+error.message;});
+  text(body,"Ранее сохранённые предпочтения памяти не стираются, но не исполняются до создания соответствующего модуля.","set-note");
+}
+function toolSafetyPanel(body){
+  body.append(el("p","set-note","Ручные действия пользователя с Диском работают как раньше. Здесь указаны разрешения только для будущих действий ИИ — исполнитель инструментов пока не подключён."));
+  const state=el("div","set-health-grid");body.append(state);
+  void tsApi("/api/capabilities").then(info=>{
+    if(!state.isConnected)return;
+    state.replaceChildren(
+      line("Интернет для ИИ",info.aiTools.reason,el("span","set-state pending","Запрещено")),
+      line("Запись файлов от имени ИИ","Нет исполняющего модуля; настройка не выдаёт доступ к диску",el("span","set-state pending","Запрещено")),
+      line("Предыдущие предпочтения","Интернет: "+(config.tools.web?"да":"нет")+
+        " · запись: "+(config.tools.writeFiles?"да":"нет"),el("span","set-state","Не активны")));
+  }).catch(error=>{state.textContent="Не удалось проверить разрешения: "+error.message;});
+}
 function saveButton(handler) {
   return btn('Сохранить',()=>void handler(),'btn primary');
 }
@@ -574,21 +704,30 @@ function sectionCard(sec) {
     sectionPrefs.collapsed=[...set];writeLocal(KEY_SETTINGS,sectionPrefs);
   },'icon-btn sm set-collapse');
   collapse.setAttribute('aria-expanded',String(!collapsed));
-  head.append(ic,copy,collapse);
+  const states={conn:['partial','Подключение без чата'],model:['partial','Модели без чата'],
+    persona:['pending','Ожидает ИИ'],memory:['partial','Заметки работают'],
+    tools:['pending','Инструменты недоступны'],quick:['partial','Сохраняет шаблоны'],
+    look:['ready','Работает'],chat:['pending','Ожидает ИИ'],
+    data:['ready','SQLite работает'],about:['ready','Информация']};
+  const [state,label]=states[sec.id]||['pending','Не подключено'];
+  const flag=el('small','set-cap-state '+state,label);
+  flag.setAttribute('title','Функциональная доступность раздела');
+  head.append(ic,copy,flag,collapse);
   const body=el('div','set-card-body');body.hidden=collapsed;
   section.append(head,body);
   return {section,body};
 }
 function setupCard(id,body) {
   if(id==='conn') {
-    body.append(line('Подключение Cloud.ru','В новый проект перенесены только дизайн и настройки.',el('span','route-status','Не подключено')));
-    text(body,'В Tsukimera ещё нет облачного клиента. API-ключ не запрашивается и никуда не отправляется. После подключения реального API здесь появятся проверка ключа и статус соединения.','set-note warn');
+    cloudConnectionPanel(body);
   } else if(id==='model') {
     const primary=field('Основная модель',config.model.primary,'text',120);
     const fallback=field('Запасная модель',config.model.fallback,'text',120);
     const reasoning=el('input');reasoning.type='checkbox';reasoning.checked=config.model.reasoning;
     reasoning.setAttribute('aria-label','Включить размышления');
-    body.append(primary.wrap,fallback.wrap,line('Размышления','Предпочтение для будущего подключения модели.',reasoning));
+    body.append(primary.wrap,modelPicker("Основная модель",primary),
+      fallback.wrap,modelPicker("Запасная модель",fallback),
+      line('Размышления','Предпочтение для будущего подключения чата.',reasoning));
     const act=el('div','set-controls');
     act.append(saveButton(()=>saveSettings({model:{primary:primary.input.value.trim(),
       fallback:fallback.input.value.trim(),reasoning:reasoning.checked}})));
@@ -601,32 +740,27 @@ function setupCard(id,body) {
     body.append(saveButton(()=>saveSettings({instructions:{about:about.input.value,style:style.input.value}})));
     text(body,'Инструкции пока не передаются модели: ИИ-движок в Tsukimera не установлен.','set-note');
   } else if(id==='memory') {
-    body.append(switcher('Поиск по смыслу','Резервная настройка эмбеддингов; индексация не работает.',config.memory.embeddings,
-      v=>saveSettings({memory:{embeddings:v}})));
-    body.append(switcher('Сводки длинных диалогов','Настройка для будущей подсистемы.',config.memory.summaries,
-      v=>saveSettings({memory:{summaries:v}})));
-    body.append(choices('Предлагать сохранение фактов','Пока не запускает фоновую память.',
-      [{id:'off',label:'Выключено'},{id:'rules',label:'По правилу'},{id:'smart',label:'Умное'}],
-      config.memory.suggestions,v=>void saveSettings({memory:{suggestions:v}})));
+    memoryCenterPanel(body);
   } else if(id==='tools') {
-    body.append(switcher('Доступ к интернету','Только запомнить предпочтение. Реальных инструментов нет.',config.tools.web,
-      v=>saveSettings({tools:{web:v}})));
-    body.append(switcher('Разрешать запись файлов','Не даёт файловых разрешений действующему процессу.',config.tools.writeFiles,
-      v=>saveSettings({tools:{writeFiles:v}})));
-    text(body,'Эти переключатели не запускают внешние инструменты и не меняют права операционной системы.','set-note');
+    toolSafetyPanel(body);
   } else if(id==='quick') {
     const list=el('ul','quick-list');
     for(const item of config.quickCommands){
       const li=el('li');li.append(el('code','','/'+item.name),el('span','grow',item.text));
-      li.append(iconBtn('trash','Удалить команду',()=>void saveSettings({quickCommands:config.quickCommands.filter(x=>x.name!==item.name)})));
+      li.append(iconBtn('trash','Удалить команду',async()=>{
+        if(await saveSettings({quickCommands:config.quickCommands.filter(x=>x.name!==item.name)}))renderMain();
+      }));
       list.append(li);
     }
     body.append(list);
     const name=field('Название команды, без /','','text',24);
     const value=field('Текст команды','','textarea',1500);
     body.append(name.wrap,value.wrap);
-    body.append(saveButton(()=>saveSettings({quickCommands:[...config.quickCommands,
-      {name:name.input.value.trim(),text:value.input.value.trim()}]})));
+    body.append(saveButton(async()=>{
+      const ok=await saveSettings({quickCommands:[...config.quickCommands,
+        {name:name.input.value.trim(),text:value.input.value.trim()}]});
+      if(ok)renderMain();
+    }));
     text(body,'Шаблоны сохраняются локально. Выполнение команд будет доступно после подключения чата.','set-note');
   } else if(id==='look') {
     const option=(id,label)=>({id,label});
@@ -658,19 +792,39 @@ function setupCard(id,body) {
         (data.backupCreated?' · исходная копия: '+data.backupCreated:'');
     }).catch(()=>{if(storage.isConnected)storage.textContent='Не удалось проверить SQLite';});
     text(body,'Экспорт включает настройки, заметки, их ссылки по ID и параметры просмотра Диска — без ключей API. Содержимое файлов и версии нужно сохранить отдельно в разделе «Диск».','set-note');
+    const diagnostic=el('div','set-diagnostics');
+    const inspect=btn('Проверить целостность SQLite',async()=>{
+      inspect.disabled=true;
+      diagnostic.textContent='Проверяю SQLite, размер и резервные копии…';
+      try{
+        const report=await tsApi('/api/storage/diagnostics');
+        diagnostic.replaceChildren(
+          line('Проверка базы',report.integrity==='ok'?'Ошибок не обнаружено':report.integrity,
+            el('span','set-state '+(report.integrity==='ok'?'ready':'error'),report.integrity==='ok'?'Порядок':'Проверить')),
+          line('Размер SQLite',Math.round(report.sizeBytes/1024).toLocaleString('ru-RU')+' КБ'),
+          line('Схема / таблицы',report.schema+' / '+report.tables),
+          line('Записей',report.counts.files+' файлов · '+report.counts.notes+
+            ' заметок · '+report.counts.preferences+' настроек · '+report.counts.versions+' редакций'),
+          line('Резервные копии',report.backups.length+' найдено в папке data/backups'),
+          el('p','set-note',report.backups.slice(0,5).join(' · ')||'Резервных копий пока нет.')
+        );
+      }catch(error){diagnostic.textContent='Диагностика не завершена: '+error.message;}
+      finally{inspect.disabled=false;}
+    },'btn');
+    body.append(inspect,diagnostic);
     const actions=el('div','section-actions');
-    actions.append(btn('Скачать резервную копию',downloadBackup,'btn primary'));
+    actions.append(btn('Скачать резервную копию',()=>void downloadBackup(),'btn primary'));
     const input=el('input');input.type='file';input.accept='application/json,.json';input.setAttribute('aria-label','Импорт файла резервной копии');
     input.addEventListener('change',async()=>{
       const f=input.files?.[0];if(!f)return;
-      if(f.size>100000){toast('Слишком большой файл');return;}
+      if(f.size>1024*1024){toast('Слишком большой файл');return;}
       try {await restoreBackup(JSON.parse(await f.text()));}
       catch(err){toast('Ошибка импорта: '+err.message);}
     });
     actions.append(input);
     actions.append(btn('Резервная копия файлов Диска',()=>go('disk')));
     body.append(actions);
-    text(body,'Основное хранилище: data/tsukimera.db. Файлы остаются в data/disk/; прежние JSON сохранены для совместимости. Ключи API не сохраняются.','set-note');
+    text(body,'Основное хранилище: data/tsukimera.db. Файлы и их версии остаются в data/disk/. Импорт создаёт копию SQLite перед изменением, но не переносит бинарные файлы. Ключ Cloud.ru не сохраняется.','set-note');
   } else if(id==='about') {
     body.append(line('Проект','Tsukimera',el('span','', 'Версия 0.1.0')));
     body.append(line('Образец интерфейса','Оформление и концепция меню — JUUNIBI.',
@@ -684,14 +838,16 @@ function setupCard(id,body) {
 }
 function renderSettings() {
   const page=el('div','page settings-page');
-  const head=heading('Настройки','Из JUUNIBI перенесены разделы, компоновка и управление. Важные параметры сохраняются локально.','settings');
+  const head=heading('Настройки','Локальные настройки Tsukimera · SQLite · реальные возможности помечены по состоянию.','settings');
   page.append(head);
   const search=el('div','set-search');
   search.append(icon('search'));
   const searchInput=el('input');searchInput.type='search';searchInput.placeholder='Поиск по настройкам';
   searchInput.setAttribute('aria-label','Поиск по настройкам');
+  const results=el('small','set-search-results','Поиск по разделам и отдельным параметрам');
+  results.setAttribute('role','status');
   search.append(searchInput,el('kbd','kbd','Ctrl+,'));
-  page.append(search);
+  page.append(search,results);
   const layout=el('div','set-layout');
   const left=el('aside','set-side'),toc=el('nav','set-toc');
   toc.setAttribute('aria-label','Разделы настроек');
@@ -701,9 +857,11 @@ function renderSettings() {
   for(const sec of SECTIONS) {
     const link=btn('',null,'set-toc-link');
     link.append(icon(sec.icon,17),el('span','grow',sec.label));
-    if(['conn','memory','tools'].includes(sec.id)){
-      link.dataset.unavailable='true';link.append(el('i','set-hdot'));
-    }
+    const readiness={conn:'partial',model:'partial',persona:'pending',memory:'partial',
+      tools:'pending',quick:'partial',look:'ready',chat:'pending',data:'ready',about:'ready'};
+    link.dataset.readiness=readiness[sec.id];
+    link.title=readiness[sec.id]==='ready'?'Работает':
+      readiness[sec.id]==='partial'?'Часть возможностей работает':'Функционал пока не подключён';
     link.addEventListener('click',()=>{
       searchInput.value='';filter('');
       document.getElementById('set-'+sec.id)?.scrollIntoView({behavior:'smooth',block:'start'});
@@ -714,15 +872,43 @@ function renderSettings() {
     main.append(section);cards.set(sec.id,section);
   }
   function filter(query) {
-    const q=query.trim().toLowerCase().replaceAll('ё','е');
-    for(const sec of SECTIONS) {
-      const match=!q||[sec.label,sec.hint,cards.get(sec.id).textContent].join(' ').toLowerCase().replaceAll('ё','е').includes(q);
-      cards.get(sec.id).hidden=!match;
-      links.get(sec.id).hidden=!match;
-      if(q&&match){cards.get(sec.id).classList.remove('collapsed');cards.get(sec.id).querySelector('.set-card-body').hidden=false;}
+    const norm=value=>String(value||'').toLowerCase().replaceAll('ё','е');
+    const terms=norm(query.trim()).split(/\s+/).filter(Boolean);
+    let matches=0,sections=0;
+    for(const sec of SECTIONS){
+      const card=cards.get(sec.id),link=links.get(sec.id);
+      const heading=norm(sec.label+' '+sec.hint),whole=norm(card.textContent);
+      const full=terms.every(t=>heading.includes(t));
+      const rowNodes=[...card.querySelector('.set-card-body').children];
+      const hits=rowNodes.filter(node=>terms.every(t=>norm(node.textContent).includes(t)));
+      const match=!terms.length||full||hits.length>0||terms.every(t=>whole.includes(t));
+      card.hidden=!match;link.hidden=!match;
+      if(match)sections++;
+      if(terms.length&&match){
+        card.classList.remove('collapsed');
+        card.querySelector('.set-card-body').hidden=false;
+        for(const node of rowNodes){
+          // A section match keeps all fields; otherwise highlight the exact
+          // matching controls while retaining context and surrounding hints.
+          node.classList.toggle('set-search-hit',hits.includes(node));
+        }
+        matches+=full?rowNodes.length:hits.length||1;
+      }else rowNodes.forEach(node=>node.classList.remove('set-search-hit'));
     }
+    results.textContent=terms.length?sections+' разделов · '+matches+' совпадений':
+      '10 разделов · работает / частично / не подключено';
+    search.dataset.empty=String(terms.length>0&&sections===0);
   }
   searchInput.addEventListener('input',()=>filter(searchInput.value));
+  searchInput.addEventListener('keydown',event=>{
+    if(event.key==='Enter'){
+      event.preventDefault();
+      const first=[...cards.values()].find(card=>!card.hidden);
+      first?.scrollIntoView({block:'start',behavior:'smooth'});
+      first?.querySelector('input,button,textarea')?.focus({preventScroll:true});
+    }
+  });
+  filter('');
   const controls=el('div','set-controls');
   controls.append(btn('Свернуть все',()=>{
     sectionPrefs.collapsed=SECTIONS.map(s=>s.id);writeLocal(KEY_SETTINGS,sectionPrefs);renderMain();
@@ -732,55 +918,47 @@ function renderSettings() {
   left.append(controls);
   layout.append(left,main);page.append(layout);mainNode.append(page);
 }
-function downloadBackup() {
-  const diskPrefs={};
-  for(const key of DISK_PREF_KEYS){
-    try{const value=localStorage.getItem(key);if(value!==null)diskPrefs[key]=value;}
-    catch{toast('Не удалось прочитать настройки Диска для копии');return;}
-  }
-  const payload={kind:'tsukimera-settings-v1',version:1,created:new Date().toISOString(),
-    menu,ui,sections:sectionPrefs,notes,settings:config,diskPrefs};
-  const blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'});
-  const href=URL.createObjectURL(blob);
-  const a=el('a');a.href=href;a.download='Tsukimera-settings.json';
-  document.body.append(a);a.click();a.remove();
-  setTimeout(()=>URL.revokeObjectURL(href),5000);
-  toast('Резервная копия подготовлена');
+async function downloadBackup(){
+  try{
+    const [pref,store,notesSaved]=await Promise.all([
+      tsApi('/api/preferences'),tsApi('/api/settings'),tsApi('/api/notes')
+    ]);
+    const decoded=key=>{try{return JSON.parse(pref.preferences[key]||'null');}catch{return null;}};
+    const diskPrefs={};
+    for(const key of DISK_PREF_KEYS)if(Object.hasOwn(pref.preferences,key))
+      diskPrefs[key]=pref.preferences[key];
+    const payload={kind:'tsukimera-settings-v1',version:1,created:new Date().toISOString(),
+      menu:decoded(KEY_NAV)||menu,ui:decoded(KEY_UI)||ui,
+      sections:decoded(KEY_SETTINGS)||sectionPrefs,
+      notes:notesSaved.notes,settings:store.settings,diskPrefs};
+    const blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'});
+    const href=URL.createObjectURL(blob);
+    const a=el('a');a.href=href;a.download='Tsukimera-settings.json';
+    document.body.append(a);a.click();a.remove();
+    setTimeout(()=>URL.revokeObjectURL(href),5000);
+    toast('Копия настроек и заметок скачана. Файлы Диска сохраняются отдельно.');
+  }catch(error){toast('Не удалось создать копию: '+error.message);}
 }
-async function restoreBackup(payload) {
+async function restoreBackup(payload){
   if(!payload||payload.kind!=='tsukimera-settings-v1'||payload.version!==1)
     throw Error('Это не резервная копия Tsukimera');
-  if(!payload.settings||typeof payload.settings!=='object'||Array.isArray(payload.settings))
-    throw Error('Нет настроек');
-  if(!Array.isArray(payload.notes)||payload.notes.length>200)
-    throw Error('Некорректные заметки');
-  const diskPrefs=payload.diskPrefs??{};
-  if(!diskPrefs||typeof diskPrefs!=='object'||Array.isArray(diskPrefs)||
-    Object.entries(diskPrefs).some(([key,value])=>
-      !DISK_PREF_KEYS.includes(key)||typeof value!=='string'||value.length>16000))
-    throw Error('Некорректные настройки Диска');
-  const restored=payload.notes.filter(n=>n&&typeof n.id==='string'&&typeof n.text==='string'&&n.text.length<3000);
-  if(restored.length!==payload.notes.length)throw Error('Некорректные заметки');
-  // Restore saved notes into the authoritative database before changing the
-  // browser mirror. A rejected import never deletes existing database notes.
-  const imported=await fetch('/api/notes/import',{method:'POST',
-    headers:{'X-Tsukimera-Request':'1','Content-Type':'application/json'},
-    body:JSON.stringify({notes:restored,action:'replace'})});
-  const importedData=await imported.json();
-  if(!imported.ok)throw Error(importedData.error||'Не удалось восстановить заметки SQLite');
-  if(!(await saveSettings(payload.settings)))throw Error('Не удалось сохранить параметры');
-  menu=cleanMenu(payload.menu||{});
-  ui=cleanUi(payload.ui||{});
-  sectionPrefs={collapsed:Array.isArray(payload.sections?.collapsed)?
-    payload.sections.collapsed.filter(x=>SECTIONS.some(s=>s.id===x)):[]};
-  notes=importedData.notes;
-  const changes={
-    [KEY_NAV]:JSON.stringify(menu),[KEY_UI]:JSON.stringify(ui),
-    [KEY_SETTINGS]:JSON.stringify(sectionPrefs),...diskPrefs};
-  await savePrefChanges(changes);
-  for(const [key,value] of Object.entries(changes))localStorage.setItem(key,value);
+  if(!confirm('Восстановить настройки и заметки из копии? Перед изменениями будет создан снимок SQLite. Данные Диска и файлов не затрагиваются.'))
+    return;
+  const restored=await tsPost('/api/settings/restore',payload);
+  config=restored.settings;
+  notes=restored.notes;
+  const prefs=restored.preferences;
+  // Restore the browser mirror only after the whole SQLite transaction succeeds.
+  for(const key of SQLITE_PREF_KEYS){
+    if(Object.hasOwn(prefs,key))localStorage.setItem(key,prefs[key]);
+    else localStorage.removeItem(key);
+  }
+  menu=cleanMenu(readLocal(KEY_NAV,{collapsed:false,order:IDS,hidden:[]}));
+  ui=cleanUi(readLocal(KEY_UI,DEFAULT_UI));
+  sectionPrefs=readLocal(KEY_SETTINGS,{collapsed:[]});
   writeLocal(KEY_NOTES,notes);
-  applyUi();renderMenu();renderMain();toast('Настройки и заметки восстановлены. Для файлов импортируйте отдельную копию Диска.');
+  applyUi();renderMenu();renderMain();
+  toast('Восстановлено. Предыдущая SQLite сохранена: '+restored.backup);
 }
 function createModal(title) {
   const overlay=el('div','modal-ts');

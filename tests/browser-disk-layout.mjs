@@ -223,6 +223,50 @@ try{
   const savedCopy=await evaluate("localStorage.getItem('tsukimera:notes:v1')");
   assert.ok(savedCopy.includes('browser-legacy-note'),"Migration must retain the browser safety copy");
   console.log("SQLite browser migration verified: old note survived in DB and local backup.");
+
+  // Settings 3.0: real Chrome exercises new controls without a paid Cloud.ru
+  // inference call or a privileged tool operation.
+  await evaluate("location.hash='#/settings'");
+  let settingsReady=false;
+  for(let n=0;n<30;n++){
+    settingsReady=await evaluate("!!document.querySelector('#set-data .set-diagnostics')");
+    if(settingsReady)break;
+    await pause(140);
+  }
+  assert.ok(settingsReady,"New settings were not rendered in the browser");
+  const home=await evaluate("(()=>({cards:document.querySelectorAll('.set-card').length, model:!!document.querySelector('#set-model .set-model-chooser'), cloud:!!document.querySelector('#set-conn .set-cloud-key'), ready:document.querySelectorAll('.set-cap-state').length, labels:[...document.querySelectorAll('.set-toc-link')].map(x=>x.title)}))()");
+  assert.equal(home.cards,10,"All 10 settings sections must remain");
+  assert.equal(home.ready,10,"All settings must disclose their capability status");
+  assert.ok(home.cloud&&home.model,"Cloud.ru key and real model selector must render");
+  await evaluate("(()=>{const q=document.querySelector('.set-search input'); q.value='SQLite';q.dispatchEvent(new Event('input',{bubbles:true}));})()");
+  const found=await evaluate("(()=>({count:document.querySelectorAll('.set-card:not([hidden])').length, result:document.querySelector('.set-search-results').textContent}))()");
+  assert.ok(found.count>0&&found.count<10&&found.result.includes("совпадений"),
+    "Settings search must find individual parameters");
+  await evaluate("(()=>{const q=document.querySelector('.set-search input'); q.value='';q.dispatchEvent(new Event('input',{bubbles:true}));})()");
+  const checkButton=await evaluate("(()=>{const b=[...document.querySelectorAll('#set-data button')].find(x=>x.textContent.includes('Проверить целостность'));if(!b)return false;b.click();return true;})()");
+  assert.ok(checkButton,"SQLite diagnosis button missing");
+  let diagnosed=false;
+  for(let n=0;n<35;n++){
+    diagnosed=await evaluate("document.querySelector('#set-data .set-diagnostics')?.textContent.includes('Ошибок не обнаружено')");
+    if(diagnosed)break;
+    await pause(120);
+  }
+  assert.ok(diagnosed,"Real SQLite integrity diagnosis failed in Chrome");
+  // Saving Persona must not erase a draft in the unrelated Model form.
+  await evaluate("(()=>{document.querySelector('#set-model .beh-field input').value='draft-do-not-erase'; document.querySelector('#set-persona .beh-field textarea').value='Сохраняемый текст'; document.querySelector('#set-persona button.btn.primary').click();})()");
+  let persisted=false;
+  for(let n=0;n<30;n++){
+    const response=await fetch(origin+"/api/settings");
+    if(response.ok&&((await response.json()).settings.instructions.about)==="Сохраняемый текст"){
+      persisted=true;break;
+    }
+    await pause(120);
+  }
+  assert.ok(persisted,"Persona server-side settings were not saved");
+  assert.equal(await evaluate("document.querySelector('#set-model .beh-field input').value"),
+    "draft-do-not-erase","An unrelated successful save destroyed the pending model draft");
+  console.log("Settings 3.0 verified: 10 sections, Cloud.ru selectors, diagnosis, search and no-loss editing.");
+
 }finally{
   socket?.close();
   chrome.kill("SIGTERM");
