@@ -6,13 +6,13 @@ on:
 permissions:
   contents: read
 jobs:
-  linux-node20:
+  linux-node22:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22.16.0'
       - name: Проверить синтаксис и локальные настройки
         run: npm test
       - name: Проверить справку запуска
