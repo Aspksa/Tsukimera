@@ -1525,12 +1525,14 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
     life.refresh();
     if (infoId && !byId(infoId)) closeInfo();
   }
-  let loadGen = 0;
-  /** One catalogue request (plus folder looks on the first load or after folder changes). */
+  let loadGen = 0, catalogResolvedOnce = false;
+  /** The initial fetch may resolve while the page is still being attached.
+   * Do not discard it: the faster SQLite v3 catalogue can beat DOM mounting. */
   async function loadCatalog(withStyles = true) {
     const gen = ++loadGen;
     const [r, st, tr] = await Promise.all([api.diskList(), withStyles || !loaded ? api.diskFolderStyles() : Promise.resolve(null), loaded ? Promise.resolve(null) : api.diskTrash()]);
-    if (gen !== loadGen || !page.isConnected) return;
+    if (gen !== loadGen || (catalogResolvedOnce && !page.isConnected)) return;
+    catalogResolvedOnce = true;
     if (!r.ok) {
       loaded = true;
       filesBox.replaceChildren(emptyState("alert", "Диск недоступен", r.error.message, btn("Повторить", () => void loadCatalog(), { small: true, icon: "refresh" })));
