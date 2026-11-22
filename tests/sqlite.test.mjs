@@ -91,6 +91,9 @@ test("legacy JSON and every Disk object are backed up BEFORE SQLite migration, w
     await unlink(join(dir,"settings.json"));
     const second=await start(dir);
     try{
+      const resumed=await api(second.origin,"/api/storage");
+      assert.equal(resumed.value.backupCreated,status.value.backupCreated,
+        "The original migration backup location must survive every restart");
       const files=(await api(second.origin,"/api/disk")).value.files;
       assert.equal(files.length,1);
       assert.equal(files[0].id,entry.id);
