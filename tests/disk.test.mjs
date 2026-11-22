@@ -5,6 +5,7 @@ import {tmpdir} from "node:os";
 import {join,resolve} from "node:path";
 import {fileURLToPath} from "node:url";
 import {createAppServer} from "../scripts/server.mjs";
+import http from "node:http";
 import {prepareDisk} from "../scripts/build-disk.mjs";
 
 const root=resolve(fileURLToPath(new URL("../",import.meta.url)));
@@ -63,7 +64,7 @@ test("Disk HTTP: folders, binary uploads, preview, metadata, ZIP, versions, tras
   assert.equal(ranged.status,206);assert.equal((await ranged.arrayBuffer()).byteLength,6);
   const text=await request("/api/disk/files/"+id+"/text");
   assert.equal(text.status,200);assert.match(text.body.text,/Tsukimera/);
-  r=await request("/api/disk/metadata","POST",{id,tags:["важное"],color:"amber",note:"Тест"});
+  r=await request("/api/disk/metadata","POST",{id,tags:["важное"],color:"#d9a441",note:"Тест"});
   assert.equal(r.status,200,JSON.stringify(r.body));
   r=await request("/api/disk/files/"+id,"PATCH",{name:"Переименован.txt"});
   assert.equal(r.status,200,JSON.stringify(r.body));
@@ -127,7 +128,14 @@ test("Disk HTTP rejects path escapes, foreign origins and hidden server runtime"
     assert.match(await css.text(),/dk-layout/);
     const invalid=await fetch(origin+"/api/disk/UNKNOWN");
     assert.equal(invalid.status,404);
-    const wrongHost=await fetch(origin+"/api/disk",{headers:{Host:"evil.example"}});
-    assert.equal(wrongHost.status,403);
+    // Undici fetch may normalize the Host header: send a real HTTP request.
+    const wrongHost=await new Promise((resolve,reject)=>{
+      const req=http.get(origin+"/api/disk",{headers:{Host:"evil.example"}},response=>{
+        response.resume();
+        response.on("end",()=>resolve(response.statusCode));
+      });
+      req.on("error",reject);
+    });
+    assert.equal(wrongHost,403);
   });
 });
