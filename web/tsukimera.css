@@ -174,3 +174,156 @@ textarea,input,select{accent-color:var(--brand)}
   .app,.nav,.toast-ts,.set-collapse svg{transition:none!important;animation:none!important}
   html{scroll-behavior:auto}
 }
+
+
+/* --------------------------------------------------------------------------
+   Typography & spacing imported from Aspksa/Kiyomira:
+   10-Веб/02-Стиль.css (system monospace, viewport-adjusted font, --gap/--pad)
+   10-Веб/05-ЕдиныйИнтерфейс.css (4/8/12/16/24/32 rhythm, type roles).
+   Keep the JUUNIBI menu/settings structure and Tsukimera colour/theme settings.
+   This file loads AFTER the original JUUNIBI styles, avoiding vendor edits.
+   -------------------------------------------------------------------------- */
+:root {
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono","DejaVu Sans Mono",monospace;
+  --font:var(--mono);
+  --gap:clamp(12px,.6rem + .8vw,32px);
+  --pad:clamp(16px,1rem + 2.2vw,72px);
+  --ki-space-1:4px;--ki-space-2:8px;--ki-space-3:12px;
+  --ki-space-4:16px;--ki-space-5:24px;--ki-space-6:32px;
+  --ki-type-small:clamp(11px,.7vw + 8px,13px);
+  --ki-type-body:clamp(13px,.45vw + 11px,16px);
+  --ki-type-title:clamp(17px,.75vw + 13px,22px);
+  --fs-xs:var(--ki-type-small);
+  --fs-sm:var(--ki-type-small);
+  --fs-md:var(--ki-type-body);
+  --fs-lg:var(--ki-type-title);
+}
+:root[data-scale=md]{font-size:clamp(14px,.5vw + 8px,30px)}
+/* Preserve Tsukimera's existing small/large accessibility controls. */
+:root[data-scale=sm]{
+  font-size:clamp(12px,.45vw + 6px,26px);
+  --ki-type-small:clamp(10px,.6vw + 7px,12px);
+  --ki-type-body:clamp(12px,.4vw + 10px,14px);
+  --ki-type-title:clamp(15px,.6vw + 12px,20px);
+}
+:root[data-scale=lg]{
+  font-size:clamp(16px,.55vw + 9px,32px);
+  --ki-type-small:clamp(12px,.75vw + 9px,15px);
+  --ki-type-body:clamp(15px,.5vw + 12px,18px);
+  --ki-type-title:clamp(19px,.8vw + 15px,25px);
+}
+body{font-family:var(--font);line-height:1.5;-webkit-font-smoothing:antialiased}
+button,input,textarea,select{font-family:inherit}
+.content-main{
+  padding-top:var(--ki-space-5);
+  padding-right:var(--pad);
+  padding-left:var(--pad);
+}
+.page,.settings-page{line-height:1.5}
+.pg-card{
+  padding:var(--ki-space-5);
+  margin-bottom:var(--ki-space-4);
+}
+.pg-head{
+  gap:var(--ki-space-3);
+  margin-bottom:var(--ki-space-5);
+}
+.pg-head-text h1{
+  font-size:var(--ki-type-title);
+  font-weight:600;
+  line-height:1.25;
+  letter-spacing:0;
+}
+.pg-head-text p{
+  margin-top:var(--ki-space-1);
+  font-size:var(--ki-type-body);
+  line-height:1.5;
+}
+.route-empty{padding:var(--ki-space-5)}
+.route-empty p{margin:var(--ki-space-2) 0;line-height:1.65}
+.route-status{gap:var(--ki-space-2);padding:.35em .9em;font-size:var(--ki-type-small)}
+/* Match Kiyomira's compact, regular monospace navigation rhythm. */
+.nav{
+  padding:var(--ki-space-3) var(--ki-space-2);
+  gap:var(--ki-space-1);
+}
+.nav-head{gap:var(--ki-space-2);padding-bottom:var(--ki-space-2)}
+.nav .brand{font-family:var(--font);font-weight:600;letter-spacing:.14em}
+.nav-tools{gap:var(--ki-space-2);margin-bottom:var(--ki-space-2)}
+.nav-group{gap:2px;padding:var(--ki-space-2) 0}
+.nav-item{
+  gap:var(--ki-space-3);
+  padding:.75rem .8rem;
+  font-size:var(--ki-type-body);
+  line-height:1.5;
+}
+.nav-sub{padding:var(--ki-space-2) var(--ki-space-3);font-size:var(--ki-type-small)}
+.nav-me{gap:var(--ki-space-2);padding:var(--ki-space-2)}
+.nav-hotkey,.nav-today{font-size:var(--ki-type-small);line-height:1.5}
+.nav-edit-row{gap:var(--ki-space-1);padding:var(--ki-space-1)}
+.nav-edit-hint{font-size:var(--ki-type-small);line-height:1.6}
+.nav-edit-foot{gap:var(--ki-space-2)}
+/* Identical Kiyomira units for the setting columns, cards and form rows. */
+.set-layout{gap:var(--ki-space-5)}
+.set-toc{gap:var(--ki-space-1)}
+.set-toc-link{
+  gap:var(--ki-space-2);
+  padding:var(--ki-space-2) var(--ki-space-3);
+  font-size:var(--ki-type-small);
+  line-height:1.5;
+}
+.set-card-head{gap:var(--ki-space-3)}
+.set-card-head h2{font-size:1rem;line-height:1.25;letter-spacing:0}
+.set-card-head p{font-size:var(--ki-type-body);line-height:1.5}
+.set-card-body{margin-top:var(--ki-space-3)}
+.set-card .set-row{
+  gap:var(--ki-space-4);
+  padding:var(--ki-space-4) 0;
+}
+.set-row strong{font-size:var(--ki-type-body);line-height:1.4}
+.set-row small{margin-top:var(--ki-space-1);font-size:var(--ki-type-small);line-height:1.6}
+.set-note{font-size:var(--ki-type-small);line-height:1.6;margin:var(--ki-space-3) 0 var(--ki-space-1)}
+.beh-field{gap:var(--ki-space-1);margin:var(--ki-space-3) 0;font-size:var(--ki-type-body);line-height:1.5}
+.set-value input[type=text],
+.set-value input[type=search],
+.set-value textarea,
+.beh-field input,
+.beh-field textarea{
+  padding:.8em 1em;
+  line-height:1.5;
+}
+.set-controls{gap:var(--ki-space-2);margin-top:var(--ki-space-3)}
+.set-search{
+  gap:var(--ki-space-2);
+  padding:var(--ki-space-1) var(--ki-space-3);
+  margin:var(--ki-space-3) 0 var(--ki-space-4);
+}
+.set-search input{padding:.7em .8em;font-size:var(--ki-type-body)}
+.choice-cards,.theme-cards{gap:var(--ki-space-2)}
+.choice-card,.theme-card{padding:.7em 1em;line-height:1.5}
+.btn{padding:.7em 1.2em;line-height:1.5}
+.set-card .btn{font-size:var(--ki-type-body)}
+.section-actions{gap:var(--ki-space-2);padding-top:var(--ki-space-4)}
+.quick-list{margin:var(--ki-space-2) 0 var(--ki-space-4)}
+.quick-list li{gap:var(--ki-space-3);padding:var(--ki-space-3);margin-bottom:var(--ki-space-2)}
+.toast-ts{padding:var(--ki-space-3) var(--ki-space-4);font-size:var(--ki-type-body);line-height:1.5}
+.modal-ts-card{padding:var(--ki-space-5)}
+.modal-ts-head{gap:var(--ki-space-3);margin-bottom:var(--ki-space-3)}
+.pal-item{padding:var(--ki-space-2) var(--ki-space-3)}
+.pal-title{font-size:var(--ki-type-body)}
+.pal-sub{font-size:var(--ki-type-small)}
+@media(max-width:860px){
+  .content-main{padding:var(--ki-space-4) var(--ki-space-3) 95px}
+  .nav{padding:var(--ki-space-3) var(--ki-space-2)}
+  .topbar{gap:var(--ki-space-3);padding:var(--ki-space-2) var(--ki-space-3)}
+  .pg-head{margin-bottom:var(--ki-space-4)}
+  .set-layout{gap:var(--ki-space-3)}
+  .set-toc{gap:var(--ki-space-1);margin-bottom:var(--ki-space-3)}
+  .set-toc-link{padding:var(--ki-space-2) var(--ki-space-3)}
+}
+@media(max-width:450px){
+  .pg-card,.route-empty{padding:var(--ki-space-3)}
+  .pg-head{gap:var(--ki-space-2)}
+  .set-card .set-row{gap:var(--ki-space-3)}
+  .modal-ts-card{padding:var(--ki-space-4)}
+}
