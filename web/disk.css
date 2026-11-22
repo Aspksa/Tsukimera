@@ -901,3 +901,169 @@ button.dk-crumb:hover{background:var(--hover);color:var(--fg)}
   .disk-page .dk-layout,.disk-page .dk-resize-handle,
   .disk-page .dk-resize-handle > span,.disk-page .dk-file{transition:none!important}
 }
+
+
+/* ==========================================================================
+   Tsukimera · Жизнь Диска 4.0
+   150 metrics stay in the local backend; only presentation is layered.
+   ========================================================================= */
+.disk-page .dkl{min-width:0;box-sizing:border-box;--dkl-gap:12px}
+.disk-page .dkl-body{gap:var(--dkl-gap);min-width:0}
+.disk-page .dkl-toolbar{
+  display:flex;align-items:center;justify-content:space-between;
+  gap:8px;min-width:0;padding:5px 0 10px;
+  border-bottom:1px solid var(--line);
+}
+.disk-page .dkl-toolbar-text{display:flex;flex-direction:column;gap:3px;min-width:0}
+.disk-page .dkl-toolbar-text strong{font-size:var(--ki-type-body,var(--fs-md));font-weight:700;line-height:1.35}
+.disk-page .dkl-tally{font-size:var(--ki-type-small,var(--fs-xs));color:var(--muted)}
+.disk-page .dkl-toolbar-actions{display:flex;align-items:center;gap:4px;flex:none}
+.disk-page .dkl-expand,.disk-page .dkl-refresh{
+  display:grid;place-items:center;flex:none;
+  height:34px;width:34px;min-width:34px;margin:0;
+  border:1px solid transparent;border-radius:var(--r-md);
+  background:transparent;color:var(--muted);
+}
+.disk-page .dkl-expand:hover,.disk-page .dkl-refresh:hover,
+.disk-page .dkl-expand:focus-visible,.disk-page .dkl-refresh:focus-visible{
+  color:var(--brand);background:var(--hover-2);border-color:var(--line)
+}
+.disk-page .dkl-area{
+  min-width:0;display:flex;align-items:center;justify-content:space-between;
+  gap:8px;padding:11px 12px;text-align:left;
+  color:var(--fg);background:transparent;
+  border:1px solid transparent;border-radius:var(--r-md);
+  font:inherit;cursor:pointer;transition:background .2s ease,border-color .2s ease;
+}
+.disk-page .dkl-area strong{font-size:var(--ki-type-small,var(--fs-sm));font-weight:600;line-height:1.3}
+.disk-page .dkl-area small{color:var(--muted);font-size:var(--ki-type-small,var(--fs-xs));white-space:nowrap}
+.disk-page .dkl-area:hover{background:var(--hover)}
+.disk-page .dkl-area.selected{background:var(--hover-2);border-color:color-mix(in srgb,var(--brand) 45%,transparent)}
+.disk-page .dkl-area.selected strong{color:var(--brand)}
+.disk-page .dkl-area:focus-visible,.disk-page .dkl-show-all:focus-visible,
+.disk-page .dkl-tile:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
+.disk-page .dkl-tab-count{flex:none;color:var(--muted);font-size:var(--ki-type-small,var(--fs-xs))}
+.disk-page .dkl-tab[aria-pressed=true]{background:var(--hover-2);border-color:color-mix(in srgb,var(--brand) 60%,transparent)}
+.disk-page .dkl-tab[aria-pressed=true] .dkl-tab-name{color:var(--fg)}
+.disk-page .dkl-group-head{min-width:0;gap:10px}
+.disk-page .dkl-group-count{
+  margin-left:auto;font-size:var(--ki-type-small,var(--fs-xs));
+  color:var(--muted);text-align:right;white-space:nowrap
+}
+.disk-page .dkl-tile{
+  cursor:pointer;min-height:0;box-sizing:border-box;
+  border-color:var(--line);background:var(--surface);
+  transition:transform .18s ease,border-color .18s ease,background .18s ease;
+}
+.disk-page .dkl-tile .dkl-value{font-size:clamp(17px,.7vw + 13px,25px)}
+.disk-page .dkl-tile-small{padding:12px;gap:10px}
+.disk-page .dkl-tile-medium{padding:15px;gap:12px;min-height:145px}
+.disk-page .dkl-tile-large{padding:18px;gap:12px;min-height:175px}
+.disk-page .dkl-show-all{
+  border:1px solid var(--line);background:var(--surface);
+  color:var(--brand);text-align:center;border-radius:var(--r-md);
+  padding:12px;cursor:pointer;font:inherit;font-size:var(--ki-type-small,var(--fs-sm))
+}
+.disk-page .dkl-show-all:hover{background:var(--hover-2)}
+.disk-page .dkl-detail-sheet{display:flex;flex-direction:column;gap:14px;min-width:0}
+.disk-page .dkl-detail-sheet p{overflow-wrap:anywhere}
+.dkl-detail-sheet{display:flex;flex-direction:column;gap:13px;min-width:0;max-height:70vh;overflow:auto}
+.dkl-detail-number{font-size:clamp(22px,2.6vw,36px);line-height:1.3;
+  font-weight:700;color:var(--brand);overflow-wrap:anywhere}
+.dkl-detail-section{display:flex;flex-direction:column;gap:4px;
+  border-top:1px solid var(--line);padding-top:10px}
+.dkl-detail-section strong{font-size:var(--fs-sm)}
+.dkl-detail-section p{margin:0;color:var(--muted);font-size:var(--fs-sm);line-height:1.6}
+.dkl-detail-caveat{margin:0;color:var(--muted);font-size:var(--fs-xs);line-height:1.6}
+.dkl-detail-list{margin:0;padding-left:22px;max-height:200px;overflow:auto;font-size:var(--fs-sm)}
+.dkl-detail-list li{padding:3px 0;overflow-wrap:anywhere}
+/* Compact right panel: 6 highlights always visible; 5 areas; up to 3 quick insights.
+   All remaining metrics appear by expanding the same Disk panel. */
+.disk-page .dkl-compact .dkl-hl{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.disk-page .dkl-compact .dkl-hl-card{
+  padding:11px;gap:5px;min-height:89px;border-color:var(--line);
+  border-radius:var(--r-md);
+}
+.disk-page .dkl-compact .dkl-hl-card .dkl-ic{display:none}
+.disk-page .dkl-compact .dkl-hl-card b{
+  font-size:clamp(15px,.65vw + 12px,22px);line-height:1.3;
+  max-width:100%;text-overflow:ellipsis;
+}
+.disk-page .dkl-compact .dkl-hl-card small{font-size:var(--ki-type-small,var(--fs-xs));line-height:1.35}
+.disk-page .dkl-compact .dkl-areas{display:grid;grid-template-columns:1fr;gap:3px}
+.disk-page .dkl-compact .dkl-tabs{display:flex;flex-direction:column;gap:5px}
+.disk-page .dkl-compact .dkl-tab{min-height:42px;padding:7px 10px}
+.disk-page .dkl-compact .dkl-tab .dkl-ic{width:26px;height:26px;flex:none}
+.disk-page .dkl-compact .dkl-tab .dkl-tab-name{flex:1}
+.disk-page .dkl-compact .dkl-grid{grid-template-columns:minmax(0,1fr);gap:8px}
+.disk-page .dkl-compact .dkl-tile{
+  padding:12px;min-height:86px;
+  animation:none;transform:none;
+}
+.disk-page .dkl-compact .dkl-tile:hover{transform:none}
+.disk-page .dkl-compact .dkl-tile .dkl-value{font-size:var(--ki-type-title,20px)}
+.disk-page .dkl-compact .dkl-group-head .dkl-ic{display:none}
+.disk-page .dkl-compact .dkl-group-head h3{font-size:var(--ki-type-body,var(--fs-md))}
+.disk-page .dkl-compact .dkl-group-head p{line-height:1.45}
+.disk-page .dkl-compact .dkl-group-count{display:none}
+/* Full-width analytical workspace stays inside the existing Disk route.
+   Keep existing DOM and state alive; returning restores the file panes. */
+.disk-page.dk-life-expanded .dk-layout,
+.disk-page.dk-life-expanded .dk-layout.no-tree,
+.disk-page.dk-life-expanded .dk-layout.with-info{
+  display:grid;grid-template-columns:minmax(0,1fr);gap:0;
+}
+.disk-page.dk-life-expanded .dk-layout > .dk-side,
+.disk-page.dk-life-expanded .dk-layout > .dk-main,
+.disk-page.dk-life-expanded .dk-layout > .dk-info,
+.disk-page.dk-life-expanded .dk-layout > .dk-resize-handle{
+  display:none!important;
+}
+.disk-page.dk-life-expanded .dk-layout > .dkl,
+.disk-page.dk-life-expanded .dk-layout.with-info > .dkl{
+  display:flex;grid-column:1/-1;grid-row:1;
+  width:100%;min-width:0;max-width:none;
+  position:static;inset:auto;padding:8px 0 30px;
+  margin:0;border:0;border-radius:0;box-shadow:none;
+  max-height:none;background:transparent;
+}
+.disk-page .dkl-expanded .dkl-hl{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:12px}
+.disk-page .dkl-expanded .dkl-hl-card{padding:14px;border-color:var(--line);min-height:120px}
+.disk-page .dkl-expanded .dkl-hl-card b{font-size:clamp(17px,1vw + 12px,26px)}
+.disk-page .dkl-expanded .dkl-areas{
+  display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px
+}
+.disk-page .dkl-expanded .dkl-tabs{
+  display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:8px
+}
+.disk-page .dkl-expanded .dkl-tab{min-height:55px;padding:9px 11px}
+.disk-page .dkl-expanded .dkl-tab .dkl-tab-name{flex:1}
+.disk-page .dkl-expanded .dkl-tab-bar{display:none}
+.disk-page .dkl-expanded .dkl-grid{
+  display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;
+}
+.disk-page .dkl-expanded .dkl-tile-large{grid-column:span 2}
+.disk-page .dkl-expanded .dkl-chart{min-width:0}
+.disk-page .dkl-expanded .dkl-toolbar{padding:6px 0 18px}
+@container diskspace (max-width:1150px){
+  .disk-page .dkl-expanded .dkl-grid{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .disk-page .dkl-expanded .dkl-hl{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .disk-page .dkl-expanded .dkl-areas{grid-template-columns:repeat(3,minmax(0,1fr))}
+}
+@container diskspace (max-width:760px){
+  .disk-page .dkl-expanded .dkl-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .disk-page .dkl-expanded .dkl-areas{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .disk-page .dkl-expanded .dkl-hl{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .disk-page .dkl-expanded .dkl-tile-large{grid-column:span 2}
+}
+@container diskspace (max-width:470px){
+  .disk-page .dkl-expanded .dkl-grid{grid-template-columns:minmax(0,1fr)}
+  .disk-page .dkl-expanded .dkl-areas{grid-template-columns:minmax(0,1fr)}
+  .disk-page .dkl-expanded .dkl-tile-large{grid-column:auto}
+  .disk-page .dkl-expanded .dkl-tabs{grid-template-columns:minmax(0,1fr)}
+}
+@media(prefers-reduced-motion:reduce){
+  .disk-page .dkl-area,.disk-page .dkl-tile,.disk-page .dkl-hl-card,
+  .disk-page .dkl-expand,.disk-page .dkl-tabs{animation:none!important;transition:none!important}
+  .disk-page .dkl-tile:hover,.disk-page .dkl-hl-card:hover{transform:none}
+}
