@@ -1,6 +1,6 @@
 import { stripTypeScriptTypes } from "node:module";
 import { readdir, readFile, writeFile, mkdir } from "node:fs/promises";
-import { join, relative, dirname, extname } from "node:path";
+import { join, relative, dirname, extname, sep } from "node:path";
 
 /**
  * Turn the owner's original JUUNIBI TypeScript Disk sources into ordinary JS.
@@ -25,7 +25,7 @@ export async function prepareDisk(root) {
       let code = stripTypeScriptTypes(typescript, { mode: "transform", sourceUrl: source });
       // JUUNIBI is the source project, Tsukimera is the running product.
       // Apply the same rename across all modules so events and storage keys match.
-      if(relative(sourceRoot,source).startsWith("web/")){
+      if(relative(sourceRoot,source).startsWith("web"+sep)){
         code=code.replaceAll("JUUNIBI","Tsukimera").replaceAll("juunibi","tsukimera");
       }
       // CSS is served as a real stylesheet, not as a JS module.
