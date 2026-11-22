@@ -153,6 +153,13 @@ try{
   const linked=await evaluate("(()=>({panel:!!document.querySelector('.dk-info:not([hidden])'),expanded:document.querySelector('.disk-page').classList.contains('dk-life-expanded')}))()");
   assert.ok(linked.panel&&!linked.expanded,"Verified source document did not open in the Disk inspector");
   await evaluate("document.querySelector('.dkl-expand').click()");
+  // Life 5.0: search all groups, filter missing data and keep the source untouched.
+  const hits=await evaluate("(()=>{const x=document.querySelector('.dkl-search');x.value='слова';x.dispatchEvent(new Event('input',{bubbles:true}));return {shown:document.querySelectorAll('.dkl-tile').length,open:!document.querySelector('.dkl-discover').hidden,coverage:document.querySelector('.dkl-coverage').textContent.includes('500 документами')}})()");
+  assert.ok(hits.open&&hits.coverage&&hits.shown>0&&hits.shown<150,
+    "Search across Disk Life metrics must work in the real browser: "+JSON.stringify(hits));
+  const emptyFilter=await evaluate("(()=>{const x=document.querySelector('.dkl-search');x.value='';x.dispatchEvent(new Event('input',{bubbles:true}));document.querySelectorAll('.dkl-filter')[2].click();return {cards:[...document.querySelectorAll('.dkl-tile')].every(e=>e.classList.contains('is-empty')),active:document.querySelectorAll('.dkl-filter')[2].getAttribute('aria-pressed'),total:document.querySelectorAll('.dkl-tile').length}})()");
+  assert.ok(emptyFilter.cards&&emptyFilter.active==='true',
+    "Missing-data filter must only show incomplete metrics: "+JSON.stringify(emptyFilter));
   await device(390,844);
   const narrow=await evaluate("(()=>({width:innerWidth,scroll:document.documentElement.scrollWidth,grid:getComputedStyle(document.querySelector('.dkl-grid')).gridTemplateColumns}))()");
   assert.ok(narrow.scroll<=narrow.width+3,"Expanded mobile analytics scrolls horizontally");
