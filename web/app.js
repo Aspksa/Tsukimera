@@ -55,6 +55,8 @@ const KEY_NAV = 'tsukimera:nav:v1';
 const KEY_UI = 'tsukimera:ui:v1';
 const KEY_SETTINGS = 'tsukimera:settings:v1';
 const KEY_NOTES = 'tsukimera:notes:v1';
+const NOTE_DB_MARKER = 'tsukimera:notes:sqlite-instance:v1';
+let noteDatabaseId = '';
 const DISK_PREF_KEYS = [
   'tsukimera.disk.smart.v1','tsukimera.disk.columns.v1',
   'tsukimera.disk.layout.left.v1','tsukimera.disk.layout.right.v1',
@@ -388,8 +390,15 @@ function renderMain() {
         }
         li.append(links);
       }
-      li.append(iconBtn('trash','Удалить заметку',()=>{
-        notes=notes.filter(x=>x.id!==n.id);writeLocal(KEY_NOTES,notes);renderMain();renderMenu();
+      li.append(iconBtn('trash','Удалить заметку',async()=>{
+        try{
+          const response=await fetch('/api/notes/'+encodeURIComponent(n.id),{
+            method:'DELETE',headers:{'X-Tsukimera-Request':'1'}});
+          const value=await response.json();
+          if(!response.ok)throw Error(value.error||'Ошибка удаления');
+          notes=notes.filter(x=>x.id!==n.id);
+          writeLocal(KEY_NOTES,notes);renderMain();renderMenu();
+        }catch(error){toast('Заметка не удалена: '+error.message);}
       }));
       list.append(li);
     }
@@ -411,6 +420,31 @@ function renderMain() {
   }
   mainNode.append(wrap);
   if(route==='tasks')void refreshNoteFileLinks(wrap);
+}
+/** One-time import is keyed by the database identity: moving to another SSD
+ * or a fresh database cannot silently discard earlier browser-only notes. */
+async function loadDatabaseNotes(){
+  try{
+    let response=await fetch('/api/notes');
+    if(!response.ok)throw Error('HTTP '+response.status);
+    let value=await response.json();
+    noteDatabaseId=value.instanceId;
+    let migrated='';
+    try{migrated=localStorage.getItem(NOTE_DB_MARKER)||'';}catch{}
+    if(migrated!==noteDatabaseId && notes.length){
+      response=await fetch('/api/notes/import',{
+        method:'POST',headers:{'Content-Type':'application/json','X-Tsukimera-Request':'1'},
+        body:JSON.stringify({notes})});
+      value=await response.json();
+      if(!response.ok)throw Error(value.error||'Ошибка переноса заметок');
+    }
+    notes=Array.isArray(value.notes)?value.notes:[];
+    writeLocal(KEY_NOTES,notes);
+    try{localStorage.setItem(NOTE_DB_MARKER,noteDatabaseId);}catch{}
+  }catch(error){
+    console.error('Tsukimera SQLite notes:',error);
+    toast('Не удалось перенести заметки в SQLite. Исходные данные браузера сохранены.');
+  }
 }
 async function loadConfig() {
   try{
@@ -663,13 +697,19 @@ async function restoreBackup(payload) {
     throw Error('Некорректные настройки Диска');
   const restored=payload.notes.filter(n=>n&&typeof n.id==='string'&&typeof n.text==='string'&&n.text.length<3000);
   if(restored.length!==payload.notes.length)throw Error('Некорректные заметки');
-  // First validate and persist settings on the server; only then change browser preferences.
+  // Restore saved notes into the authoritative database before changing the
+  // browser mirror. A rejected import never deletes existing database notes.
+  const imported=await fetch('/api/notes/import',{method:'POST',
+    headers:{'X-Tsukimera-Request':'1','Content-Type':'application/json'},
+    body:JSON.stringify({notes:restored,action:'replace'})});
+  const importedData=await imported.json();
+  if(!imported.ok)throw Error(importedData.error||'Не удалось восстановить заметки SQLite');
   if(!(await saveSettings(payload.settings)))throw Error('Не удалось сохранить параметры');
   menu=cleanMenu(payload.menu||{});
   ui=cleanUi(payload.ui||{});
   sectionPrefs={collapsed:Array.isArray(payload.sections?.collapsed)?
     payload.sections.collapsed.filter(x=>SECTIONS.some(s=>s.id===x)):[]};
-  notes=restored;
+  notes=importedData.notes;
   writeLocal(KEY_NAV,menu);writeLocal(KEY_UI,ui);writeLocal(KEY_SETTINGS,sectionPrefs);writeLocal(KEY_NOTES,notes);
   for(const [key,value] of Object.entries(diskPrefs))localStorage.setItem(key,value);
   applyUi();renderMenu();renderMain();toast('Настройки и заметки восстановлены. Для файлов импортируйте отдельную копию Диска.');
@@ -691,9 +731,16 @@ function openAddNote() {
   card.append(input.wrap);
   card.append(btn('Сохранить заметку',()=>{
     const value=input.input.value.trim();if(!value){toast('Введите текст');return;}
-    notes.push({id:crypto.randomUUID(),text:value});
-    notes=notes.slice(-200);writeLocal(KEY_NOTES,notes);
-    overlay.remove();renderMenu();go('tasks');
+    try{
+      const response=await fetch('/api/notes',{
+        method:'POST',headers:{'X-Tsukimera-Request':'1','Content-Type':'application/json'},
+        body:JSON.stringify({id:crypto.randomUUID(),text:value})});
+      const result=await response.json();
+      if(!response.ok)throw Error(result.error||'Ошибка сохранения');
+      notes.push(result.note);
+      notes=notes.slice(-200);writeLocal(KEY_NOTES,notes);
+      overlay.remove();renderMenu();go('tasks');
+    }catch(error){toast('Заметка не сохранена: '+error.message);}
   },'btn primary'));
   input.input.focus();
 }
@@ -761,6 +808,7 @@ async function init() {
   createShell();
   bindKeys();
   await loadConfig();
+  await loadDatabaseNotes();
   window.addEventListener('tsukimera:notes-changed',()=>{
     notes=readLocal(KEY_NOTES,[]);
     if(route==='tasks')renderMain();
