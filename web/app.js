@@ -635,8 +635,11 @@ function renderSettings() {
   layout.append(left,main);page.append(layout);mainNode.append(page);
 }
 function downloadBackup() {
-  const diskPrefs=Object.fromEntries(DISK_PREF_KEYS.map(key=>[key,localStorage.getItem(key)])
-    .filter(([,value])=>value!==null));
+  const diskPrefs={};
+  for(const key of DISK_PREF_KEYS){
+    try{const value=localStorage.getItem(key);if(value!==null)diskPrefs[key]=value;}
+    catch{toast('Не удалось прочитать настройки Диска для копии');return;}
+  }
   const payload={kind:'tsukimera-settings-v1',version:1,created:new Date().toISOString(),
     menu,ui,sections:sectionPrefs,notes,settings:config,diskPrefs};
   const blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'});
