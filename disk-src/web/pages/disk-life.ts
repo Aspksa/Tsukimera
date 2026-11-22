@@ -80,6 +80,7 @@ export function diskLifePanel(isEmpty:()=>boolean=()=>false):{
   searchBox.append(filters);
   const coverage=el("p",{cls:"dkl-coverage"});
   searchBox.hidden=true;
+  coverage.hidden=true;
   search.addEventListener("input",()=>{query=search.value;render();});
   root.append(heading,searchBox,coverage,body);
 
