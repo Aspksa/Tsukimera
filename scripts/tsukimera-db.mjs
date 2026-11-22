@@ -41,7 +41,7 @@ const cleanPrefs = (input, allowDelete = false) => {
   const output={};
   for (const [key,value] of Object.entries(input)){
     const canonical=aliases[key]||key;
-    if (!(canonical in input)) output[canonical]=value;
+    if(key===canonical || !(canonical in input)) output[canonical]=value;
   }
   return output;
 };
