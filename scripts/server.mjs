@@ -24,7 +24,7 @@ function isRecord(v) {
 }
 const allowed = (value, options) => typeof value === "string" && options.includes(value);
 const str = (value, max) => typeof value === "string" && value.length <= max && !value.includes("\0");
-const model = (v) => str(v, 120) && (v === "" || /^[a-zA-Z0-9_.:/@+-]{2,120}$/.test(v));
+const model = (v) => str(v, 120) && (v === "" || (v.length >= 2 && !v.includes("..") && !v.startsWith("/") && !v.includes("//") && /^[a-zA-Z0-9_.:@+-]+(?:\/[a-zA-Z0-9_.:@+-]+)*$/.test(v)));
 function bad(reason) {
   const error = new Error(reason);
   error.status = 400;
