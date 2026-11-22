@@ -1137,3 +1137,19 @@ button.dk-crumb:hover{background:var(--hover);color:var(--fg)}
 @media(prefers-reduced-motion:reduce){
   .dkx-map-canvas,.dkl-explorer-plot svg{scroll-behavior:auto}
 }
+
+
+/* Disk 7.0: bounded DOM window in list/table modes, multi-condition smart folders. */
+.dk-window-spacer{grid-column:1 / -1;width:100%;padding:0!important;margin:0!important;pointer-events:none;border:0!important;background:transparent!important}
+.dk-files.mode-list .dk-window-spacer,.dk-files.mode-table .dk-window-spacer{min-height:0!important}
+.dkx-smart-conditions{display:grid;gap:8px;min-width:0}
+.dkx-smart-condition{display:grid;grid-template-columns:minmax(100px,1fr) minmax(100px,1fr) minmax(100px,1fr) auto;align-items:center;gap:8px;padding:8px;border:1px solid var(--line);border-radius:12px;background:color-mix(in srgb,var(--brand) 3%,transparent)}
+.dkx-smart-condition select,.dkx-smart-condition input{min-width:0;width:100%;min-height:39px;box-sizing:border-box;border:1px solid var(--line);border-radius:9px;padding:7px 9px;background:var(--surface);color:var(--fg);font:inherit}
+.dkx-smart-condition .btn{white-space:nowrap}
+@media(max-width:740px){
+ .dkx-smart-condition{grid-template-columns:repeat(2,minmax(0,1fr))}
+ .dkx-smart-condition input,.dkx-smart-condition select{min-width:0}
+}
+@media(max-width:440px){
+ .dkx-smart-condition{grid-template-columns:minmax(0,1fr)}
+}

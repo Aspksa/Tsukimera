@@ -7,9 +7,22 @@ import {showToast} from "../toast";
 import {kindOf,human} from "./disk-model";
 import type {DiskFile} from "../api";
 
-export type SmartRule={id:string;name:string;field:"name"|"folder"|"extension"|"tag";pattern:string};
+export type SmartField="name"|"folder"|"extension"|"tag"|"size"|"date"|"favorite";
+export type SmartOperator="contains"|"equals"|"min"|"max"|"before"|"after"|"is";
+export type SmartCondition={field:SmartField;operator:SmartOperator;value:string};
+/** Old rules with field/pattern are still accepted without modification. */
+export type SmartRule={
+  id:string;name:string;field?:SmartField;pattern?:string;
+  mode?:"all"|"any";conditions?:SmartCondition[];
+};
 const SMART_KEY="tsukimera.disk.smart.v1";
 const COLUMN_KEY="tsukimera.disk.columns.v1";
+const smartFields:SmartField[]=["name","folder","extension","tag","size","date","favorite"];
+const operators:Record<SmartField,SmartOperator[]>={
+  name:["contains","equals"],folder:["contains","equals"],
+  extension:["contains","equals"],tag:["contains","equals"],
+  size:["min","max"],date:["before","after"],favorite:["is"],
+};
 export type TableColumns={size:boolean;date:boolean;folder:boolean};
 export function readColumns():TableColumns{
   let value:Partial<TableColumns>={};
@@ -17,19 +30,64 @@ export function readColumns():TableColumns{
   return {size:value?.size!==false,date:value?.date!==false,folder:value?.folder===true};
 }
 export function writeColumns(columns:TableColumns){writePreference(COLUMN_KEY,JSON.stringify(columns));}
+export function isConditionValid(c:unknown):c is SmartCondition{
+  if(!c||typeof c!=="object")return false;
+  const v=c as Partial<SmartCondition>;
+  if(!smartFields.includes(v.field as SmartField)||typeof v.value!=="string"||v.value.length>80||
+    !operators[v.field as SmartField]?.includes(v.operator as SmartOperator))return false;
+  if(v.field==="size")return /^(?:0|[1-9]\d{0,5})(?:\.\d{1,2})?$/.test(v.value)&&Number(v.value)<=500000;
+  if(v.field==="date")return /^\d{4}-\d{2}-\d{2}$/.test(v.value)&&
+    !Number.isNaN(Date.parse(v.value+"T00:00:00Z"));
+  if(v.field==="favorite")return ["yes","no"].includes(v.value);
+  return !!v.value.trim();
+}
 export function readSmartRules():SmartRule[]{
   try{
     const rows=JSON.parse(localStorage.getItem(SMART_KEY)||"[]");
     if(!Array.isArray(rows))return [];
-    return rows.filter(r=>r&&typeof r.id==="string"&&typeof r.name==="string"&&typeof r.pattern==="string"&&
-      r.name.length<=40&&r.pattern.length<=80&&["name","folder","extension","tag"].includes(r.field)).slice(0,30);
+    return rows.filter(r=>r&&typeof r.id==="string"&&typeof r.name==="string"&&
+      r.name.length>0&&r.name.length<=40&&
+      ((typeof r.field==="string"&&smartFields.includes(r.field)&&
+        typeof r.pattern==="string"&&r.pattern.length<=80)||
+       (Array.isArray(r.conditions)&&r.conditions.length>=1&&r.conditions.length<=4&&
+        r.conditions.every(isConditionValid))))
+      .slice(0,30).map(r=>({
+        id:r.id,name:r.name,
+        ...(typeof r.field==="string"?{field:r.field,pattern:r.pattern}:{}),
+        ...(Array.isArray(r.conditions)&&r.conditions.every(isConditionValid)
+          ?{mode:r.mode==="any"?"any":"all",conditions:r.conditions}:{}),
+      }));
   }catch{return [];}
 }
-function saveSmartRules(rows:SmartRule[]){writePreference(SMART_KEY,JSON.stringify(rows));}
+function saveSmartRules(rows:SmartRule[]):boolean{
+  const serialized=JSON.stringify(rows);
+  if(serialized.length>15500){
+    showToast("Достигнут предел хранения правил SQLite. Удалите ненужные правила.");return false;
+  }
+  writePreference(SMART_KEY,serialized);
+  return true;
+}
 export function matchesSmartRule(file:DiskFile,rule:SmartRule):boolean{
-  const hay=rule.field==="name"?file.name:rule.field==="folder"?file.folder:
-    rule.field==="extension"?(file.name.split(".").pop()||""):((file.tags||[]).join(" "));
-  return hay.toLocaleLowerCase("ru-RU").includes(rule.pattern.trim().toLocaleLowerCase("ru-RU"));
+  const conditions=rule.conditions?.length?rule.conditions:[
+    {field:rule.field??"name",operator:"contains",value:rule.pattern??""} as SmartCondition];
+  const check=(c:SmartCondition)=>{
+    if(!isConditionValid(c))return false;
+    if(c.field==="size"){
+      const amount=Number(c.value)*1024*1024;
+      return c.operator==="min"?file.size>=amount:file.size<=amount;
+    }
+    if(c.field==="date"){
+      const day=file.uploadedAt.slice(0,10);
+      return c.operator==="before"?day<=c.value:day>=c.value;
+    }
+    if(c.field==="favorite")return !!file.favorite===(c.value==="yes");
+    const content=c.field==="name"?file.name:c.field==="folder"?file.folder:
+      c.field==="extension"?(file.name.split(".").pop()||""):(file.tags||[]).join(" ");
+    const left=content.toLocaleLowerCase("ru-RU");
+    const right=c.value.trim().toLocaleLowerCase("ru-RU");
+    return c.operator==="equals"?left===right:left.includes(right);
+  };
+  return rule.mode==="any"?conditions.some(check):conditions.every(check);
 }
 export type RenamePlan={id:string;folder:string;from:string;to:string;valid:boolean;why:string};
 export function renamePlan(files:DiskFile[],all:DiskFile[],template:string,start=1):RenamePlan[]{
@@ -75,37 +133,95 @@ export function openColumnSettings(current:TableColumns,onSave:(next:TableColumn
 }
 export function openSmartManager({onApply,onChanged}:{onApply:(rule:SmartRule)=>void;onChanged:()=>void}){
   const panel=el("div",{cls:"dkx-stack"});
+  const descriptions:Record<SmartField,string>={
+    name:"Название",folder:"Папка",extension:"Расширение",tag:"Метка",
+    size:"Размер (МБ)",date:"Дата загрузки",favorite:"Избранное",
+  };
+  const opText:Record<SmartOperator,string>={
+    contains:"Содержит",equals:"Равно",min:"Не меньше",max:"Не больше",
+    before:"До даты включительно",after:"Начиная с даты",is:"Да / нет",
+  };
+  let conditions:SmartCondition[]=[{field:"name",operator:"contains",value:""}];
+  let matchMode:"all"|"any"="all";
+  const conditionsBox=el("div",{cls:"dkx-smart-conditions"});
+  const drawConditions=()=>{
+    conditionsBox.replaceChildren();
+    for(const [i,c] of conditions.entries()){
+      const field=el("select",{attrs:{"aria-label":"Поле условия "+(i+1)}},
+        ...smartFields.map(name=>el("option",{value:name,textContent:descriptions[name]})));
+      field.value=c.field;
+      const op=el("select",{attrs:{"aria-label":"Операция "+(i+1)}},
+        ...operators[c.field].map(name=>el("option",{value:name,textContent:opText[name]})));
+      op.value=c.operator;
+      const val=c.field==="favorite"
+        ?el("select",{attrs:{"aria-label":"Значение "+(i+1)}},
+          el("option",{value:"yes",textContent:"Да"}),
+          el("option",{value:"no",textContent:"Нет"}))
+        :el("input",{type:c.field==="date"?"date":c.field==="size"?"number":"text",
+          maxLength:80,placeholder:c.field==="size"?"Например: 5":c.field==="extension"?"pdf, txt…":"Текст условия",
+          attrs:{"aria-label":"Значение "+(i+1)},...(c.field==="size"?{min:0,max:500000,step:0.01}:{})});
+      val.value=c.value;
+      field.addEventListener("change",()=>{
+        const next=field.value as SmartField;
+        conditions[i]={field:next,operator:operators[next][0]!,value:next==="favorite"?"yes":""};
+        drawConditions();
+      });
+      op.addEventListener("change",()=>{c.operator=op.value as SmartOperator;});
+      val.addEventListener("input",()=>{c.value=val.value;});
+      val.addEventListener("change",()=>{c.value=val.value;});
+      const remove=btn("Убрать",()=>{
+        if(conditions.length<=1){showToast("Нужно хотя бы одно условие");return;}
+        conditions.splice(i,1);drawConditions();
+      },{small:true});
+      const row=el("div",{cls:"dkx-smart-condition"},field,op,val,remove);
+      conditionsBox.append(row);
+    }
+  };
   const render=()=>{
-    panel.replaceChildren(el("p",{cls:"muted",textContent:"Умные папки — сохранённые фильтры. Они не перемещают и не изменяют файлы."}));
+    panel.replaceChildren(el("p",{cls:"muted",textContent:"Умные папки — сохранённые фильтры, они не двигают и не изменяют оригиналы. Можно задать до четырёх условий И/ИЛИ."}));
     for(const rule of readSmartRules()){
+      const count=rule.conditions?.length??1;
       const row=el("div",{cls:"dkx-smart-row"},el("strong",{textContent:rule.name}),
-        el("span",{cls:"muted",textContent:rule.field+" · "+rule.pattern}));
+        el("span",{cls:"muted",textContent:count+" условий · "+(rule.mode==="any"?"любое":"все")}));
       row.append(btn("Открыть",()=>{sheet.close();onApply(rule);},{small:true}),
         btn("Удалить",()=>{
-          saveSmartRules(readSmartRules().filter(x=>x.id!==rule.id));
+          if(!saveSmartRules(readSmartRules().filter(x=>x.id!==rule.id)))return;
           onChanged();render();
         },{small:true,danger:true}));
       panel.append(row);
     }
     if(readSmartRules().length>=30)return;
-    const name=el("input",{type:"text",maxLength:40,placeholder:"Название умной папки",attrs:{"aria-label":"Имя умной папки"}});
-    const match=el("input",{type:"text",maxLength:80,placeholder:"Содержит текст…",attrs:{"aria-label":"Условие"}}); 
-    const field=el("select",{attrs:{"aria-label":"Искать в"}},
-      ...([["name","Название"],["folder","Папка"],["extension","Расширение"],["tag","Метки"]] as const)
-        .map(([id,label])=>el("option",{value:id,textContent:label})));
-    const row=el("div",{cls:"dkx-stack"},name,field,match);
+    const name=el("input",{type:"text",maxLength:40,
+      placeholder:"Название умной папки",attrs:{"aria-label":"Имя умной папки"}});
+    const mode=el("select",{attrs:{"aria-label":"Как объединять условия"}},
+      el("option",{value:"all",textContent:"Все условия (И)"}),
+      el("option",{value:"any",textContent:"Любое условие (ИЛИ)"}));
+    mode.value=matchMode;
+    mode.addEventListener("change",()=>{matchMode=mode.value as "all"|"any";});
+    drawConditions();
+    const add=btn("+ Условие",()=>{
+      if(conditions.length>=4){showToast("Не больше четырёх условий");return;}
+      conditions.push({field:"name",operator:"contains",value:""});
+      drawConditions();
+    },{small:true});
+    const row=el("div",{cls:"dkx-stack"},name,mode,conditionsBox,add);
     row.append(btn("Добавить умную папку",()=>{
-      const n=name.value.trim(),p=match.value.trim();
-      if(!n||!p){showToast("Введите название и условие");return;}
+      const n=name.value.trim();
+      if(!n||!conditions.every(isConditionValid)){showToast("Укажите название и заполните условия");return;}
       const rules=readSmartRules();
-      if(rules.some(r=>r.name.toLocaleLowerCase()===n.toLocaleLowerCase())){showToast("Такая папка уже существует");return;}
-      rules.push({id:crypto.randomUUID(),name:n,field:field.value as SmartRule["field"],pattern:p});
-      saveSmartRules(rules);onChanged();render();
-      showToast("Умная папка добавлена");
+      if(rules.some(r=>r.name.toLocaleLowerCase("ru-RU")===n.toLocaleLowerCase("ru-RU"))){
+        showToast("Такая папка уже существует");return;
+      }
+      const saved={id:crypto.randomUUID(),name:n,mode:matchMode,
+        conditions:conditions.map(c=>({...c}))};
+      rules.push(saved);
+      if(!saveSmartRules(rules))return;
+      conditions=[{field:"name",operator:"contains",value:""}];matchMode="all";
+      onChanged();render();showToast("Умная папка добавлена");
     },{primary:true}));
     panel.append(row);
   };
-  const sheet=openSheet({title:"Умные папки",icon:"folder",content:panel});
+  const sheet=openSheet({title:"Умные папки 3.0",icon:"folder",content:panel});
   render();
 }
 /** Keep the existing entry point while the map becomes an interactive Canvas view. */

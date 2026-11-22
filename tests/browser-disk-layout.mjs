@@ -149,9 +149,18 @@ try{
   assert.ok(details.dialog&&details.method&&details.source,
     "A verified metric must show methodology and its real source link: "+JSON.stringify(details));
   await evaluate("document.querySelector('.dkl-detail-sheet .btn.primary').click()");
-  await pause(250);
-  const linked=await evaluate("(()=>({panel:!!document.querySelector('.dk-info:not([hidden])'),expanded:document.querySelector('.disk-page').classList.contains('dk-life-expanded')}))()");
-  assert.ok(linked.panel&&!linked.expanded,"Verified source document did not open in the Disk inspector");
+  let linked;
+  for(let attempt=0;attempt<25;attempt++){
+    linked=await evaluate("(()=>({panel:!!document.querySelector('.dk-info:not([hidden])'),expanded:document.querySelector('.disk-page').classList.contains('dk-life-expanded'),infoHidden:document.querySelector('.dk-info')?.hidden,layoutClasses:document.querySelector('.dk-layout')?.className,visibleCards:document.querySelectorAll('.dk-file').length,toast:document.querySelector('.toast-ts')?.textContent,files:document.querySelector('.dk-count')?.textContent,catalogStage:document.querySelector('.disk-page')?.dataset.catalogStage}))()");
+    if(linked?.panel&&!linked.expanded)break;
+    await pause(120);
+  }
+  if(!linked.panel){
+    const probe=await evaluate("(async()=>{const paths=['/api/disk','/api/disk/folders/styles','/api/disk/trash','/api/disk/automation'];return await Promise.all(paths.map(async p=>{try{const r=await fetch(p,{signal:AbortSignal.timeout(4000)});const data=await r.json();return {path:p,status:r.status,files:data.files?.length,folders:data.folders?.length,error:data.error,body:JSON.stringify(data).slice(0,180)};}catch(e){return {path:p,error:String(e)};}}))})()");
+    console.log("Disk catalog browser fetch diagnostics:",JSON.stringify(probe));
+  }
+  console.log("Verified life-file navigation:",JSON.stringify(linked));
+  assert.ok(linked.panel&&!linked.expanded,"Verified source document did not open in the Disk inspector: "+JSON.stringify(linked));
   await evaluate("document.querySelector('.dkl-expand').click()");
   // Life 5.0: search all groups, filter missing data and keep the source untouched.
   const hits=await evaluate("(()=>{const x=document.querySelector('.dkl-search');x.value='слова';x.dispatchEvent(new Event('input',{bubbles:true}));return {shown:document.querySelectorAll('.dkl-tile').length,open:!document.querySelector('.dkl-discover').hidden,coverage:document.querySelector('.dkl-coverage').textContent.includes('500 документами')}})()");

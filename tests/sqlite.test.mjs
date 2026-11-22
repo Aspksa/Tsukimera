@@ -37,7 +37,7 @@ test("first start creates SQLite and retains original interface and 150 metrics"
       const db=new DatabaseSync(join(dir,"tsukimera.db"));
       try{
         assert.equal(db.prepare("PRAGMA quick_check").get().quick_check,"ok");
-        assert.equal(db.prepare("SELECT value FROM metadata WHERE key='schema_version'").get().value,"2");
+        assert.equal(db.prepare("SELECT value FROM metadata WHERE key='schema_version'").get().value,"3");
         assert.equal(db.prepare("SELECT count(*) AS n FROM disk_files").get().n,0);
       }finally{db.close();}
       const seeded=await fetch(origin+"/api/disk/files/binary?name=sqlite-seed.txt&folder=",{

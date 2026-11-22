@@ -8,7 +8,7 @@ import { createResumableUploads } from "./resumable-uploads.mjs";
  * The source disk's LocalDisk methods enforce name, folder, size and data-integrity limits.
  * Only loopback calls are accepted by the parent server.
  */
-export function createDiskRouter({disk,zipStream,zipLength,collectLife,uploadDir}) {
+export function createDiskRouter({disk,zipStream,zipLength,collectLife,uploadDir,automation=null}) {
   const uploads=createResumableUploads({disk,dir:uploadDir});
   const zipTokens=new Map();
   const verified=new Map();
@@ -115,6 +115,12 @@ export function createDiskRouter({disk,zipStream,zipLength,collectLife,uploadDir
         return send(res,200,disk.list(url.searchParams.get("folder")??undefined));
       }
       if(method==="GET"&&p==="/api/disk/life")return send(res,200,await collectLife(disk));
+      if(method==="GET"&&p==="/api/disk/automation")
+        return send(res,200,automation?.status()??{running:false});
+      if(method==="POST"&&p==="/api/disk/automation/run"){
+        automation?.wake();
+        return send(res,202,{scheduled:!!automation,details:automation?.status()??null});
+      }
       if(method==="GET"&&p==="/api/disk/trash")return send(res,200,disk.trashSettings());
       if(method==="POST"&&p==="/api/disk/trash")return send(res,200,await disk.setTrashDays((await body(req)).days));
       if(method==="POST"&&p==="/api/disk/trash/empty")return send(res,200,await disk.emptyTrash());
@@ -214,7 +220,10 @@ export function createDiskRouter({disk,zipStream,zipLength,collectLife,uploadDir
         const b=await body(req,14*1024*1024);
         return send(res,201,await disk.upload(b.name,b.folder,b.base64));
       }
-      if(method==="GET"&&p==="/api/disk/search")return send(res,200,{ids:await disk.searchContent(url.searchParams.get("q")??"")});
+      if(method==="GET"&&p==="/api/disk/search")return send(res,200,{
+        ids:await disk.searchContent(url.searchParams.get("q")??""),
+        index:automation?.status().index??{indexed:0,pending:0}
+      });
       if(method==="POST"&&p==="/api/disk/bulk"){const b=await body(req);return send(res,200,await disk.bulk(b.ids,b.action,b.folder));}
       if(method==="POST"&&p==="/api/disk/restore")return send(res,200,await disk.restore(String((await body(req)).id??"")));
       if(method==="POST"&&p==="/api/disk/purge")return send(res,200,await disk.purge(String((await body(req)).id??"")));

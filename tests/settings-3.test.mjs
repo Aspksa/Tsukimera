@@ -133,7 +133,7 @@ test("settings restore is atomic across config, notes, preferences; saves a reco
     const report=await call(server.url,"/api/storage/diagnostics");
     assert.equal(report.status,200);
     assert.equal(report.data.integrity,"ok");
-    assert.equal(report.data.schema,"2");
+    assert.equal(report.data.schema,"3");
     assert.equal(report.data.counts.notes,1);
     assert.ok(report.data.backups.some(x=>x.startsWith("settings-restore-")));
     const policy=await call(server.url,"/api/capabilities");

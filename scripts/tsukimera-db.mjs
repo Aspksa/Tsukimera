@@ -8,6 +8,7 @@ import { statSync, readdirSync } from "node:fs";
 import { cp, copyFile, mkdir, rm, stat, writeFile } from "node:fs/promises";
 import { join, relative } from "node:path";
 import { randomUUID } from "node:crypto";
+import {installDiskIndex,readDiskState,saveDiskState,textIndexTargets,cachedText,indexText,indexedSearch,indexStatus,auditTarget,recordAudit,auditStatus} from "./disk-index.mjs";
 
 const exists = async path => { try { await stat(path); return true; } catch (error) {
   if (error.code === "ENOENT") return false;
@@ -122,15 +123,19 @@ export async function initializeDatabase(dataDir) {
   // browser-only preferences are imported later, never silently deleted.
   if (await exists(filename)) {
     const old = new DatabaseSync(filename, { readOnly: true });
-    let needsUpgrade = false;
+    let needsUpgrade = false, needsDiskUpgrade = false;
     try {
       needsUpgrade = !old.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='user_preferences'").get();
+      needsDiskUpgrade = !old.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='disk_meta'").get();
     } finally { old.close(); }
-    if (needsUpgrade) {
+    if (needsUpgrade || needsDiskUpgrade) {
       const folder = join(dataDir, "backups");
       await mkdir(folder, {recursive:true});
-      await copyFile(filename, join(folder, "before-preferences-" +
-        new Date().toISOString().replace(/[:.]/g, "-") + "-" + randomUUID().slice(0,8) + ".db"));
+      // Online SQLite backup avoids copies of partial journal/WAL data.
+      const destination=join(folder,(needsUpgrade?"before-preferences-":"before-disk-index-")+
+        new Date().toISOString().replace(/[:.]/g, "-")+"-"+randomUUID().slice(0,8)+".db");
+      const oldReadOnly=new DatabaseSync(filename,{readOnly:true});
+      try{await sqliteBackup(oldReadOnly,destination);}finally{oldReadOnly.close();}
     }
   }
   function withDb(fn) {
@@ -144,9 +149,10 @@ export async function initializeDatabase(dataDir) {
   }
   withDb(db => {
     for (const sql of SCHEMA) db.exec(sql);
+    installDiskIndex(db);
     db.prepare("INSERT OR IGNORE INTO metadata(key,value) VALUES('instance_id',?)").run(randomUUID());
     db.prepare("INSERT OR IGNORE INTO metadata(key,value) VALUES('schema_version','1')").run();
-    db.prepare("UPDATE metadata SET value='2' WHERE key='schema_version'").run();
+    db.prepare("UPDATE metadata SET value='3' WHERE key='schema_version'").run();
     if (backupPath) db.prepare("INSERT OR IGNORE INTO metadata(key,value) VALUES('pre_migration_backup',?)")
       .run(relative(dataDir,backupPath));
     // Collapse obsolete JUUNIBI preference names into the canonical Tsukimera
@@ -190,7 +196,7 @@ export async function initializeDatabase(dataDir) {
         .filter(x=>x.name.startsWith("before-")||x.name.startsWith("settings-restore-"))
         .map(x=>x.name).sort().reverse().slice(0,20);
       return {engine:"sqlite",integrity,schema,tables,file:"data/tsukimera.db",
-        sizeBytes:statSync(filename).size,backups,counts:{
+        sizeBytes:statSync(filename).size,backups,search:indexStatus(db),audit:auditStatus(db),counts:{
           files:db.prepare("SELECT count(*) AS n FROM disk_files WHERE deleted_at IS NULL").get().n,
           notes:db.prepare("SELECT count(*) AS n FROM notes").get().n,
           versions:db.prepare("SELECT count(*) AS n FROM disk_versions").get().n,
@@ -253,22 +259,21 @@ export async function initializeDatabase(dataDir) {
     writeSettings: config => transaction(db => {
       db.prepare("INSERT INTO app_settings(id,data) VALUES(1,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data").run(JSON.stringify(config));
     }),
-    readDisk: () => withDb(db => { const row = db.prepare("SELECT data FROM disk_state WHERE id=1").get(); return row ? parse(row.data) : null; }),
-    writeDisk: state => transaction(db => {
-      // One SQLite transaction commits the complete, original Disk state, file index
-      // and version history. Disk object bytes stay in data/disk/objects unchanged.
-      db.prepare("DELETE FROM disk_versions").run();
-      db.prepare("DELETE FROM disk_files").run();
-      db.prepare("DELETE FROM disk_folders").run();
-      const files = db.prepare("INSERT INTO disk_files(id,name,folder,size,sha256,deleted_at,uploaded_at) VALUES(?,?,?,?,?,?,?)");
-      for (const file of state.entries ?? []) files.run(file.id,file.name,file.folder,file.size,file.sha256,file.deletedAt ?? null,file.uploadedAt);
-      const versions = db.prepare("INSERT INTO disk_versions(file_id,revision,object_id,size,sha256,at) VALUES(?,?,?,?,?,?)");
-      for (const [id,history] of Object.entries(state.versions ?? {})) {
-        for (const item of history) versions.run(id,item.revision,item.objectId,item.size,item.sha256,item.at);
-      }
-      const folders = db.prepare("INSERT INTO disk_folders(name,style_json) VALUES(?,?)");
-      for (const name of state.folders ?? []) folders.run(name,JSON.stringify(state.folderStyles?.[name] ?? null));
-      db.prepare("INSERT INTO disk_state(id,data) VALUES(1,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data").run(JSON.stringify(state));
+    readDisk: () => withDb(readDiskState),
+    writeDisk: state => transaction(db => saveDiskState(db,state)),
+    pendingTextIndex: (limit=8) => withDb(db => textIndexTargets(db,limit)),
+    getTextCache: sha => withDb(db => cachedText(db,sha)),
+    putTextIndex: row => transaction(db => indexText(db,row)),
+    searchTextIndex: query => withDb(db => indexedSearch(db,query)),
+    indexStats: () => withDb(indexStatus),
+    auditNext: () => withDb(auditTarget),
+    auditRecord: (target,status) => transaction(db => recordAudit(db,target,status)),
+    auditStats: () => withDb(auditStatus),
+    optimize: () => withDb(db => {
+      // PRAGMA optimize is opportunistic and never vacuums or deletes originals.
+      db.exec("PRAGMA optimize");
+      return {integrity:db.prepare("PRAGMA quick_check").get().quick_check,
+        at:new Date().toISOString()};
     }),
     listNotes: () => withDb(allNotes),
     importNotes: notes => {
