@@ -65,7 +65,8 @@ export class LocalDisk {
     }finally{release();}
   }
   constructor(private readonly root:string,
-    private readonly stateDb?:{readDisk:()=>unknown|null;writeDisk:(state:object)=>void}) {}
+    private readonly stateDb?:{readDisk:()=>unknown|null;writeDisk:(state:object)=>void;searchTextIndex?:(query:string)=>string[]},
+    private readonly afterSave?:()=>void) {}
 
   importBackup(lines:AsyncIterable<string>) { return this.mutate(() => this.importBackupUnlocked(lines)); }
   createFolder(name:unknown) { return this.mutate(() => this.createFolderUnlocked(name)); }
@@ -173,7 +174,7 @@ export class LocalDisk {
         console.error("Не удалось обновить дополнительный disk/index.json:",error);
       }
     });
-    return this.writes;
+    return this.writes.then(()=>{this.afterSave?.();});
   }
 
   /** Portable newline-delimited archive: immutable object checksums are verified on both sides. */
@@ -432,6 +433,9 @@ export class LocalDisk {
   async searchContent(query:string):Promise<string[]>{
     const q=query.trim().toLocaleLowerCase();
     if(q.length<2||q.length>160)throw bad("Поиск: от 2 до 160 символов");
+    // Modern server uses the persisted FTS5 index. The original bounded
+    // scanner remains a fallback for offline/direct LocalDisk consumers.
+    if(this.stateDb?.searchTextIndex)return this.stateDb.searchTextIndex(q);
     const ids:string[]=[];
     for(const entry of this.entries){
       if(entry.deletedAt)continue;
