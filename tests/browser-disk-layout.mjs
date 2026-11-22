@@ -160,6 +160,8 @@ try{
   const emptyFilter=await evaluate("(()=>{const x=document.querySelector('.dkl-search');x.value='';x.dispatchEvent(new Event('input',{bubbles:true}));document.querySelectorAll('.dkl-filter')[2].click();return {cards:[...document.querySelectorAll('.dkl-tile')].every(e=>e.classList.contains('is-empty')),active:document.querySelectorAll('.dkl-filter')[2].getAttribute('aria-pressed'),total:document.querySelectorAll('.dkl-tile').length}})()");
   assert.ok(emptyFilter.cards&&emptyFilter.active==='true',
     "Missing-data filter must only show incomplete metrics: "+JSON.stringify(emptyFilter));
+  // The mobile geometry test needs a real grid, not the intentional empty state.
+  await evaluate("document.querySelectorAll('.dkl-filter')[0].click()");
   await device(390,844);
   const narrow=await evaluate("(()=>({width:innerWidth,scroll:document.documentElement.scrollWidth,grid:getComputedStyle(document.querySelector('.dkl-grid')).gridTemplateColumns}))()");
   assert.ok(narrow.scroll<=narrow.width+3,"Expanded mobile analytics scrolls horizontally");
