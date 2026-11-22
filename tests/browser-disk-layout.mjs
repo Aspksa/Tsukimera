@@ -7,6 +7,13 @@ import assert from "node:assert/strict";
 // Inspect the real browser layout using CDP, without Playwright or npm packages.
 const origin=process.argv[2];
 if(!/^http:\/\/127\.0\.0\.1:\d+$/.test(origin||""))throw Error("Supply loopback server origin");
+// The headless browser sees a real local document: analytics must be tested
+// against server calculations, not mocked cards or made-up numbers.
+const fixture=Buffer.from(("Документ Tsukimera содержит слова и предложения. Повторяем текст для локального анализа. ").repeat(40),"utf8");
+const uploaded=await fetch(origin+"/api/disk/files/binary?name="+encodeURIComponent("Тест-жизни-Диска.txt")+"&folder=",{
+  method:"POST",headers:{"X-Tsukimera-Request":"1","Content-Type":"application/octet-stream"},body:fixture
+});
+assert.equal(uploaded.status,201,"Could not seed Disk Life browser fixture: "+await uploaded.text());
 const dir=await mkdtemp(join(tmpdir(),"tsukimera-layout-chrome-"));
 const chrome=spawn("google-chrome",[
   "--headless=new","--no-sandbox","--disable-gpu","--disable-dev-shm-usage",
@@ -116,6 +123,41 @@ try{
   assert.ok(mobile.files.width>300,"Mobile file grid too narrow: "+JSON.stringify(mobile));
   assert.ok(mobile.scrollWidth<=mobile.width+3,"Unexpected horizontal scroll: "+JSON.stringify(mobile));
   assert.equal(mobile.sidePosition,"fixed","Folders should become a mobile drawer");
+
+  // Life 4.0: verify six real highlight cards, 15 original groups in five areas,
+  // the expanded full-width layout, a method dialog and a real-file source link.
+  await device(1920,1080);
+  let life;
+  for(let i=0;i<75;i++){
+    life=await evaluate("(()=>({h:document.querySelectorAll('.dkl-hl-card').length,areas:document.querySelectorAll('.dkl-area').length,groups:document.querySelectorAll('.dkl-tab').length}))()");
+    if(life?.h===6&&life?.areas===5)break;
+    await pause(300);
+  }
+  assert.equal(life?.h,6,"Six real Disk Life highlights failed to render");
+  assert.equal(life?.areas,5,"Five analytics directions missing");
+  const groupsCount=await evaluate("(()=>{let sum=0;const areas=[...document.querySelectorAll('.dkl-area')];for(const a of areas){a.click();sum+=document.querySelectorAll('.dkl-tab').length;}return sum;})()");
+  assert.equal(groupsCount,15,"All original fifteen groups must be reachable");
+  await evaluate("document.querySelector('.dkl-area').click()");
+  await evaluate("document.querySelector('.dkl-expand').click()");
+  await pause(350);
+  const expanded=await evaluate("(()=>({flag:document.querySelector('.disk-page').classList.contains('dk-life-expanded'),count:document.querySelectorAll('.dkl-tile').length,files:getComputedStyle(document.querySelector('.dk-main')).display,life:document.querySelector('.dkl').getBoundingClientRect().width,areas:document.querySelectorAll('.dkl-area').length}))()");
+  assert.equal(expanded.flag,true,"Full-width analytics did not activate");
+  assert.equal(expanded.count,10,"Expanded group must show all its ten metrics");
+  assert.equal(expanded.files,"none","File workspace must yield its width to analytics");
+  assert.ok(expanded.life>1200,"Analytics remained constrained inside the right sidebar");
+  const details=await evaluate("(()=>{document.querySelector('.dkl-tile[data-id=\"biggest\"]').click();return {dialog:!!document.querySelector('.dkl-detail-sheet'),method:document.querySelector('.dkl-detail-sheet')?.textContent.includes('Как рассчитывается'),source:!!document.querySelector('.dkl-detail-sheet .btn.primary')};})()");
+  assert.ok(details.dialog&&details.method&&details.source,
+    "A verified metric must show methodology and its real source link: "+JSON.stringify(details));
+  await evaluate("document.querySelector('.dkl-detail-sheet .btn.primary').click()");
+  await pause(250);
+  const linked=await evaluate("(()=>({panel:!!document.querySelector('.dk-info:not([hidden])'),expanded:document.querySelector('.disk-page').classList.contains('dk-life-expanded')}))()");
+  assert.ok(linked.panel&&!linked.expanded,"Verified source document did not open in the Disk inspector");
+  await evaluate("document.querySelector('.dkl-expand').click()");
+  await device(390,844);
+  const narrow=await evaluate("(()=>({width:innerWidth,scroll:document.documentElement.scrollWidth,grid:getComputedStyle(document.querySelector('.dkl-grid')).gridTemplateColumns}))()");
+  assert.ok(narrow.scroll<=narrow.width+3,"Expanded mobile analytics scrolls horizontally");
+  console.log("Disk Life 4.0 verified: 6 highlights, 5 directions, 15 groups, 10 metrics per group, full-width layout, source link.");
+
   console.log("Disk layout verified at 1920, 1366 and 390px; pointer drag and tile zoom persist.");
 }finally{
   socket?.close();
