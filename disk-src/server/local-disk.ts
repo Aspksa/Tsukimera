@@ -64,7 +64,8 @@ export class LocalDisk {
       try{return await operation();}catch(error){Object.assign(this,before);throw error;}
     }finally{release();}
   }
-  constructor(private readonly root:string) {}
+  constructor(private readonly root:string,
+    private readonly stateDb?:{readDisk:()=>unknown|null;writeDisk:(state:object)=>void}) {}
 
   importBackup(lines:AsyncIterable<string>) { return this.mutate(() => this.importBackupUnlocked(lines)); }
   createFolder(name:unknown) { return this.mutate(() => this.createFolderUnlocked(name)); }
@@ -122,7 +123,10 @@ export class LocalDisk {
     try{for(const f of await readdir(path.join(this.root,"thumbs"))){const m=/^([a-f0-9]{64})\.(webp|jpg|png)$/.exec(f);if(m)this.thumbs.set(m[1]!,m[2]!);}}catch{/* no previews yet */}
     const before=this.state();
     try {
-      const raw=JSON.parse(await readFile(this.index,"utf8")) as {versions?:Record<string,DiskRevision[]>;entries?:DiskEntry[];folders?:string[];folderStyles?:Record<string,{color:string;pinned:boolean;cover:string}>;folderActions?:{at:string;action:string;folder:string;destination?:string;files?:number}[];fileActions?:{id:string;before:{name:string;folder:string};after:{name:string;folder:string};at:string}[];deletedFolders?:{root:string;paths:string[];at:string;styles:Record<string,{color:string;pinned:boolean;cover:string}>}[];trashDays?:number};
+      // SQLite is authoritative after the first successful import. The old
+      // index.json is read only when the database has not been initialized.
+      const saved=this.stateDb?.readDisk()??null;
+      const raw=(saved??JSON.parse(await readFile(this.index,"utf8"))) as {versions?:Record<string,DiskRevision[]>;entries?:DiskEntry[];folders?:string[];folderStyles?:Record<string,{color:string;pinned:boolean;cover:string}>;folderActions?:{at:string;action:string;folder:string;destination?:string;files?:number}[];fileActions?:{id:string;before:{name:string;folder:string};after:{name:string;folder:string};at:string}[];deletedFolders?:{root:string;paths:string[];at:string;styles:Record<string,{color:string;pinned:boolean;cover:string}>}[];trashDays?:number};
       if(raw.versions&&typeof raw.versions==="object"&&!Array.isArray(raw.versions)){
         const revisions:Record<string,DiskRevision[]>={};
         for(const [id,history] of Object.entries(raw.versions)){
@@ -147,15 +151,27 @@ export class LocalDisk {
       if(Array.isArray(raw.deletedFolders))this.deletedFolders=raw.deletedFolders.filter(d=>{try{return !!d&&typeof d.root==="string"&&validFolder(d.root)===d.root&&Array.isArray(d.paths)&&d.paths.every((p:unknown)=>typeof p==="string"&&validFolder(p)===p)&&typeof d.at==="string"&&Number.isFinite(Date.parse(d.at))&&!!d.styles&&typeof d.styles==="object";}catch{return false;}});
       if(Number.isInteger(raw.trashDays)&&raw.trashDays!>=0&&raw.trashDays!<=365)this.trashDays=raw.trashDays!;
       if(Array.isArray(raw.folders)) this.folders=raw.folders.filter(x=>{try{return validFolder(x)===x&&!!x;}catch{return false;}});
+      if(!saved)this.stateDb?.writeDisk(this.state());
     }catch(e){Object.assign(this,before);if((e as NodeJS.ErrnoException).code!=="ENOENT")throw e;}
   }
   private save(){
-    const content=JSON.stringify({versions:this.versions,entries:this.entries,folders:this.folders,folderStyles:this.folderStyles,folderActions:this.folderActions,fileActions:this.fileActions,deletedFolders:this.deletedFolders,trashDays:this.trashDays});
+    const snapshot=this.state();
+    const content=JSON.stringify(snapshot);
     this.writes=this.writes.catch(()=>{}).then(async()=>{
-      await mkdir(this.root,{recursive:true});
-      const tmp=path.join(this.root,randomUUID()+".tmp");
-      await writeFile(tmp,content,{mode:0o600});
-      await rename(tmp,this.index);
+      // A failed SQLite transaction leaves the earlier authoritative version
+      // intact. Only after it commits do we refresh the legacy JSON export.
+      this.stateDb?.writeDisk(snapshot);
+      try{
+        await mkdir(this.root,{recursive:true});
+        const tmp=path.join(this.root,randomUUID()+".tmp");
+        await writeFile(tmp,content,{mode:0o600});
+        await rename(tmp,this.index);
+      }catch(error){
+        if(!this.stateDb)throw error;
+        // The database committed; do not roll back in-memory state on an
+        // optional compatibility-copy failure.
+        console.error("Не удалось обновить дополнительный disk/index.json:",error);
+      }
     });
     return this.writes;
   }
