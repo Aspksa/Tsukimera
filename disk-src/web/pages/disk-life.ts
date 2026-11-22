@@ -1,3 +1,4 @@
+import {writePreference} from "../preferences";
 /**
  * Tsukimera · Жизнь Диска 4.0. All 150 original JUUNIBI metrics and their
  * 15 source groups stay intact; presentation is now a compact right-side
@@ -19,7 +20,7 @@ const savedGroup=()=>{
   try{return localStorage.getItem(GROUP_KEY)??"";}catch{return "";}
 };
 const keepGroup=(id:string)=>{
-  try{localStorage.setItem(GROUP_KEY,id);}catch{}
+  writePreference(GROUP_KEY,id);
 };
 
 function heat(series:number[]):HTMLElement{
