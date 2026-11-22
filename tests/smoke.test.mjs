@@ -109,6 +109,44 @@ test("settings API saves only allowlisted local preferences, safely reloads, and
   }
 });
 
+test("concurrent settings writes preserve unrelated fields and survive restart",async()=>{
+  const dir=await mkdtemp(join(tmpdir(),"tsukimera-parallel-"));
+  const app=createAppServer({root,dataDir:dir});await app.load();
+  await new Promise(done=>app.server.listen(0,"127.0.0.1",done));
+  const url="http://127.0.0.1:"+app.server.address().port;
+  try {
+    const updates=[
+      {model:{primary:"cloud/model-a"}},
+      {instructions:{style:"Короткие ответы"}},
+      {memory:{summaries:true}},
+      {tools:{web:true}},
+      {quickCommands:[{name:"важно",text:"Сохрани решение"}]}
+    ];
+    const statuses=await Promise.all(updates.map(async patch=>
+      (await fetch(url+"/api/settings",{method:"PUT",headers:headers(),body:JSON.stringify(patch)})).status));
+    assert.deepEqual(statuses,[200,200,200,200,200]);
+    const expected=app.getSettings();
+    assert.equal(expected.model.primary,"cloud/model-a");
+    assert.equal(expected.instructions.style,"Короткие ответы");
+    assert.equal(expected.memory.summaries,true);
+    assert.equal(expected.tools.web,true);
+    assert.equal(expected.quickCommands[0].name,"важно");
+    assert.deepEqual(JSON.parse(await readFile(join(dir,"settings.json"),"utf8")),expected);
+    const rejected=await fetch(url+"/api/settings",{method:"PUT",headers:headers(),body:JSON.stringify({tools:{writeFiles:"invalid"}})});
+    assert.equal(rejected.status,400);
+    const after=await fetch(url+"/api/settings",{method:"PUT",headers:headers(),body:JSON.stringify({model:{reasoning:true}})});
+    assert.equal(after.status,200,"A rejected write must not poison the queue");
+    const reopened=createAppServer({root,dataDir:dir});
+    await reopened.load();
+    assert.equal(reopened.getSettings().model.reasoning,true);
+    assert.equal(reopened.getSettings().instructions.style,"Короткие ответы");
+    assert.equal(reopened.getSettings().memory.summaries,true);
+  }finally{
+    await new Promise(done=>app.server.close(done));
+    await rm(dir,{recursive:true,force:true});
+  }
+});
+
 test("settings validation and code syntax support stock Node without packages",async()=>{
   assert.deepEqual(patchSettings(DEFAULTS,{}),DEFAULTS);
   assert.throws(()=>patchSettings(DEFAULTS,{tools:{writeFiles:"true"}}),/Неверный переключатель/);
