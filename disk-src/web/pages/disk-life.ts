@@ -1,3 +1,4 @@
+import {writePreference} from "../preferences";
 /**
  * Tsukimera · Жизнь Диска 4.0. All 150 original JUUNIBI metrics and their
  * 15 source groups stay intact; presentation is now a compact right-side
@@ -8,6 +9,7 @@ import {el,icon,iconButton} from "../dom";
 import {openSheet} from "./sheet";
 import {lifeGlyph} from "./disk-life-icons";
 import {barChart,miniChart,ringChart} from "./life-charts";
+import {interactiveLifeChart} from "./life-interactive";
 import {agoText} from "./project-life";
 import {LIFE_AREAS,areaForGroup,methodology,tileClass,searchLifeMetrics,type LifeAvailability} from "./disk-life-layout";
 
@@ -19,7 +21,7 @@ const savedGroup=()=>{
   try{return localStorage.getItem(GROUP_KEY)??"";}catch{return "";}
 };
 const keepGroup=(id:string)=>{
-  try{localStorage.setItem(GROUP_KEY,id);}catch{}
+  writePreference(GROUP_KEY,id);
 };
 
 function heat(series:number[]):HTMLElement{
@@ -121,6 +123,8 @@ export function diskLifePanel(isEmpty:()=>boolean=()=>false):{
         m.detail||m.hint||"Показатель вычислен локально по доступным данным."),
       label("Дата расчёта",data?new Date(data.generatedAt).toLocaleString("ru-RU"):"Неизвестно")
     );
+    const explorer=interactiveLifeChart(m);
+    if(explorer)info.append(explorer);
     if(m.list?.length){
       info.append(el("strong",{textContent:"Состав показателя"}),
         el("ul",{cls:"dkl-detail-list"},...m.list.slice(0,100).map(line=>el("li",{textContent:line}))));

@@ -1,3 +1,5 @@
+import {openLiveDiskMap} from "./disk-map";
+import {writePreference} from "../preferences";
 import {el,iconButton,copyText} from "../dom";
 import {btn} from "./kit";
 import {openSheet} from "./sheet";
@@ -14,7 +16,7 @@ export function readColumns():TableColumns{
   try{value=JSON.parse(localStorage.getItem(COLUMN_KEY)||"{}");}catch{}
   return {size:value?.size!==false,date:value?.date!==false,folder:value?.folder===true};
 }
-export function writeColumns(columns:TableColumns){localStorage.setItem(COLUMN_KEY,JSON.stringify(columns));}
+export function writeColumns(columns:TableColumns){writePreference(COLUMN_KEY,JSON.stringify(columns));}
 export function readSmartRules():SmartRule[]{
   try{
     const rows=JSON.parse(localStorage.getItem(SMART_KEY)||"[]");
@@ -23,7 +25,7 @@ export function readSmartRules():SmartRule[]{
       r.name.length<=40&&r.pattern.length<=80&&["name","folder","extension","tag"].includes(r.field)).slice(0,30);
   }catch{return [];}
 }
-function saveSmartRules(rows:SmartRule[]){localStorage.setItem(SMART_KEY,JSON.stringify(rows));}
+function saveSmartRules(rows:SmartRule[]){writePreference(SMART_KEY,JSON.stringify(rows));}
 export function matchesSmartRule(file:DiskFile,rule:SmartRule):boolean{
   const hay=rule.field==="name"?file.name:rule.field==="folder"?file.folder:
     rule.field==="extension"?(file.name.split(".").pop()||""):((file.tags||[]).join(" "));
@@ -57,7 +59,7 @@ export function animateChange(action:()=>void){
 }
 export function openColumnSettings(current:TableColumns,onSave:(next:TableColumns)=>void){
   const wrapper=el("div",{cls:"dkx-stack"});
-  const heading=el("p",{textContent:"Выберите дополнительные колонки режима «Таблица». Настройки останутся в этом браузере."});
+  const heading=el("p",{textContent:"Выберите дополнительные колонки режима «Таблица». Настройки сохраняются в локальной базе SQLite."});
   wrapper.append(heading);
   const inputs=new Map<keyof TableColumns,HTMLInputElement>();
   for(const [key,label] of [["size","Размер"],["date","Дата загрузки"],["folder","Папка"]] as const){
@@ -106,29 +108,10 @@ export function openSmartManager({onApply,onChanged}:{onApply:(rule:SmartRule)=>
   const sheet=openSheet({title:"Умные папки",icon:"folder",content:panel});
   render();
 }
-export function openDiskMap(files:DiskFile[],onOpen:(folder:string)=>void){
-  const groups=new Map<string,number>();
-  for(const file of files) {
-    const root=file.folder.split("/")[0]||"Корень";
-    groups.set(root,(groups.get(root)||0)+file.size);
-  }
-  const sorted=[...groups].sort((a,b)=>b[1]-a[1]);
-  const total=files.reduce((n,f)=>n+f.size,0);
-  const panel=el("div",{cls:"dkx-stack"});
-  panel.append(el("p",{cls:"muted",textContent:"Распределение места внутри Tsukimera. Это размеры сохранённых файлов, а не свободное место всего SSD."}),
-    el("strong",{textContent:"Файлов: "+files.length+" · "+human(total)}));
-  if(!sorted.length)panel.append(el("p",{textContent:"Диск пока пуст."}));
-  for(const [folder,bytes] of sorted.slice(0,30)){
-    const percent=total?Math.round(bytes/total*100):0;
-    const meter=el("span",{cls:"dkx-map-fill"});
-    meter.style.width=Math.max(.5,percent)+"%";
-    const b=btn(folder+" · "+human(bytes)+" · "+percent+"%",()=>{
-      sheet.close();onOpen(folder==="Корень"?"":folder);
-    },{});
-    b.classList.add("dkx-map-row");
-    b.append(el("span",{cls:"dkx-map-track"},meter));panel.append(b);
-  }
-  const sheet=openSheet({title:"Карта пространства",icon:"folder",content:panel});
+/** Keep the existing entry point while the map becomes an interactive Canvas view. */
+export function openDiskMap(files:DiskFile[],folders:string[],
+  onOpen:(folder:string)=>void,onFile?:(id:string)=>void){
+  openLiveDiskMap(files,folders,onOpen,onFile);
 }
 export function openBatchRename(files:DiskFile[],all:DiskFile[],onApply:(plan:RenamePlan[])=>Promise<void>){
   const panel=el("div",{cls:"dkx-stack"});

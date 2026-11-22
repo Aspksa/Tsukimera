@@ -15,6 +15,27 @@ const exists = async path => { try { await stat(path); return true; } catch (err
 const fail = (message, status = 400) => Object.assign(new Error(message), { status });
 const record = value => value !== null && typeof value === "object" && !Array.isArray(value);
 const parse = text => JSON.parse(text);
+export const PREF_KEYS = new Set([
+  "tsukimera:nav:v1", "tsukimera:ui:v1", "tsukimera:settings:v1",
+  "tsukimera.disk.smart.v1", "tsukimera.disk.columns.v1",
+  "tsukimera.disk.layout.left.v1", "tsukimera.disk.layout.right.v1",
+  "tsukimera.disk.tiles.v1", "tsukimera.disk.view", "tsukimera.disk.sort",
+  "tsukimera.disk.open", "tsukimera.disk.tree", "tsukimera.disk.life.group",
+  "juunibi.disk.view", "juunibi.disk.sort", "juunibi.disk.open",
+  "juunibi.disk.tree", "juunibi.disk.mdRaw", "juunibi.disk.life.group",
+]);
+
+const cleanPrefs = (input, allowDelete = false) => {
+  if (!record(input) || Object.keys(input).length > PREF_KEYS.size)
+    throw fail("Некорректные параметры интерфейса");
+  for (const [key, value] of Object.entries(input)) {
+    if (!PREF_KEYS.has(key)) throw fail("Неизвестная настройка интерфейса: " + key);
+    if (allowDelete && value === null) continue;
+    if (typeof value !== "string" || value.length > 16000 || value.includes("\0"))
+      throw fail("Слишком длинная или некорректная настройка");
+  }
+  return input;
+};
 const SCHEMA = [
   "CREATE TABLE IF NOT EXISTS metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
   "CREATE TABLE IF NOT EXISTS app_settings (id INTEGER PRIMARY KEY CHECK (id=1), data TEXT NOT NULL)",
@@ -24,6 +45,7 @@ const SCHEMA = [
   "CREATE INDEX IF NOT EXISTS disk_files_name_idx ON disk_files(name)",
   "CREATE TABLE IF NOT EXISTS disk_versions (file_id TEXT NOT NULL, revision INTEGER NOT NULL, object_id TEXT NOT NULL, size INTEGER NOT NULL, sha256 TEXT NOT NULL, at TEXT NOT NULL, PRIMARY KEY(file_id, revision), FOREIGN KEY(file_id) REFERENCES disk_files(id) ON DELETE CASCADE)",
   "CREATE TABLE IF NOT EXISTS disk_folders (name TEXT PRIMARY KEY, style_json TEXT)",
+  "CREATE TABLE IF NOT EXISTS user_preferences (key TEXT PRIMARY KEY, value TEXT NOT NULL)", 
   "CREATE TABLE IF NOT EXISTS notes (id TEXT PRIMARY KEY, data TEXT NOT NULL, created_at TEXT NOT NULL)",
   "CREATE TABLE IF NOT EXISTS note_file_links (note_id TEXT NOT NULL, file_id TEXT NOT NULL, name TEXT NOT NULL, position INTEGER NOT NULL, PRIMARY KEY (note_id,file_id), FOREIGN KEY(note_id) REFERENCES notes(id) ON DELETE CASCADE)",
   "CREATE INDEX IF NOT EXISTS note_file_links_file_idx ON note_file_links(file_id)",
@@ -87,6 +109,21 @@ export async function initializeDatabase(dataDir) {
       }
     }
   }
+  // A copy of the existing SQLite file is made before altering its schema;
+  // browser-only preferences are imported later, never silently deleted.
+  if (await exists(filename)) {
+    const old = new DatabaseSync(filename, { readOnly: true });
+    let needsUpgrade = false;
+    try {
+      needsUpgrade = !old.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='user_preferences'").get();
+    } finally { old.close(); }
+    if (needsUpgrade) {
+      const folder = join(dataDir, "backups");
+      await mkdir(folder, {recursive:true});
+      await copyFile(filename, join(folder, "before-preferences-" +
+        new Date().toISOString().replace(/[:.]/g, "-") + "-" + randomUUID().slice(0,8) + ".db"));
+    }
+  }
   function withDb(fn) {
     const db = new DatabaseSync(filename, { timeout: 5000 });
     try {
@@ -100,6 +137,7 @@ export async function initializeDatabase(dataDir) {
     for (const sql of SCHEMA) db.exec(sql);
     db.prepare("INSERT OR IGNORE INTO metadata(key,value) VALUES('instance_id',?)").run(randomUUID());
     db.prepare("INSERT OR IGNORE INTO metadata(key,value) VALUES('schema_version','1')").run();
+    db.prepare("UPDATE metadata SET value='2' WHERE key='schema_version'").run();
     if (backupPath) db.prepare("INSERT OR IGNORE INTO metadata(key,value) VALUES('pre_migration_backup',?)")
       .run(relative(dataDir,backupPath));
     const integrity = db.prepare("PRAGMA quick_check").get();
@@ -126,6 +164,36 @@ export async function initializeDatabase(dataDir) {
   const previousBackup = withDb(db => db.prepare("SELECT value FROM metadata WHERE key='pre_migration_backup'").get()?.value ?? null);
   return {
     path: filename, backupPath: previousBackup ? join(dataDir,previousBackup) : null, instanceId,
+    readPreferences: () => withDb(db => ({
+      instanceId,
+      initialized: !!db.prepare("SELECT 1 FROM metadata WHERE key='preferences_initialized'").get(),
+      preferences: Object.fromEntries(db.prepare("SELECT key,value FROM user_preferences").all().map(row=>[row.key,row.value])),
+    })),
+    initializePreferences: input => {
+      const prefs=cleanPrefs(input);
+      return transaction(db => {
+        if (!db.prepare("SELECT 1 FROM metadata WHERE key='preferences_initialized'").get()) {
+          const insert=db.prepare("INSERT OR IGNORE INTO user_preferences(key,value) VALUES(?,?)");
+          for (const [key,value] of Object.entries(prefs)) insert.run(key,value);
+          db.prepare("INSERT INTO metadata(key,value) VALUES('preferences_initialized','1')").run();
+        }
+        return {instanceId, initialized:true,
+          preferences:Object.fromEntries(db.prepare("SELECT key,value FROM user_preferences").all().map(row=>[row.key,row.value]))};
+      });
+    },
+    writePreferences: input => {
+      const prefs=cleanPrefs(input,true);
+      return transaction(db => {
+        const update=db.prepare("INSERT INTO user_preferences(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value");
+        const del=db.prepare("DELETE FROM user_preferences WHERE key=?");
+        for (const [key,value] of Object.entries(prefs)) {
+          if (value===null) del.run(key);
+          else update.run(key,value);
+        }
+        db.prepare("INSERT OR IGNORE INTO metadata(key,value) VALUES('preferences_initialized','1')").run();
+        return {saved:Object.keys(prefs).length};
+      });
+    },
     readSettings: () => withDb(db => { const row = db.prepare("SELECT data FROM app_settings WHERE id=1").get(); return row ? parse(row.data) : null; }),
     writeSettings: config => transaction(db => {
       db.prepare("INSERT INTO app_settings(id,data) VALUES(1,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data").run(JSON.stringify(config));

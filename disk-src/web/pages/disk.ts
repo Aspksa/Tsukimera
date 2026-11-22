@@ -28,6 +28,7 @@ import {
   type SmartRule,type TableColumns,type RenamePlan
 } from "./disk-extras";
 import {createDiskSplitters,tileSize,TILE_KEY} from "./disk-layout";
+import {writePreference} from "../preferences";
 import "./disk.css";
 
 export interface DiskDeps {
@@ -62,7 +63,7 @@ const ib = (ic: DiskIconName, label: string, run: () => void) => {
 };
 const store = {
   get: (k: string) => { try { return localStorage.getItem(k); } catch { return null; } },
-  set: (k: string, v: string) => { try { localStorage.setItem(k, v); } catch { /* private mode */ } },
+  set: (k: string, v: string) => { writePreference(k,v); },
 };
 const fmtDate = (iso: string) => new Date(iso).toLocaleDateString("ru-RU", { day: "numeric", month: "short", year: "numeric" });
 const fmtTime = (iso: string) => new Date(iso).toLocaleString("ru-RU", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
@@ -212,7 +213,10 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
     { icon: "zipDown", label: current && view === "all" && virtual === "none" ? "Скачать папку ZIP-архивом" : "Скачать весь Диск ZIP-архивом", run: () => void downloadZip({ folder: view === "all" && virtual === "none" ? current : "" }) },
     { icon: "chronicle", label: "Жизнь документов", run: () => life.reveal() },
     { icon: "search", label: "Палитра команд · Ctrl+K", run: () => showCommands() },
-    { icon: "folder", label: "Карта занятого места", run: () => openDiskMap(all,folder=>go({folder})) },
+    { icon: "folder", label: "Живая карта файлов и связей", run: () => openDiskMap(all,folders,folder=>go({folder}),id=>{
+      const file=byId(id);if(!file)return;
+      go({folder:file.folder});reveal(id);openInfo(id);
+    }) },
     { icon: "folderPlus", label: "Умные папки", run: () => editSmartFolders() },
     { icon: "table", label: "Колонки таблицы", run: () => customizeColumns() },
     { icon: "audit", label: "Проверка файлов", run: () => void openAudit() },
@@ -712,7 +716,10 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
       {label:"Загрузить файлы",run:chooseFiles},
       {label:"Загрузить папку",run:chooseFolder},
       {label:"Создать папку",run:()=>void createFolder(uploadFolder())},
-      {label:"Карта занятого пространства",run:()=>openDiskMap(all,folder=>go({folder}))},
+      {label:"Живая карта файлов и связей",run:()=>openDiskMap(all,folders,folder=>go({folder}),id=>{
+      const file=byId(id);if(!file)return;
+      go({folder:file.folder});reveal(id);openInfo(id);
+    })},
       {label:"Умные папки",run:editSmartFolders},
       {label:"Колонки таблицы",run:customizeColumns},
       {label:"Жизнь документов",run:()=>life.reveal()},

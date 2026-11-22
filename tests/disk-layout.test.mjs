@@ -50,7 +50,7 @@ test("Pane widths and tile zoom are clamped, accessible and saved independently"
   const src=await readFile(join(root,"disk-src/web/pages/disk-layout.ts"),"utf8");
   for(const key of ["pointerdown","pointermove","pointerup","pointercancel",
     "lostpointercapture","setPointerCapture","aria-valuenow","ArrowLeft","ArrowRight",
-    "Home","End","dblclick","localStorage.setItem","touch-action"])
+    "Home","End","dblclick","writePreference","touch-action"])
     assert.ok(src.includes(key)||key==="touch-action","Missing splitter behavior "+key);
   const disk=await readFile(join(root,"disk-src/web/pages/disk.ts"),"utf8");
   assert.match(disk,/createDiskSplitters\(layout\)/);

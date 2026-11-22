@@ -167,6 +167,43 @@ try{
   assert.ok(narrow.scroll<=narrow.width+3,"Expanded mobile analytics scrolls horizontally");
   console.log("Disk Life 4.0 verified: 6 highlights, 5 directions, 15 groups, 10 metrics per group, full-width layout, source link.");
 
+
+  // The analytics explorer must render real samples in an actual Chrome window.
+  await device(1920,1080);
+  const source=await(await fetch(origin+"/api/disk/life")).json();
+  const metric=source.metrics.find(m=>!m.empty&&Array.isArray(m.series)&&m.series.length>=3&&
+    ["line","spark","hours","calendar","split"].includes(m.kind));
+  assert.ok(metric,"The seeded Disk must expose a real chart series for exploration");
+  const group=source.groups.find(g=>g.id===metric.group);
+  const navigated=await evaluate("(()=>{for(const area of [...document.querySelectorAll('.dkl-area')]){area.click();const tab=[...document.querySelectorAll('.dkl-tab')].find(x=>x.textContent.includes("+JSON.stringify(group.title)+"));if(tab){tab.click();return true;}}return false;})()");
+  assert.ok(navigated,"Could not navigate to the verified chart group");
+  const interactive=await evaluate("(()=>{const tile=document.querySelector('.dkl-tile[data-id="+JSON.stringify(metric.id)+"]');if(!tile)return {found:false};tile.click();const plot=document.querySelector('.dkl-explorer-plot svg');const counter=document.querySelector('.dkl-explorer-range');return {found:true,plot:!!plot,points:plot?.querySelectorAll('rect,circle,path').length||0,range:counter?.textContent,buttons:document.querySelectorAll('.dkl-explorer-actions button').length};})()");
+  assert.ok(interactive.found&&interactive.plot&&interactive.points&&interactive.buttons===5,
+    "The metric detail must contain a working real-data explorer: "+JSON.stringify(interactive));
+  const zoomed=await evaluate("(()=>{const before=document.querySelector('.dkl-explorer-range').textContent;document.querySelector('.dkl-explorer-actions button[aria-label=\"Приблизить график\"]').click();const after=document.querySelector('.dkl-explorer-range').textContent;return {before,after,changed:before!==after};})()");
+  assert.ok(zoomed.changed,"The chart zoom control did not change its real-data window");
+  await evaluate("document.querySelector('.mod-sheet button[aria-label=\"Закрыть\"]').click()");
+  await evaluate("document.querySelector('.dkl-expand').click()");
+  const opened=await evaluate("(()=>{document.querySelector('.dk-more-btn').click();const row=[...document.querySelectorAll('.dk-menu-item')].find(x=>x.textContent.includes('Живая карта'));if(!row)return false;row.click();return true;})()");
+  assert.ok(opened,"The existing Disk menu did not expose the new live map");
+  await pause(350);
+  const canvas=await evaluate("(()=>{const c=document.querySelector('.dkx-map-canvas');const f=document.querySelector('.dkx-map-frame');return {ready:!!c,width:c?.width,height:c?.height,context:!!c?.getContext('2d'),controls:document.querySelectorAll('.dkx-map-controls button').length,legend:document.querySelectorAll('.dkx-map-legend span').length,frame:f?.getBoundingClientRect().width};})()");
+  assert.ok(canvas.ready&&canvas.context&&canvas.width>500&&canvas.height>250&&canvas.controls===3&&canvas.legend===5,
+    "Live Canvas graph did not render with real files: "+JSON.stringify(canvas));
+  await evaluate("document.querySelector('.dkx-map-controls button[aria-label=\"Увеличить карту\"]').click()");
+  const mapSearch=await evaluate("(()=>{const x=document.querySelector('.dkx-map-search');x.value='Тест';x.dispatchEvent(new Event('input',{bubbles:true}));return document.querySelector('.dkx-map-selected').textContent;})()");
+  assert.match(mapSearch,/Найдено на карте/);
+  await evaluate("document.querySelector('.mod-sheet button[aria-label=\"Закрыть\"]').click()");
+  let savedSettings;
+  for(let i=0;i<25;i++){
+    savedSettings=(await(await fetch(origin+"/api/preferences")).json()).preferences;
+    if(savedSettings["tsukimera.disk.tiles.v1"]==="300")break;
+    await pause(120);
+  }
+  assert.equal(savedSettings["tsukimera.disk.tiles.v1"],"300",
+    "The browser Disk tile size was not persisted to SQLite");
+  console.log("SQLite Disk preferences, live Canvas map and interactive real-data charts verified in Chrome.");
+
   console.log("Disk layout verified at 1920, 1366 and 390px; pointer drag and tile zoom persist.");
 
   // Real-browser migration from the older localStorage-only notes. This runs

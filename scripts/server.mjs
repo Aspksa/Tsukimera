@@ -195,6 +195,23 @@ export function createAppServer({ root, dataDir = join(root, "data") }) {
           instanceId: database.instanceId, counts: database.counts(),
           backupCreated: database.backupPath ? "data/" + database.backupPath.split(/[\\/]/).slice(-2).join("/") : null });
       }
+      if (pathname === "/api/preferences" && req.method === "GET") {
+        return json(res,200,database.readPreferences());
+      }
+      if (pathname === "/api/preferences/initialize" && req.method === "POST") {
+        if (req.headers["x-tsukimera-request"] !== "1")return json(res,403,{error:"Недопустимый запрос"});
+        const input=await body(req,262144);
+        if(!isRecord(input) || !isRecord(input.preferences) ||
+          Object.keys(input).some(key=>key!=="preferences"))bad("Некорректный импорт настроек");
+        return json(res,200,database.initializePreferences(input.preferences));
+      }
+      if (pathname === "/api/preferences" && req.method === "PUT") {
+        if (req.headers["x-tsukimera-request"] !== "1")return json(res,403,{error:"Недопустимый запрос"});
+        const input=await body(req,262144);
+        if(!isRecord(input)||!isRecord(input.changes)||
+          Object.keys(input).some(key=>key!=="changes"))bad("Некорректное изменение настроек");
+        return json(res,200,database.writePreferences(input.changes));
+      }
       if (pathname === "/api/notes" && req.method === "GET") {
         return json(res, 200, { notes: database.listNotes(), instanceId: database.instanceId });
       }

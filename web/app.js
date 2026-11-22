@@ -61,8 +61,56 @@ const DISK_PREF_KEYS = [
   'tsukimera.disk.smart.v1','tsukimera.disk.columns.v1',
   'tsukimera.disk.layout.left.v1','tsukimera.disk.layout.right.v1',
   'tsukimera.disk.tiles.v1','tsukimera.disk.view','tsukimera.disk.sort',
-  'tsukimera.disk.open','tsukimera.disk.tree','tsukimera.disk.life.group'
+  'tsukimera.disk.open','tsukimera.disk.tree','tsukimera.disk.life.group',
+  'tsukimera.disk.mdRaw','juunibi.disk.view','juunibi.disk.sort',
+  'juunibi.disk.open','juunibi.disk.tree','juunibi.disk.mdRaw',
+  'juunibi.disk.life.group'
 ];
+const SQLITE_PREF_KEYS=[KEY_NAV,KEY_UI,KEY_SETTINGS,...DISK_PREF_KEYS];
+let prefsReady=false;
+let preferenceQueue=Promise.resolve();
+function savePrefChanges(changes){
+  preferenceQueue=preferenceQueue.catch(()=>{}).then(async()=>{
+    const response=await fetch('/api/preferences',{method:'PUT',
+      headers:{'Content-Type':'application/json','X-Tsukimera-Request':'1'},
+      body:JSON.stringify({changes})});
+    if(!response.ok)throw Error((await response.json().catch(()=>({}))).error||'HTTP '+response.status);
+    return true;
+  });
+  return preferenceQueue;
+}
+async function hydrateSqlitePrefs(){
+  try{
+    let response=await fetch('/api/preferences');
+    if(!response.ok)throw Error('HTTP '+response.status);
+    let result=await response.json();
+    if(!result.initialized){
+      const initial={};
+      for(const key of SQLITE_PREF_KEYS){
+        const value=localStorage.getItem(key);
+        if(value!==null)initial[key]=value;
+      }
+      response=await fetch('/api/preferences/initialize',{
+        method:'POST',headers:{'Content-Type':'application/json','X-Tsukimera-Request':'1'},
+        body:JSON.stringify({preferences:initial})});
+      result=await response.json();
+      if(!response.ok)throw Error(result.error||'Не удалось перенести настройки');
+    }
+    // The database wins after the initial import. This ensures that opening
+    // the same portable SSD in a new browser restores the same preferences.
+    for(const key of SQLITE_PREF_KEYS){
+      if(Object.hasOwn(result.preferences,key))localStorage.setItem(key,result.preferences[key]);
+      else localStorage.removeItem(key);
+    }
+    menu=cleanMenu(readLocal(KEY_NAV,{collapsed:false,order:IDS,hidden:[]}));
+    ui=cleanUi(readLocal(KEY_UI,DEFAULT_UI));
+    sectionPrefs=readLocal(KEY_SETTINGS,{collapsed:[]});
+    prefsReady=true;
+  }catch(error){
+    console.error('Tsukimera SQLite preferences:',error);
+    toast('SQLite настройки недоступны. Пока используется локальная копия браузера.');
+  }
+}
 const DEFAULT_CONFIG = {
   model:{primary:'',fallback:'',reasoning:false},
   instructions:{about:'',style:''},
@@ -75,8 +123,13 @@ function readLocal(key, fallback) {
   catch { return structuredClone(fallback); }
 }
 function writeLocal(key, value) {
-  try { localStorage.setItem(key, JSON.stringify(value)); }
+  const raw=JSON.stringify(value);
+  try { localStorage.setItem(key,raw); }
   catch { toast('Браузер запретил локальное сохранение'); }
+  if(prefsReady&&SQLITE_PREF_KEYS.includes(key)){
+    void savePrefChanges({[key]:raw}).catch(error=>
+      toast('Настройки не сохранены в SQLite: '+error.message));
+  }
 }
 function cleanMenu(raw) {
   const order = Array.isArray(raw?.order) ? [...new Set(raw.order.filter(x => IDS.includes(x)))] : [];
@@ -721,8 +774,12 @@ async function restoreBackup(payload) {
   sectionPrefs={collapsed:Array.isArray(payload.sections?.collapsed)?
     payload.sections.collapsed.filter(x=>SECTIONS.some(s=>s.id===x)):[]};
   notes=importedData.notes;
-  writeLocal(KEY_NAV,menu);writeLocal(KEY_UI,ui);writeLocal(KEY_SETTINGS,sectionPrefs);writeLocal(KEY_NOTES,notes);
-  for(const [key,value] of Object.entries(diskPrefs))localStorage.setItem(key,value);
+  const changes={
+    [KEY_NAV]:JSON.stringify(menu),[KEY_UI]:JSON.stringify(ui),
+    [KEY_SETTINGS]:JSON.stringify(sectionPrefs),...diskPrefs};
+  await savePrefChanges(changes);
+  for(const [key,value] of Object.entries(changes))localStorage.setItem(key,value);
+  writeLocal(KEY_NOTES,notes);
   applyUi();renderMenu();renderMain();toast('Настройки и заметки восстановлены. Для файлов импортируйте отдельную копию Диска.');
 }
 function createModal(title) {
@@ -815,6 +872,7 @@ function bindKeys(){
 }
 async function init() {
   route=currentRoute();
+  await hydrateSqlitePrefs();
   applyUi();
   createShell();
   bindKeys();

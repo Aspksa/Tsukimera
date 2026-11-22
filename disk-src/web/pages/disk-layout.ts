@@ -1,3 +1,4 @@
+import {writePreference} from "../preferences";
 /** Tsukimera Disk — independent responsive pane layout.
  * Pointer + keyboard resizing without dependencies or changing JUUNIBI storage.
  * Widths are browser-local preferences, safely bounded at every viewport size.
@@ -23,7 +24,7 @@ const read=(key:string):string|null=>{
   try{return localStorage.getItem(key);}catch{return null;}
 };
 const write=(key:string,value:number):void=>{
-  try{localStorage.setItem(key,String(Math.round(value)));}catch{}
+  writePreference(key,String(Math.round(value)));
 };
 
 export interface DiskSplitters{
