@@ -2,12 +2,14 @@ import { createReadStream } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
 import { createHash, randomUUID } from "node:crypto";
 import { Readable } from "node:stream";
+import { createResumableUploads } from "./resumable-uploads.mjs";
 
 /** JUUNIBI Disk HTTP contract, isolated from the rest of Tsukimera.
  * The source disk's LocalDisk methods enforce name, folder, size and data-integrity limits.
  * Only loopback calls are accepted by the parent server.
  */
-export function createDiskRouter({disk,zipStream,zipLength,collectLife}) {
+export function createDiskRouter({disk,zipStream,zipLength,collectLife,uploadDir}) {
+  const uploads=createResumableUploads({disk,dir:uploadDir});
   const zipTokens=new Map();
   const verified=new Map();
   let lastTrashSweep=0;
@@ -101,6 +103,10 @@ export function createDiskRouter({disk,zipStream,zipLength,collectLife}) {
     const p=url.pathname;
     const method=req.method;
     try{
+      if(p.startsWith("/api/disk/uploads")){
+        const result=await uploads.handle(req,url);
+        return send(res,result.status,result.value);
+      }
       if(method==="GET"&&p==="/api/disk"){
         if(Date.now()-lastTrashSweep>3600000){
           lastTrashSweep=Date.now();
@@ -227,5 +233,5 @@ export function createDiskRouter({disk,zipStream,zipLength,collectLife}) {
       return send(res,status,{error:status===500?"Внутренняя ошибка Диска":error.message});
     }
   }
-  return {handle};
+  return {handle,initUploads:()=>uploads.init()};
 }

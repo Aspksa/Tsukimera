@@ -21,6 +21,12 @@ import {
 import { createUploader, readDropped } from "./disk-upload";
 import { btn, emptyState } from "./kit";
 import { openSheet } from "./sheet";
+import {
+  readColumns,writeColumns,readSmartRules,matchesSmartRule,animateChange,
+  openColumnSettings,openSmartManager,openDiskMap,openBatchRename,
+  openDiskCommands,copyDiskLink,
+  type SmartRule,type TableColumns,type RenamePlan
+} from "./disk-extras";
 import "./disk.css";
 
 export interface DiskDeps {
@@ -127,6 +133,8 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
   const expanded = new Set<string>(JSON.parse(store.get("juunibi.disk.open") ?? "[]") as string[]);
   let treeSort: "pinned" | "name" | "files" | "size" | "created" = "pinned", treeQuery = "";
   let treeHidden = store.get("juunibi.disk.tree") === "hidden";
+  let smartCurrent:string|null=null;
+  let columns:TableColumns=readColumns();
   let shown: DiskFile[] = [];
 
   const page = el("div", { cls: "page disk-page" });
@@ -200,6 +208,10 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
     { icon: "folderUp", label: "Загрузить папку…", run: chooseFolder },
     { icon: "zipDown", label: current && view === "all" && virtual === "none" ? "Скачать папку ZIP-архивом" : "Скачать весь Диск ZIP-архивом", run: () => void downloadZip({ folder: view === "all" && virtual === "none" ? current : "" }) },
     { icon: "chronicle", label: "Жизнь документов", run: () => life.reveal() },
+    { icon: "search", label: "Палитра команд · Ctrl+K", run: () => showCommands() },
+    { icon: "folder", label: "Карта занятого места", run: () => openDiskMap(all,folder=>go({folder})) },
+    { icon: "folderPlus", label: "Умные папки", run: () => editSmartFolders() },
+    { icon: "table", label: "Колонки таблицы", run: () => customizeColumns() },
     { icon: "audit", label: "Проверка файлов", run: () => void openAudit() },
     { icon: "history", label: "История", run: () => void openHistory() },
     { icon: "undo", label: "Отменить последнее", run: () => void undoLast() },
@@ -243,11 +255,17 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
   const sortSel = el("select", { cls: "dk-select", attrs: { "aria-label": "Порядок файлов" } },
     ...([["new", "Сначала новые"], ["old", "Сначала старые"], ["name", "По имени"], ["size", "По размеру"]] as const).map(([v, t]) => el("option", { value: v, textContent: t })));
   sortSel.value = sort;
-  sortSel.addEventListener("change", () => { sort = sortSel.value as SortKey; store.set("juunibi.disk.sort", sort); renderFiles(); });
+  sortSel.addEventListener("change", () => animateChange(() => {
+    sort = sortSel.value as SortKey; store.set("juunibi.disk.sort", sort); renderFiles();
+  }));
   const modeBox = el("div", { cls: "dk-modes", attrs: { role: "group", "aria-label": "Вид" } },
     ...MODES.map((m) => {
       const b = el("button", { type: "button", cls: "icon-btn", title: m.label, attrs: { "aria-label": "Вид: " + m.label, "aria-pressed": String(mode === m.id), "data-mode": m.id } }, dIcon(m.icon, 18));
-      b.addEventListener("click", () => { mode = m.id; store.set("juunibi.disk.view", mode); for (const x of modeBox.children) x.setAttribute("aria-pressed", String((x as HTMLElement).dataset.mode === mode)); renderFiles(); });
+      b.addEventListener("click", () => animateChange(() => {
+        mode = m.id; store.set("juunibi.disk.view", mode);
+        for (const x of modeBox.children) x.setAttribute("aria-pressed", String((x as HTMLElement).dataset.mode === mode));
+        renderFiles();
+      }));
       return b;
     }));
   const num = (label: string) => el("input", { type: "number", min: 0, step: 1, cls: "mem-input", placeholder: label, attrs: { "aria-label": label } });
@@ -303,6 +321,7 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
           act("copy", "Копировать", () => { clipboard = { ids, cut: false }; showToast("Скопировано: " + filesWord(ids.length) + ". Откройте папку и нажмите «Вставить» или Ctrl+V."); renderSelBar(); }),
           act("cut", "Вырезать", () => { clipboard = { ids, cut: true }; showToast("Вырезано: " + filesWord(ids.length) + ". Откройте папку и нажмите «Вставить» или Ctrl+V."); renderSelBar(); }),
           act("move", "Переместить", () => void moveFiles(ids)),
+          act("rename", "Переименовать массово", () => openBatchRename(ids.map(byId).filter((f):f is DiskFile=>!!f),all,applyBulkRename)),
           act("star", ids.every((id) => byId(id)?.favorite) ? "Убрать из избранного" : "В избранное", () => void favoriteFiles(ids)),
           act("zipDown", "Скачать ZIP", () => void downloadZip({ ids })),
           ...(deps.attach && ids.some((id) => askable(byId(id)?.name ?? "")) ? [act("chatIn", "В беседу", () => void attachToChat(ids))] : []),
@@ -334,7 +353,14 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
   const dropzone = el("div", { cls: "dk-dropzone", attrs: { "aria-hidden": "true" } }, dIcon("upload", 34), el("strong"), el("span", { textContent: "До 500 МБ на файл, можно целые папки" }));
   const main = el("section", { cls: "dk-main" }, head, selBar, trashBar, filesBox, dropzone);
   const sourceList = () => view === "trash" ? trash
-    : all.filter((f) => (view !== "favorites" || f.favorite) && matchesVirtual(f, virtual) && (view !== "all" || virtual !== "none" || everywhere || f.folder === current));
+    : all.filter(f=>{
+      if(smartCurrent){
+        const rule=readSmartRules().find(x=>x.id===smartCurrent);
+        return !!rule&&matchesSmartRule(f,rule);
+      }
+      return (view!=="favorites"||f.favorite)&&matchesVirtual(f,virtual)&&
+        (view!=="all"||virtual!=="none"||everywhere||f.folder===current);
+    });
   const thumbFor = (f: DiskFile, size: number) => {
     const box = el("span", { cls: "dk-thumb" });
     if (f.color) box.style.setProperty("--tag", f.color);
@@ -375,6 +401,11 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
         el("strong", { cls: "dk-name", textContent: f.name, title: f.name + (f.tags?.length ? "\nМетки: " + f.tags.join(", ") : "") }),
         el("small", { textContent: meta }),
         ...(f.tags?.length && mode !== "table" ? [el("span", { cls: "dk-tags" }, ...f.tags.slice(0, 3).map((t) => el("i", { textContent: t })))] : [])),
+      ...(mode==="table"&&view!=="trash"?[
+        el("small",{cls:"dkx-col dkx-col-size",textContent:human(f.size)}),
+        el("small",{cls:"dkx-col dkx-col-date",textContent:fmtDate(f.uploadedAt)}),
+        el("small",{cls:"dkx-col dkx-col-folder",textContent:f.folder||"Корень"})
+      ]:[]),
       ...(f.favorite && view !== "trash" ? [el("span", { cls: "dk-fav", title: "В избранном" }, dIcon("star", 15))] : []),
       el("button", { type: "button", cls: "icon-btn sm dk-more", attrs: { "aria-label": "Действия: " + f.name, "aria-haspopup": "menu", "aria-expanded": "false" } }, dIcon("more", 18)));
     return c;
@@ -396,7 +427,8 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
       el("div", { cls: "dk-empty-actions" }, up, btn("Загрузить папку", chooseFolder, {}), btn("Новая папка", () => void createFolder(uploadFolder()), { icon: "plus" })));
   };
   const renderFiles = () => {
-    filesBox.className = "dk-files mode-" + mode;
+    filesBox.className = "dk-files mode-" + mode+
+      (columns.size?"":" dkx-hide-size")+(columns.date?"":" dkx-hide-date")+(columns.folder?"":" dkx-hide-folder");
     if (!loaded) { filesBox.replaceChildren(...skeleton()); return; }
     shown = filterFiles(sourceList(), { text: query, contentIds, ext, minKb, maxKb, after, sort });
     const total = sourceList().length;
@@ -453,7 +485,13 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
     if (t.closest(".dk-check")) { if (t instanceof HTMLInputElement) pick(f.id, e, true); return; }
     focusId = f.id;
     if (e.shiftKey || e.ctrlKey || e.metaKey || selected.size || view === "trash") { e.preventDefault(); pick(f.id, e, !e.shiftKey); return; }
-    openViewer(f);
+    openInfo(f.id);
+  });
+  filesBox.addEventListener("dblclick",(e)=>{
+    const c=(e.target as HTMLElement).closest<HTMLElement>(".dk-file");
+    if(!c||e.target instanceof HTMLInputElement||(e.target as HTMLElement).closest(".dk-more"))return;
+    const file=byId(c.dataset.id!);
+    if(file&&view!=="trash")openViewer(file);
   });
   filesBox.addEventListener("contextmenu", (e) => {
     const c = (e.target as HTMLElement).closest<HTMLElement>(".dk-file"); const f = c && byId(c.dataset.id!);
@@ -476,6 +514,7 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
   ] : [
     { icon: "eye", label: "Открыть", run: () => openViewer(f), hint: "Enter" },
     { icon: "info", label: "Сведения", run: () => openInfo(f.id) },
+    { icon: "attach", label: "Скопировать ссылку для чата", run: () => void copyDiskLink(f) },
     ...(deps.ask && askable(f.name) ? [{ icon: "ask", label: "Спросить JUUNIBI о файле", run: () => askAbout(f) } as MenuItem] : []),
     ...(deps.attach && askable(f.name) ? [{ icon: "chatIn", label: "Прикрепить к беседе", run: () => void attachToChat([f.id]) } as MenuItem] : []),
     { icon: "download", label: "Скачать", run: () => download(f) },
@@ -613,6 +652,67 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
     if (infoId === f.id) openInfo(f.id);
     showToast("Переименовано: «" + r.value.name + "»", { action: { label: "Отменить", run: () => void (async () => { const u = await api.diskRename(f.id, f.name); if (!u.ok) showToast(u.error.message); else { replace(u.value); redraw(); } })() } });
   }
+  async function applyBulkRename(plan:RenamePlan[]){
+    const done: {id:string;name:string}[]=[];
+    for(const item of plan){
+      const result=await api.diskRename(item.id,item.to);
+      if(!result.ok){
+        await loadCatalog(false);
+        throw new Error("Переименовано "+done.length+" из "+plan.length+
+          ". На «"+item.from+"»: "+result.error.message);
+      }
+      done.push({id:item.id,name:item.from});replace(result.value);
+    }
+    selected.clear();redraw();
+    showToast("Переименовано "+done.length+" файлов",{
+      action:{label:"Отменить",run:()=>void(async()=>{
+        for(const item of done.slice().reverse()){
+          const result=await api.diskRename(item.id,item.name);
+          if(!result.ok){showToast("Частичный откат: "+result.error.message);await loadCatalog(false);return;}
+          replace(result.value);
+        }
+        redraw();showToast("Имена восстановлены");
+      })()}
+    });
+  }
+  const customizeColumns=()=>openColumnSettings(columns,next=>{
+    columns=next;
+    if(mode!=="table")modeBox.querySelector<HTMLButtonElement>('[data-mode="table"]')?.click();
+    renderFiles();
+  });
+  const editSmartFolders=()=>openSmartManager({
+    onApply:rule=>{
+      smartCurrent=rule.id;view="all";virtual="none";everywhere=true;
+      selected.clear();redraw();
+    },
+    onChanged:()=>{
+      if(smartCurrent&&!readSmartRules().some(rule=>rule.id===smartCurrent))smartCurrent=null;
+      redraw();
+    }
+  });
+  const showCommands=()=>{
+    const items:{label:string;detail?:string;run:()=>void}[]=[
+      {label:"Загрузить файлы",run:chooseFiles},
+      {label:"Загрузить папку",run:chooseFolder},
+      {label:"Создать папку",run:()=>void createFolder(uploadFolder())},
+      {label:"Карта занятого пространства",run:()=>openDiskMap(all,folder=>go({folder}))},
+      {label:"Умные папки",run:editSmartFolders},
+      {label:"Колонки таблицы",run:customizeColumns},
+      {label:"Жизнь документов",run:()=>life.reveal()},
+      {label:"Проверить целостность",run:()=>void openAudit()},
+    ];
+    if(selected.size>0&&view!=="trash")
+      items.push({label:"Массовое переименование",detail:String(selected.size)+" файлов",
+        run:()=>openBatchRename([...selected].map(byId).filter((f):f is DiskFile=>!!f),all,applyBulkRename)});
+    for(const folder of folders.slice(0,1000))
+      items.push({label:folder,detail:"Папка",run:()=>go({folder})});
+    for(const file of all.slice(0,2500))
+      items.push({label:file.name,detail:"Файл · "+(file.folder||"Корень"),
+        run:()=>{go({folder:file.folder});openInfo(file.id);}});
+    openDiskCommands(items);
+  };
+  page.addEventListener("tsukimera:disk-command",()=>showCommands());
+
   async function undoLast() {
     const r = await api.diskUndo();
     if (!r.ok) { showToast(r.error.message); return; }
@@ -819,7 +919,7 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
       if (folder && !matches(folder)) return null;
       const children = (kids.get(folder) ?? []).sort(order);
       const open = !folder || expanded.has(folder) || !!treeQuery;
-      const isCur = view === "all" && virtual === "none" && current === folder;
+      const isCur = !smartCurrent && view === "all" && virtual === "none" && current === folder;
       const t = totals.get(folder);
       const st = styles[folder];
       const row = el("div", { cls: "dk-node" + (isCur ? " current" : ""), attrs: { role: "treeitem", "aria-level": String(depth + 1) } });
@@ -877,6 +977,23 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
       if (s.id === "trash") dropFiles(b, TRASH_DROP);
       return b;
     }));
+    const rules=readSmartRules();
+    const smartHeader=el("button",{type:"button",cls:"dkx-smart-head"},
+      el("span",{textContent:"Умные папки"}),el("span",{textContent:"+ · изменить"}));
+    smartHeader.addEventListener("click",editSmartFolders);
+    sections.append(smartHeader);
+    for(const rule of rules){
+      const n=all.filter(f=>matchesSmartRule(f,rule)).length;
+      const button=el("button",{type:"button",cls:"dk-section dkx-smart"+(smartCurrent===rule.id?" current":"")},
+        el("span",{cls:"dk-node-ic"},dIcon("folder",17)),
+        el("span",{cls:"dk-node-name",textContent:rule.name}),
+        el("small",{cls:"dk-node-n",textContent:String(n)}));
+      button.addEventListener("click",()=>{
+        smartCurrent=rule.id;view="all";virtual="none";everywhere=true;
+        selected.clear();redraw();setDrawer(false);
+      });
+      sections.append(button);
+    }
   };
 
   /* ---------------------------------------------------------------- «Сведения» side panel */
@@ -957,9 +1074,37 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
         btn("Прикрепить к делу", () => void attachToTask([f.id]), { small: true, icon: "plus" }));
       linked.hidden = false;
     });
+    const quick=el("section",{cls:"dk-info-block dkx-quick-preview"});
+    if(!f.deletedAt){
+      quick.append(el("h4",{textContent:"Быстрый просмотр"}));
+      const kind=previewKind(f.name);
+      if(kind==="image")quick.append(el("img",{
+        src:diskRawUrl(f),alt:f.name,loading:"lazy",cls:"dkx-quick-image"
+      }));
+      else if(kind==="pdf")quick.append(el("iframe",{
+        src:diskRawUrl(f),title:"Предпросмотр: "+f.name,loading:"lazy",cls:"dkx-quick-pdf"
+      }));
+      else if(kind==="video")quick.append(el("video",{
+        src:diskRawUrl(f),controls:true,preload:"metadata",cls:"dkx-quick-media"
+      }));
+      else if(kind==="audio")quick.append(el("audio",{
+        src:diskRawUrl(f),controls:true,preload:"metadata",cls:"dkx-quick-media"
+      }));
+      else if(kind==="text"||kind==="markdown"||kind==="table"||kind==="office"){
+        const summary=el("pre",{cls:"dkx-quick-text",textContent:"Читаю файл…"});
+        quick.append(summary);
+        void api.diskText(f.id).then(result=>{
+          if(infoId!==f.id||!summary.isConnected)return;
+          summary.textContent=result.ok?
+            (result.value.text.slice(0,12000)||"Нет извлекаемого текста"):
+            result.error.message;
+        });
+      }else quick.append(el("p",{cls:"muted",textContent:"Предпросмотр для этого формата недоступен"}));
+      quick.append(btn("Открыть полностью",()=>openViewer(f),{small:true,icon:"eye"}));
+    }
     info.replaceChildren(
       el("header", { cls: "dk-info-head" }, el("strong", { textContent: "Сведения" }), iconButton("x", "Закрыть сведения", closeInfo, "icon-btn sm")),
-      big, el("h3", { cls: "dk-info-name", textContent: f.name }), actions,
+      big, el("h3", { cls: "dk-info-name", textContent: f.name }), quick, actions,
       el("div", { cls: "dk-info-rows" }, row("Папка", folderLink), row("Размер", human(f.size)), row("Загружен", fmtTime(f.uploadedAt)), row("Тип", f.name.split(".").pop()?.toUpperCase() ?? "—"),
         row("Контрольная сумма", el("code", { textContent: f.sha256.slice(0, 16) + "…", title: "SHA-256: " + f.sha256 }))),
       ...(!f.deletedAt ? [
@@ -1245,7 +1390,12 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
 
   /* ---------------------------------------------------------------- navigation and loading */
   function go(to: { folder?: string; view?: View; virtual?: Virtual }) {
-    if (to.folder !== undefined) { current = to.folder; view = "all"; virtual = "none"; for (let p = parentOf(current); p; p = parentOf(p)) expanded.add(p); saveOpen(); }
+    smartCurrent=null;
+    if (to.folder !== undefined) {
+      current=to.folder;view="all";virtual="none";
+      for (let p=current; p; p=parentOf(p)) expanded.add(p);
+      saveOpen();
+    }
     if (to.view) { view = to.view; virtual = "none"; }
     if (to.virtual) { view = "all"; virtual = to.virtual; }
     selected.clear(); limit = PAGE; focusId = null;
@@ -1257,6 +1407,10 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
     const sep = () => el("span", { cls: "dk-crumb-sep", attrs: { "aria-hidden": "true" } }, dIcon("chevronRight", 14));
     const parts: HTMLElement[] = [];
     if (view === "trash") parts.push(part("Корзина"));
+    else if (smartCurrent) {
+      const rule=readSmartRules().find(r=>r.id===smartCurrent);
+      parts.push(part(rule?.name||"Умная папка"));
+    }
     else if (view === "favorites") parts.push(part("Избранное"));
     else if (virtual !== "none") parts.push(part(VIRTUAL_TITLE[virtual]));
     else {
@@ -1289,20 +1443,22 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
     if (st?.ok) styles = st.value;
     if (tr?.ok) keepDays = tr.value.days;
     if (current && !folders.includes(current)) current = "";
+    if(smartCurrent&&!readSmartRules().some(r=>r.id===smartCurrent))smartCurrent=null;
     loaded = true;
     redraw();
     showLinked();
   }
   /** A file opened from «Дела»: its folder, the file flashed, and the preview or «Сведения». */
   function showLinked() {
-    const id = takeDiskLink(); if (!id) return;
+    const linked=/^#\/disk\/([0-9a-f-]{36})$/.exec(location.hash);
+    const id=linked?.[1]||takeDiskLink(); if(!id)return;
     const f = all.find((x) => x.id === id);
     if (!f) { showToast(trash.some((x) => x.id === id) ? "Этот файл в корзине" : "Файла больше нет на Диске"); return; }
     go({ folder: f.folder }); reveal(f.id);
-    if (previewKind(f.name)) openViewer(f); else openInfo(f.id);
+    openInfo(f.id);
   }
-  const onLink = () => { if (!page.isConnected) { removeEventListener("juunibi:disk-link", onLink); return; } if (loaded) showLinked(); };
-  addEventListener("juunibi:disk-link", onLink);
+  const onLink = () => { if (!page.isConnected) { removeEventListener("tsukimera:disk-link", onLink); return; } if (loaded) showLinked(); };
+  addEventListener("tsukimera:disk-link", onLink);
 
   /* ---------------------------------------------------------------- keyboard */
   page.addEventListener("keydown", (e) => {

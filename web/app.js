@@ -158,7 +158,8 @@ function go(id) {
 }
 function currentRoute() {
   const raw=location.hash.replace(/^#\/?/,'');
-  return IDS.includes(raw)?raw:'settings';
+  const segment=raw.split('/')[0];
+  return IDS.includes(segment)?segment:'settings';
 }
 function orderedItems(group, showHidden=false) {
   return menu.order.map(id=>NAV.find(n=>n.id===id))
@@ -348,7 +349,7 @@ function renderMain() {
       if(Array.isArray(n.files)&&n.files.length){
         const links=el('div','set-controls');
         for(const file of n.files){
-          const open=btn('📎 '+file.name,()=>go('disk'),'btn sm');
+          const open=btn('📎 '+file.name,()=>{location.hash='#/disk/'+encodeURIComponent(file.id);},'btn sm');
           open.title='Открыть Диск: '+file.name;
           links.append(open);
         }
@@ -688,7 +689,11 @@ function bindKeys(){
       if(drawer){drawer=false;renderMenu();}return;
     }
     if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='k'){
-      event.preventDefault();openPalette();return;
+      event.preventDefault();
+      const disk=document.querySelector('.disk-page');
+      if(route==='disk'&&disk) disk.dispatchEvent(new Event('tsukimera:disk-command'));
+      else openPalette();
+      return;
     }
     if((event.ctrlKey||event.metaKey)&&event.key===','){
       event.preventDefault();go('settings');document.querySelector('.set-search input')?.focus();return;

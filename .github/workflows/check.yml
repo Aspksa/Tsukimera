@@ -37,6 +37,8 @@ jobs:
           timeout 50s google-chrome --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage --virtual-time-budget=6000 --dump-dom 'http://127.0.0.1:49678/#/disk' > /tmp/tsukimera-disk-rendered.html
           grep -q 'class="dk-layout' /tmp/tsukimera-disk-rendered.html
           grep -q 'dk-file' /tmp/tsukimera-disk-rendered.html
+          grep -q 'dkx-smart-head' /tmp/tsukimera-disk-rendered.html
+          grep -q 'Умные папки' /tmp/tsukimera-disk-rendered.html
           echo 'Chrome rendered the complete JUUNIBI Disk page.'
   linux-node24:
     runs-on: ubuntu-latest

@@ -119,7 +119,9 @@ export function createAppServer({ root, dataDir = join(root, "data") }) {
     ]);
     diskStore=new LocalDisk(join(dataDir,"disk"));
     await diskStore.load();
-    diskRouter=createDiskRouter({disk:diskStore,zipStream,zipLength,collectLife});
+    diskRouter=createDiskRouter({disk:diskStore,zipStream,zipLength,collectLife,
+      uploadDir:join(dataDir,"uploads")});
+    await diskRouter.initUploads();
   }
     // No background service or separate port: disk lives in this same loopback app.
   async function save() {
