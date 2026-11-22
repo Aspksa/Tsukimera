@@ -652,6 +652,67 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
     if (infoId === f.id) openInfo(f.id);
     showToast("Переименовано: «" + r.value.name + "»", { action: { label: "Отменить", run: () => void (async () => { const u = await api.diskRename(f.id, f.name); if (!u.ok) showToast(u.error.message); else { replace(u.value); redraw(); } })() } });
   }
+  async function applyBulkRename(plan:RenamePlan[]){
+    const done: {id:string;name:string}[]=[];
+    for(const item of plan){
+      const result=await api.diskRename(item.id,item.to);
+      if(!result.ok){
+        await loadCatalog(false);
+        throw new Error("Переименовано "+done.length+" из "+plan.length+
+          ". На «"+item.from+"»: "+result.error.message);
+      }
+      done.push({id:item.id,name:item.from});replace(result.value);
+    }
+    selected.clear();redraw();
+    showToast("Переименовано "+done.length+" файлов",{
+      action:{label:"Отменить",run:()=>void(async()=>{
+        for(const item of done.slice().reverse()){
+          const result=await api.diskRename(item.id,item.name);
+          if(!result.ok){showToast("Частичный откат: "+result.error.message);await loadCatalog(false);return;}
+          replace(result.value);
+        }
+        redraw();showToast("Имена восстановлены");
+      })()}
+    });
+  }
+  const customizeColumns=()=>openColumnSettings(columns,next=>{
+    columns=next;
+    if(mode!=="table")modeBox.querySelector<HTMLButtonElement>('[data-mode="table"]')?.click();
+    renderFiles();
+  });
+  const editSmartFolders=()=>openSmartManager({
+    onApply:rule=>{
+      smartCurrent=rule.id;view="all";virtual="none";everywhere=true;
+      selected.clear();redraw();
+    },
+    onChanged:()=>{
+      if(smartCurrent&&!readSmartRules().some(rule=>rule.id===smartCurrent))smartCurrent=null;
+      redraw();
+    }
+  });
+  const showCommands=()=>{
+    const items:{label:string;detail?:string;run:()=>void}[]=[
+      {label:"Загрузить файлы",run:chooseFiles},
+      {label:"Загрузить папку",run:chooseFolder},
+      {label:"Создать папку",run:()=>void createFolder(uploadFolder())},
+      {label:"Карта занятого пространства",run:()=>openDiskMap(all,folder=>go({folder}))},
+      {label:"Умные папки",run:editSmartFolders},
+      {label:"Колонки таблицы",run:customizeColumns},
+      {label:"Жизнь документов",run:()=>life.reveal()},
+      {label:"Проверить целостность",run:()=>void openAudit()},
+    ];
+    if(selected.size>0&&view!=="trash")
+      items.push({label:"Массовое переименование",detail:String(selected.size)+" файлов",
+        run:()=>openBatchRename([...selected].map(byId).filter((f):f is DiskFile=>!!f),all,applyBulkRename)});
+    for(const folder of folders.slice(0,1000))
+      items.push({label:folder,detail:"Папка",run:()=>go({folder})});
+    for(const file of all.slice(0,2500))
+      items.push({label:file.name,detail:"Файл · "+(file.folder||"Корень"),
+        run:()=>{go({folder:file.folder});openInfo(file.id);}});
+    openDiskCommands(items);
+  };
+  page.addEventListener("tsukimera:disk-command",()=>showCommands());
+
   async function undoLast() {
     const r = await api.diskUndo();
     if (!r.ok) { showToast(r.error.message); return; }
