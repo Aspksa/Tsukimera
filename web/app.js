@@ -729,7 +729,7 @@ function openAddNote() {
   const {overlay,card}=createModal('Новая заметка');
   const input=field('Текст заметки','','textarea',3000);
   card.append(input.wrap);
-  card.append(btn('Сохранить заметку',()=>{
+  card.append(btn('Сохранить заметку',async()=>{
     const value=input.input.value.trim();if(!value){toast('Введите текст');return;}
     try{
       const response=await fetch('/api/notes',{
