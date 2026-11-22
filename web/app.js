@@ -6,9 +6,6 @@ const NAV = [
   {id:'tasks',label:'Дела',icon:'check',group:'main'},
   {id:'disk',label:'Диск',icon:'folder',group:'main'},
   {id:'brain',label:'Мозг',icon:'brain',group:'brain'},
-  {id:'modules',label:'Модули',icon:'modules',group:'brain'},
-  {id:'mobile',label:'Телефон',icon:'phone',group:'system'},
-  {id:'update',label:'Обновление',icon:'update',group:'system'},
   {id:'settings',label:'Настройки',icon:'settings',group:'system'}
 ];
 const SECTIONS = [
@@ -28,9 +25,6 @@ const ICONS = {
   check:'M5 12l4 4L19 6',
   folder:'M3 6h6l2 2h10v11H3z',
   brain:'M3 6a3 3 0 0 1 6 0M15 6a3 3 0 0 1 6 0M9 18a3 3 0 0 1 6 0M7 8l4 7M17 8l-4 7M8 6h8',
-  modules:'M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z',
-  phone:'M7 2h10a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2zM11 18h2',
-  update:'M12 4v10m0 0-4-4m4 4 4-4M5 19h14',
   settings:'M4 7h9M17 7h3M4 17h3M11 17h9M15 4v6M9 14v6',
   cloud:'M7 18a4.5 4.5 0 0 1-.6-8.96A6 6 0 0 1 18 9.5 4 4 0 0 1 17 18z',
   spark:'M12 3l2.2 6.3L21 12l-6.8 2.7L12 21l-2.2-6.3L3 12l6.8-2.7z',
