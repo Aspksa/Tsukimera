@@ -54,7 +54,7 @@ test("SQLite v3 updates only touched files, preserves metadata and notes, surviv
         assert.equal(db.prepare("SELECT count(*) AS n FROM disk_entries").get().n,2);
         const original=db.prepare("SELECT data FROM disk_entries WHERE id=?").get(b.id).data;
         let changedCount=0;
-        db.exec("CREATE TABLE temp_changes(id TEXT)");
+        db.exec("CREATE TABLE update_changes(id TEXT)");
         db.exec("CREATE TRIGGER log_touch AFTER UPDATE ON disk_entries BEGIN INSERT INTO temp_changes(id) VALUES(new.id); END");
         const renamed=await api(s.url,"/api/disk/files/"+a.id,"PATCH",{name:"Переименован.txt"});
         assert.equal(renamed.status,200,JSON.stringify(renamed.result));
