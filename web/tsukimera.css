@@ -327,3 +327,21 @@ button,input,textarea,select{font-family:inherit}
   .set-card .set-row{gap:var(--ki-space-3)}
   .modal-ts-card{padding:var(--ki-space-4)}
 }
+
+
+/* Disk workspace only: escape the centered JUUNIBI content/page max-width.
+ * The rest of Tsukimera, including Settings, retains its original reading width. */
+.content-main.disk-workspace{
+  box-sizing:border-box;width:100%;max-width:none;margin-inline:0;
+  padding:var(--ki-space-4) clamp(12px,1.15vw,24px) 112px;
+  min-width:0;
+}
+.content-main.disk-workspace > .page.disk-page{
+  box-sizing:border-box;width:100%;max-width:none;margin-inline:0;min-width:0;
+}
+@media(max-width:860px){
+  .content-main.disk-workspace{padding:var(--ki-space-3) var(--ki-space-3) 100px}
+}
+@media(max-width:480px){
+  .content-main.disk-workspace{padding:var(--ki-space-2) var(--ki-space-2) 96px}
+}
