@@ -22,7 +22,7 @@ export function createDiskAutomation({
   idleDelayMs=15000,maintenanceHours=6,logger=console,
 }){
   let stopped=false,running=false,timer=null;
-  let lastMaintenance=0,active=null;
+  let lastMaintenance=Date.now(),active=null;
   const stats={indexed:0,audited:0,failures:0,retries:0,lastError:null,lastRun:null,
     lastOptimized:null,optimization:null};
   const stop=()=>{
@@ -36,6 +36,14 @@ export function createDiskAutomation({
     timer.unref?.();
   };
   const work=async()=>{
+    if(Date.now()-lastMaintenance>=maintenanceHours*3600000){
+      active={type:"sqlite-optimize"};
+      const out=database.optimize();
+      stats.optimization=out.integrity;
+      stats.lastOptimized=out.at;
+      lastMaintenance=Date.now();
+      return true;
+    }
     const pending=database.pendingTextIndex(1);
     if(pending.length){
       active={type:"text-index",fileId:pending[0].id};
@@ -61,14 +69,6 @@ export function createDiskAutomation({
       const path=join(diskRoot,"objects",target.object_id);
       const status=await verifyObject(path,target.size,target.sha);
       if(database.auditRecord(target,status))stats.audited++;
-      return true;
-    }
-    if(Date.now()-lastMaintenance>maintenanceHours*3600000){
-      active={type:"sqlite-optimize"};
-      const out=database.optimize();
-      stats.optimization=out.integrity;
-      stats.lastOptimized=out.at;
-      lastMaintenance=Date.now();
       return true;
     }
     return false;
