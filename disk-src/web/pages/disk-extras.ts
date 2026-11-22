@@ -32,7 +32,9 @@ export function matchesSmartRule(file:DiskFile,rule:SmartRule):boolean{
 export type RenamePlan={id:string;folder:string;from:string;to:string;valid:boolean;why:string};
 export function renamePlan(files:DiskFile[],all:DiskFile[],template:string,start=1):RenamePlan[]{
   if(!Number.isSafeInteger(start)||start<0||start>999999)return [];
-  const occupied=new Set(all.filter(x=>!files.some(y=>y.id===x.id)).map(x=>x.folder.toLocaleLowerCase()+"/"+x.name.toLocaleLowerCase()));
+  const selected=new Set(files.map(x=>x.id));
+  const occupied=new Set(all.filter(x=>!selected.has(x.id)).map(x=>x.folder.toLocaleLowerCase()+"/"+x.name.toLocaleLowerCase()));
+  const originalNames=new Map(all.map(x=>[x.folder.toLocaleLowerCase()+"/"+x.name.toLocaleLowerCase(),x.id]));
   return files.map((file,i)=>{
     const index=file.name.lastIndexOf("."),base=index>0?file.name.slice(0,index):file.name;
     const ext=index>0?file.name.slice(index+1):"";
@@ -43,6 +45,7 @@ export function renamePlan(files:DiskFile[],all:DiskFile[],template:string,start
     else if(name===file.name)why="Без изменений";
     const key=file.folder.toLocaleLowerCase()+"/"+name.toLocaleLowerCase();
     if(!why&&occupied.has(key))why="Конфликт имён";
+    if(!why&&originalNames.has(key)&&originalNames.get(key)!==file.id)why="Имя пока занято другим файлом";
     if(!why)occupied.add(key);
     return {id:file.id,folder:file.folder,from:file.name,to:name,valid:!why,why};
   });
