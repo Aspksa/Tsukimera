@@ -100,6 +100,8 @@ export async function initializeDatabase(dataDir) {
     for (const sql of SCHEMA) db.exec(sql);
     db.prepare("INSERT OR IGNORE INTO metadata(key,value) VALUES('instance_id',?)").run(randomUUID());
     db.prepare("INSERT OR IGNORE INTO metadata(key,value) VALUES('schema_version','1')").run();
+    if (backupPath) db.prepare("INSERT OR IGNORE INTO metadata(key,value) VALUES('pre_migration_backup',?)")
+      .run(relative(dataDir,backupPath));
     const integrity = db.prepare("PRAGMA quick_check").get();
     if (integrity.quick_check !== "ok") throw new Error("Повреждена база SQLite");
   });
@@ -121,8 +123,9 @@ export async function initializeDatabase(dataDir) {
   const allNotes = db => db.prepare("SELECT data FROM notes ORDER BY created_at,id")
     .all().map(row => parse(row.data));
   const instanceId = withDb(db => db.prepare("SELECT value FROM metadata WHERE key='instance_id'").get().value);
+  const previousBackup = withDb(db => db.prepare("SELECT value FROM metadata WHERE key='pre_migration_backup'").get()?.value ?? null);
   return {
-    path: filename, backupPath, instanceId,
+    path: filename, backupPath: previousBackup ? join(dataDir,previousBackup) : null, instanceId,
     readSettings: () => withDb(db => { const row = db.prepare("SELECT data FROM app_settings WHERE id=1").get(); return row ? parse(row.data) : null; }),
     writeSettings: config => transaction(db => {
       db.prepare("INSERT INTO app_settings(id,data) VALUES(1,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data").run(JSON.stringify(config));
