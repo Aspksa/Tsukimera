@@ -180,12 +180,21 @@ export function createAppServer({ root, dataDir = join(root, "data") }) {
       if (pathname === "/api/settings" && req.method === "PUT") {
         if (req.headers["x-tsukimera-request"] !== "1") return json(res, 403, { error: "Недопустимый запрос" });
         const incoming = await body(req);
-        const next = patchSettings(config, incoming);
-        await (writeQueue = writeQueue.catch(() => {}).then(async () => {
+        // Apply each patch to the latest committed configuration. Calculating
+        // next before entering the queue loses fields under concurrent PUTs.
+        const saved = await (writeQueue = writeQueue.catch(() => {}).then(async () => {
+          const next = patchSettings(config, incoming);
+          const previous = config;
           config = next;
-          await save();
+          try {
+            await save();
+          } catch (error) {
+            config = previous;
+            throw error;
+          }
+          return structuredClone(next);
         }));
-        return json(res, 200, { settings: config });
+        return json(res, 200, { settings: saved });
       }
       if (pathname.startsWith("/api/")) return json(res, 404, { error: "API не реализован" });
       const asset = FILES.get(pathname);
