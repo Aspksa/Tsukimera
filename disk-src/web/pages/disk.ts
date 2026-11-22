@@ -28,6 +28,7 @@ import {
   type SmartRule,type TableColumns,type RenamePlan
 } from "./disk-extras";
 import {createDiskSplitters,tileSize,TILE_KEY} from "./disk-layout";
+import {fileWindow} from "./disk-window";
 import {writePreference} from "../preferences";
 import "./disk.css";
 
@@ -220,6 +221,7 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
     { icon: "folderPlus", label: "Умные папки", run: () => editSmartFolders() },
     { icon: "table", label: "Колонки таблицы", run: () => customizeColumns() },
     { icon: "audit", label: "Проверка файлов", run: () => void openAudit() },
+    { icon: "history", label: "Фоновая автоматизация", run: () => void openAutomation() },
     { icon: "history", label: "История", run: () => void openHistory() },
     { icon: "undo", label: "Отменить последнее", run: () => void undoLast() },
     "-",
@@ -244,9 +246,12 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
       try {
         const r = await fetch("/api/disk/search?q=" + encodeURIComponent(q));
         if (!r.ok) throw new Error();
-        const ids = ((await r.json()) as { ids: string[] }).ids;
+        const data=(await r.json()) as {ids:string[];index?:{indexed:number;pending:number}};
         if (gen !== searchGen) return;
-        contentIds = new Set(ids);
+        contentIds = new Set(data.ids);
+        const pending=data.index?.pending??0;
+        textChip.title=pending?"Индексирование документов продолжается: "+pending+" осталось. Повторите поиск после обработки.":
+          "Текстовые документы полностью проиндексированы";
       } catch { if (gen === searchGen) showToast("Поиск внутри файлов сейчас недоступен"); }
     }
     if (gen === searchGen) { query = search.value; renderFiles(); }
@@ -371,6 +376,9 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
 
   /* ---------------------------------------------------------------- files */
   const filesBox = el("div", { cls: "dk-files", attrs: { "aria-label": "Файлы" } });
+  let autoMoreObserver:IntersectionObserver|null=null;
+  let currentWindow="";
+  let scrollQueued=false;
   const dropzone = el("div", { cls: "dk-dropzone", attrs: { "aria-hidden": "true" } }, dIcon("upload", 34), el("strong"), el("span", { textContent: "До 500 МБ на файл, можно целые папки" }));
   const main = el("section", { cls: "dk-main" }, head, selBar, trashBar, filesBox, dropzone);
   const sourceList = () => view === "trash" ? trash
@@ -448,6 +456,7 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
       el("div", { cls: "dk-empty-actions" }, up, btn("Загрузить папку", chooseFolder, {}), btn("Новая папка", () => void createFolder(uploadFolder()), { icon: "plus" })));
   };
   const renderFiles = () => {
+    autoMoreObserver?.disconnect();autoMoreObserver=null;
     filesBox.className = "dk-files mode-" + mode+
       (columns.size?"":" dkx-hide-size")+(columns.date?"":" dkx-hide-date")+(columns.folder?"":" dkx-hide-folder");
     if (!loaded) { filesBox.replaceChildren(...skeleton()); return; }
@@ -456,21 +465,63 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
     countNote.textContent = !total ? "" : shown.length === total ? filesWord(total) : shown.length + " из " + total;
     if (!shown.length) { filesBox.replaceChildren(emptyView()); renderSelBar(); return; }
     if (focusId && !shown.some((f) => f.id === focusId)) focusId = null;
-    const visible = shown.slice(0, limit);
-    const nodes: HTMLElement[] = [];
+    const canWindow=(mode==="list"||mode==="table")&&groupBy==="none"&&shown.length>180;
+    let visible:DiskFile[];
+    let before=0,after=0;
+    if(canWindow){
+      const scroller=document.querySelector<HTMLElement>(".content");
+      const r=filesBox.getBoundingClientRect();
+      const top=scroller?.getBoundingClientRect().top??0;
+      const viewport=scroller?.clientHeight??window.innerHeight;
+      const rowHeight=mode==="table"?51:69;
+      const win=fileWindow(shown.length,Math.max(0,top-r.top),viewport,rowHeight,24);
+      visible=shown.slice(win.start,win.end);before=win.before;after=win.after;
+      currentWindow=win.start+"-"+win.end;
+    }else{visible=shown.slice(0,limit);currentWindow="";}
+    const nodes:HTMLElement[]=[];
+    if(canWindow&&before>0)nodes.push(el("div",{cls:"dk-window-spacer",attrs:{
+      role:"presentation","aria-hidden":"true"}}));
     let group = "";
-    for (const f of visible) {
-      if (groupBy !== "none") { const g = groupLabel(f, groupBy); if (g !== group) { group = g; nodes.push(el("h3", { cls: "dk-group", textContent: g })); } }
+    for(const f of visible){
+      if(groupBy!=="none"){
+        const g=groupLabel(f,groupBy);
+        if(g!==group){group=g;nodes.push(el("h3",{cls:"dk-group",textContent:g}));}
+      }
       nodes.push(card(f));
     }
-    if (!focusId && nodes.length) { const first = nodes.find((n) => n.classList.contains("dk-file")); if (first) first.tabIndex = 0; }
-    if (shown.length > visible.length) {
-      const more = el("button", { type: "button", cls: "dk-more-files", textContent: "Показать ещё " + Math.min(PAGE, shown.length - visible.length) + " из " + (shown.length - visible.length) });
-      more.addEventListener("click", () => { limit += PAGE; renderFiles(); });
+    if(canWindow&&after>0)nodes.push(el("div",{cls:"dk-window-spacer",attrs:{
+      role:"presentation","aria-hidden":"true"}}));
+    if(canWindow){
+      const spacers=nodes.filter(n=>n.classList.contains("dk-window-spacer"));
+      if(before>0)spacers[0]!.style.height=before+"px";
+      if(after>0)spacers[spacers.length-1]!.style.height=after+"px";
+    }
+    if(!focusId&&nodes.length){
+      const first=nodes.find(n=>n.classList.contains("dk-file"));
+      if(first)first.tabIndex=0;
+    }
+    if(!canWindow&&shown.length>visible.length){
+      const more=el("button",{type:"button",cls:"dk-more-files",
+        textContent:"Показать ещё "+Math.min(PAGE,shown.length-visible.length)+
+          " из "+(shown.length-visible.length)});
+      more.addEventListener("click",()=>{limit+=PAGE;renderFiles();});
       nodes.push(more);
     }
     filesBox.setAttribute("role", "list");
     filesBox.replaceChildren(...nodes);
+    // CSS grid spacers are full-span and do not instantiate hidden file cards.
+    if(!canWindow&&shown.length>visible.length&&typeof IntersectionObserver==="function"){
+      const more=filesBox.querySelector<HTMLElement>(".dk-more-files");
+      if(more){
+        autoMoreObserver=new IntersectionObserver(entries=>{
+          if(entries.some(e=>e.isIntersecting)&&page.isConnected){
+            autoMoreObserver?.disconnect();autoMoreObserver=null;
+            more.click();
+          }
+        },{rootMargin:"240px 0px"});
+        autoMoreObserver.observe(more);
+      }
+    }
     renderSelBar();
   };
   /** Several changes in one frame redraw once. */
@@ -1360,6 +1411,28 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
         return box;
       }));
   }
+  async function openAutomation(){
+    const panel=el("div",{cls:"dkx-stack"});
+    const body=el("div",{cls:"dkx-stack"});
+    panel.append(el("p",{cls:"muted",textContent:"Фоновые задачи работают локально, только пока запущена Tsukimera. Исходные файлы автоматически не удаляются."}),body);
+    const sheet=openSheet({title:"Автоматизация Диска",icon:"audit",content:panel});
+    const update=async()=>{
+      const response=await fetch("/api/disk/automation");
+      const data=await response.json();
+      if(!response.ok)throw Error(data.error||"Очередь недоступна");
+      if(!sheet.open)return;
+      body.replaceChildren(
+        el("strong",{textContent:data.running?"Очередь активна":"Очередь не работает"}),
+        el("small",{textContent:"Сейчас: "+(data.active?.type??"ожидание")}),
+        el("small",{textContent:"FTS5: "+data.index.indexed+" обработано · "+data.index.pending+" ожидает"}),
+        el("small",{textContent:"Аудит SHA-256: "+data.audit.checked+" проверено · "+(data.audit.corrupt||0)+" повреждено · "+(data.audit.missing||0)+" отсутствует"}),
+        el("small",{textContent:"SQLite: "+(data.counts.lastOptimized??"ещё не обслуживалась")}),
+        el("small",{textContent:"Сбоев фоновых задач: "+data.counts.failures}),
+        btn("Повторить проверку",()=>void update(),{small:true}));
+      if(data.counts.lastError)body.append(el("p",{cls:"muted",textContent:"Последняя ошибка: "+data.counts.lastError}));
+    };
+    try{await update();}catch(error){body.replaceChildren(el("p",{textContent:error instanceof Error?error.message:"Ошибка автоматизации"}));}
+  }
   async function openHistory() {
     const [files, foldersLog] = await Promise.all([api.diskFileHistory(), api.diskFolderHistory()]);
     if (!files.ok) { showToast(files.error.message); return; }
@@ -1574,6 +1647,19 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
   const panes=createDiskSplitters(layout);
   layout.append(side,panes.left,main,panes.right,life.root,info);
   page.append(el("h1", { cls: "sr-only", textContent: "Диск" }), bar, layout, scrim, uploader.root, picker, folderPicker, restorePicker, chatDrop);
+  const scrollHost=document.querySelector<HTMLElement>(".content");
+  scrollHost?.addEventListener("scroll",()=>{
+    if(!page.isConnected){autoMoreObserver?.disconnect();return;}
+    if(!((mode==="list"||mode==="table")&&groupBy==="none"&&shown.length>180)||scrollQueued)return;
+    scrollQueued=true;
+    requestAnimationFrame(()=>{
+      scrollQueued=false;
+      const rect=filesBox.getBoundingClientRect(),top=scrollHost.getBoundingClientRect().top;
+      const win=fileWindow(shown.length,Math.max(0,top-rect.top),scrollHost.clientHeight,
+        mode==="table"?51:69,24);
+      if(currentWindow!==win.start+"-"+win.end)renderFiles();
+    });
+  },{passive:true});
   renderFiles();
   void loadCatalog();
   return page;
