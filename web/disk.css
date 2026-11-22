@@ -1081,3 +1081,59 @@ button.dk-crumb:hover{background:var(--hover);color:var(--fg)}
 .dkl-coverage{margin:8px 0 14px;color:var(--muted);font-size:var(--fs-sm);line-height:1.6}
 .dkl-no-results{min-height:120px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;text-align:center}
 @media(max-width:620px){.dkl-discover{align-items:stretch}.dkl-search-label{flex-basis:100%}.dkl-filters{width:100%}.dkl-filter{flex:1 1 auto}}
+
+
+/* Tsukimera 2.0 · live Canvas Disk map (reuses the black/gold visual language) */
+.bk-sheet:has(.dkx-live-map){width:min(1080px,calc(100vw - 28px));max-width:1080px}
+.dkx-live-map{display:grid;gap:12px;min-width:0;color:var(--text,#e8e7ec)}
+.dkx-map-intro{display:grid;gap:3px;font-size:13px}
+.dkx-map-intro p{margin:0;line-height:1.5}
+.dkx-map-intro strong{font-size:14px}
+.dkx-map-intro small{color:var(--muted,#a5a2af)}
+.dkx-map-tools{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.dkx-map-search{flex:1 1 240px;min-width:120px;max-width:100%;border:1px solid rgba(190,175,141,.19);border-radius:10px;background:rgba(5,5,8,.35);color:inherit;padding:10px 12px}
+.dkx-map-controls{display:flex;align-items:center;gap:5px}
+.dkx-map-controls .btn{min-width:36px}
+.dkx-map-selected{font-size:12px;line-height:1.5;color:var(--muted,#b6b2c1);min-height:18px;overflow-wrap:anywhere}
+.dkx-map-frame{position:relative;width:100%;border:1px solid rgba(217,164,65,.24);border-radius:16px;overflow:hidden;background:radial-gradient(ellipse at 50% 44%,rgba(220,170,85,.085),transparent 48%),radial-gradient(ellipse at 80% 90%,rgba(107,136,208,.06),transparent 56%),#08090d}
+.dkx-map-canvas{display:block;width:100%;height:410px;touch-action:none;cursor:grab}
+.dkx-map-canvas:active{cursor:grabbing}
+.dkx-map-canvas:focus-visible{outline:2px solid var(--brand,#d9a441);outline-offset:-4px}
+.dkx-map-tip{position:absolute;z-index:2;max-width:220px;pointer-events:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;background:rgba(22,22,28,.96);color:#f7e6c3;padding:7px 10px;border:1px solid rgba(217,164,65,.46);border-radius:8px;box-shadow:0 8px 22px rgba(0,0,0,.35)}
+.dkx-map-tip[hidden]{display:none}
+.dkx-map-legend{display:flex;flex-wrap:wrap;gap:8px 15px;font-size:11px;color:var(--muted,#9d9aac)}
+.dkx-legend-root{color:#d9a441}.dkx-legend-folder{color:#8ca8ed}.dkx-legend-file{color:#d7dde8}.dkx-legend-copy{color:#fcb250}.dkx-legend-tag{color:#53d2b4}
+.dkx-map-folders{display:flex;flex-wrap:wrap;align-items:center;gap:5px;max-height:110px;overflow:auto;border-top:1px solid rgba(170,168,175,.12);padding-top:10px}
+.dkx-map-folders>strong{flex:0 0 100%;font-size:12px;color:var(--muted,#a6a2ae)}
+.dkx-map-folder-btn{cursor:pointer;border:1px solid rgba(170,170,180,.18);border-radius:9px;padding:6px 10px;color:inherit;background:rgba(180,175,185,.05);font-size:11px}
+.dkx-map-folder-btn:hover,.dkx-map-folder-btn:focus-visible{border-color:var(--brand,#d9a441);background:rgba(220,170,85,.12)}
+
+/* Real-data chart explorer, inside the already existing metric details sheet. */
+.bk-sheet:has(.dkl-explorer){width:min(930px,calc(100vw - 28px));max-width:930px}
+.dkl-explorer{display:grid;gap:10px;min-width:0;margin:10px 0 18px;padding:12px;border-radius:13px;border:1px solid rgba(217,164,65,.24);background:rgba(217,164,65,.035)}
+.dkl-explorer-title{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px}
+.dkl-explorer-title strong{font-size:13px}.dkl-explorer-title small,.dkl-explorer-range{color:var(--muted,#aaa5b1);font-size:11px}
+.dkl-explorer-actions{display:flex;gap:5px;flex-wrap:wrap}
+.dkl-explorer-actions .btn{min-width:36px}
+.dkl-explorer-plot{height:260px;min-width:0;position:relative;overflow:hidden;border-radius:9px;background:rgba(5,5,9,.26)}
+.dkl-explorer-plot svg{width:100%;height:100%;display:block;touch-action:none;cursor:crosshair}
+.dkl-explorer-plot svg:focus-visible{outline:2px solid var(--brand,#d9a441);outline-offset:-4px}
+.dkl-explorer-grid{stroke:rgba(171,165,176,.2);stroke-width:1}
+.dkl-explorer-axis{fill:#9b98a6;font:12px system-ui,sans-serif;pointer-events:none}
+.dkl-explorer-bar{fill:var(--brand,#d9a441);fill-opacity:.75;cursor:crosshair}
+.dkl-explorer-line{fill:none;stroke:var(--brand,#d9a441);stroke-width:3;vector-effect:non-scaling-stroke}
+.dkl-explorer-dot{fill:#fbe7bd;stroke:var(--brand,#d9a441);stroke-width:2;cursor:crosshair}
+.dkl-explorer-tip{position:absolute;max-width:200px;padding:7px 9px;border:1px solid rgba(217,164,65,.45);border-radius:7px;background:rgba(20,20,25,.97);color:#f8dfb0;pointer-events:none;font-size:12px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;z-index:2}
+.dkl-explorer-tip[hidden]{display:none}
+.dkl-explorer p.muted{font-size:11px;line-height:1.5;margin:0}
+@media(max-width:600px){
+  .dkx-live-map{gap:8px}
+  .dkx-map-canvas{height:min(48vh,340px)}
+  .dkx-map-tools{gap:6px}
+  .dkx-map-controls .btn{padding:6px 9px}
+  .dkl-explorer{padding:8px}
+  .dkl-explorer-plot{height:215px}
+}
+@media(prefers-reduced-motion:reduce){
+  .dkx-map-canvas,.dkl-explorer-plot svg{scroll-behavior:auto}
+}
