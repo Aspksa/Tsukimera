@@ -16,6 +16,12 @@ test("Disk smart folders, rename preview, column preferences and safe file links
   const result=await prepareDisk(root);
   const module=await import(pathToFileURL(join(result.outputRoot,"web/pages/disk-extras.js")).href);
   const files=[mock("a.txt","1"),mock("b.txt","2"),mock("record.pdf","3","Документы")];
+  const apiModule=await import(pathToFileURL(join(result.outputRoot,"web/api.js")).href);
+  const list={files:[files[0],files[2]],trash:[files[1]]};
+  assert.deepEqual(apiModule.resolveFileLink({id:"1",name:"старое имя.txt"},list),
+    {id:"1",name:"a.txt",status:"active"},"A rename must not break note links");
+  assert.deepEqual(apiModule.resolveFileLink({id:"2",name:"b.txt"},list).status,"trash");
+  assert.deepEqual(apiModule.resolveFileLink({id:"gone",name:"deleted.txt"},list).status,"missing");
   const plan=module.renamePlan(files.slice(0,2),files,"{name}_{n}.{ext}",7);
   assert.deepEqual(plan.map(x=>x.to),["a_07.txt","b_08.txt"]);
   assert.ok(plan.every(x=>x.valid));
