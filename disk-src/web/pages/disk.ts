@@ -213,7 +213,10 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
     { icon: "zipDown", label: current && view === "all" && virtual === "none" ? "Скачать папку ZIP-архивом" : "Скачать весь Диск ZIP-архивом", run: () => void downloadZip({ folder: view === "all" && virtual === "none" ? current : "" }) },
     { icon: "chronicle", label: "Жизнь документов", run: () => life.reveal() },
     { icon: "search", label: "Палитра команд · Ctrl+K", run: () => showCommands() },
-    { icon: "folder", label: "Карта занятого места", run: () => openDiskMap(all,folder=>go({folder})) },
+    { icon: "folder", label: "Живая карта файлов и связей", run: () => openDiskMap(all,folders,folder=>go({folder}),id=>{
+      const file=byId(id);if(!file)return;
+      go({folder:file.folder});reveal(id);openInfo(id);
+    }) },
     { icon: "folderPlus", label: "Умные папки", run: () => editSmartFolders() },
     { icon: "table", label: "Колонки таблицы", run: () => customizeColumns() },
     { icon: "audit", label: "Проверка файлов", run: () => void openAudit() },
@@ -713,7 +716,10 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
       {label:"Загрузить файлы",run:chooseFiles},
       {label:"Загрузить папку",run:chooseFolder},
       {label:"Создать папку",run:()=>void createFolder(uploadFolder())},
-      {label:"Карта занятого пространства",run:()=>openDiskMap(all,folder=>go({folder}))},
+      {label:"Живая карта файлов и связей",run:()=>openDiskMap(all,folders,folder=>go({folder}),id=>{
+      const file=byId(id);if(!file)return;
+      go({folder:file.folder});reveal(id);openInfo(id);
+    })},
       {label:"Умные папки",run:editSmartFolders},
       {label:"Колонки таблицы",run:customizeColumns},
       {label:"Жизнь документов",run:()=>life.reveal()},
