@@ -1,11 +1,15 @@
 import { createServer } from "node:http";
 import { readFile, mkdir, writeFile, rename } from "node:fs/promises";
 import { resolve, join } from "node:path";
+import { pathToFileURL } from "node:url";
+import { prepareDisk } from "./build-disk.mjs";
+import { createDiskRouter } from "./disk-routes.mjs";
 
 const FILES = new Map([
   ["/", ["web/index.html", "text/html; charset=utf-8"]],
   ["/app.js", ["web/app.js", "text/javascript; charset=utf-8"]],
   ["/tsukimera.css", ["web/tsukimera.css", "text/css; charset=utf-8"]],
+  ["/disk.css", ["web/disk.css", "text/css; charset=utf-8"]],
   ["/juunibi-style.css", ["web/juunibi-style.css", "text/css; charset=utf-8"]],
   ["/juunibi-nav.css", ["web/juunibi-nav.css", "text/css; charset=utf-8"]],
   ["/juunibi-design.css", ["web/juunibi-design.css", "text/css; charset=utf-8"]],
@@ -96,6 +100,8 @@ export function createAppServer({ root, dataDir = join(root, "data") }) {
   let config = structuredClone(DEFAULTS);
   const file = join(dataDir, "settings.json");
   let writeQueue = Promise.resolve();
+  let diskRouter = null;
+  let diskStore = null;
 
   async function load() {
     try {
@@ -104,7 +110,18 @@ export function createAppServer({ root, dataDir = join(root, "data") }) {
     } catch (error) {
       if (error.code !== "ENOENT") console.error("Настройки не загружены: ", error.message);
     }
+    await prepareDisk(root);
+    const built=join(root,".runtime","disk-built","server");
+    const [{LocalDisk},{zipStream,zipLength},{collectLife}]=await Promise.all([
+      import(pathToFileURL(join(built,"local-disk.js")).href),
+      import(pathToFileURL(join(built,"zip-write.js")).href),
+      import(pathToFileURL(join(built,"disk-life.js")).href),
+    ]);
+    diskStore=new LocalDisk(join(dataDir,"disk"));
+    await diskStore.load();
+    diskRouter=createDiskRouter({disk:diskStore,zipStream,zipLength,collectLife});
   }
+    // No background service or separate port: disk lives in this same loopback app.
   async function save() {
     await mkdir(dataDir, { recursive: true });
     const tmp = join(dataDir, "settings.tmp-" + process.pid);
@@ -132,7 +149,28 @@ export function createAppServer({ root, dataDir = join(root, "data") }) {
   }
   const server = createServer(async (req, res) => {
     try {
-      const pathname = new URL(req.url, "http://localhost").pathname;
+      const url = new URL(req.url, "http://localhost");
+      const pathname = url.pathname;
+      const host=String(req.headers.host||"");
+      if(!/^(127\.0\.0\.1|localhost|\[::1\]):[0-9]{1,5}$/.test(host))
+        return json(res,403,{error:"Доступ разрешён только через локальный адрес"});
+      if(req.headers.origin&&req.headers.origin!=="http://"+host)
+        return json(res,403,{error:"Запрещён запрос с другого сайта"});
+      if(req.headers["sec-fetch-site"]==="cross-site")
+        return json(res,403,{error:"Межсайтовый запрос запрещён"});
+      if (pathname.startsWith("/api/disk")) {
+        if(!diskRouter)return json(res,503,{error:"Диск не запущен"});
+        return diskRouter.handle(req,res,url);
+      }
+      if(pathname.startsWith("/disk-built/")){
+        if((req.method!=="GET"&&req.method!=="HEAD")||
+          !/^\/disk-built\/web\/(?:pages\/)?[a-z0-9-]+\.js$/.test(pathname))
+          return json(res,404,{error:"Нет такого модуля"});
+        const file=join(root,".runtime","disk-built",pathname.slice("/disk-built/".length));
+        const body=await readFile(file);
+        res.writeHead(200,{...headers,"Content-Type":"text/javascript; charset=utf-8"});
+        return res.end(req.method==="HEAD"?undefined:body);
+      }
       if (pathname === "/api/status" && req.method === "GET") {
         return json(res, 200, { project: "Tsukimera", ready: true, aiConnected: false, version: "0.1.0" });
       }
@@ -158,5 +196,5 @@ export function createAppServer({ root, dataDir = join(root, "data") }) {
       json(res, error.status || 500, { error: error.status ? error.message : "Внутренняя ошибка сервера" });
     }
   });
-  return { server, load, getSettings: () => structuredClone(config) };
+  return { server, load, getSettings: () => structuredClone(config), getDisk:()=>diskStore };
 }

@@ -324,6 +324,17 @@ function renderMain() {
   const item=NAV.find(n=>n.id===route);
   topTitle.textContent='Tsukimera · '+(item?.label||'Настройки');
   if(route==='settings') return renderSettings();
+  if(route==='disk'){
+    mainNode.append(el('p','muted','Открываю Диск…'));
+    void import('/disk-built/web/pages/disk.js').then(({diskPage})=>{
+      if(route!=='disk'||mainNode.dataset.route!=='disk')return;
+      mainNode.replaceChildren(diskPage());
+    }).catch(error=>{
+      console.error('Tsukimera Disk:',error);
+      if(route==='disk')mainNode.replaceChildren(el('p','muted','Не удалось открыть Диск: '+error.message));
+    });
+    return;
+  }
   const wrap=el('div','page');wrap.append(heading(item.label, 'Новое пространство Tsukimera на базе интерфейса JUUNIBI.',item.icon));
   if(route==='tasks') {
     const card=el('section','pg-card');
@@ -334,6 +345,15 @@ function renderMain() {
     const list=el('ul','quick-list');
     for(const n of [...notes].reverse()){
       const li=el('li');li.append(el('span','grow',n.text));
+      if(Array.isArray(n.files)&&n.files.length){
+        const links=el('div','set-controls');
+        for(const file of n.files){
+          const open=btn('📎 '+file.name,()=>go('disk'),'btn sm');
+          open.title='Открыть Диск: '+file.name;
+          links.append(open);
+        }
+        li.append(links);
+      }
       li.append(iconBtn('trash','Удалить заметку',()=>{
         notes=notes.filter(x=>x.id!==n.id);writeLocal(KEY_NOTES,notes);renderMain();renderMenu();
       }));
@@ -689,6 +709,10 @@ async function init() {
   createShell();
   bindKeys();
   await loadConfig();
+  window.addEventListener('tsukimera:notes-changed',()=>{
+    notes=readLocal(KEY_NOTES,[]);
+    if(route==='tasks')renderMain();
+  });
   renderMenu();renderMain();
   window.addEventListener('hashchange',()=>{
     const next=currentRoute();

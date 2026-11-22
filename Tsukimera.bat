@@ -20,7 +20,7 @@ if exist "%NODE_DIR%\node.exe" (
   if not errorlevel 1 goto have_node
 )
 
-echo Node.js 20+ not found. Downloading portable runtime...
+echo Node.js 22.16+ not found. Downloading portable runtime...
 powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT%\scripts\bootstrap-node.ps1" -Dest "%RUNTIME%"
 if errorlevel 1 goto node_error
 set "PATH=%NODE_DIR%;%PATH%"
@@ -42,7 +42,7 @@ pause
 exit /b 1
 
 :node_error
-echo [ERROR] Node.js bootstrap failed. Check internet or install Node.js 20+.
+echo [ERROR] Node.js bootstrap failed. Check internet or install Node.js 22.16+.
 pause
 exit /b 1
 
@@ -53,5 +53,5 @@ pause
 exit /b %RC%
 
 :check_node
-node -e "process.exit(Number(process.versions.node.split('.')[0])>=20?0:1)" >nul 2>&1
+node -e "const v=process.versions.node.split('.').map(Number);process.exit(v[0]>22||(v[0]===22&&v[1]>=16)?0:1)" >nul 2>&1
 exit /b %ERRORLEVEL%

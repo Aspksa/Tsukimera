@@ -1,0 +1,170 @@
+/**
+ * «Жизнь документов»: 150 figures about the Disk (counted on this computer by the server, see
+ * apps/server/src/disk-life.ts), drawn like «Жизнь проекта»: big highlights on top, then one group at a time,
+ * each figure a tile with its own two-tone glyph and a small chart. No inner scrollbars: the page scrolls.
+ */
+import { api, type DiskLife, type DiskLifeMetric } from "../api";
+import { el, icon, iconButton } from "../dom";
+import { lifeGlyph } from "./disk-life-icons";
+import { barChart, miniChart, ringChart } from "./life-charts";
+import { agoText } from "./project-life";
+
+const GROUP_KEY = "juunibi.disk.life.group";
+const HOURS_LABEL = ["0", "6", "12", "18", "23"];
+
+/** How many figures of a group have something to show. */
+export const readyIn = (metrics: DiskLifeMetric[], group: string) => metrics.filter((m) => m.group === group && !m.empty).length;
+
+const store = {
+  get: () => { try { return localStorage.getItem(GROUP_KEY) ?? ""; } catch { return ""; } },
+  set: (v: string) => { try { localStorage.setItem(GROUP_KEY, v); } catch { /* private mode */ } },
+};
+
+/** Twelve weeks of uploads as a heat grid, Monday on top. */
+function heat(series: number[]): HTMLElement {
+  const max = Math.max(1, ...series);
+  return el("div", { cls: "life-heat dkl-heat", attrs: { "aria-hidden": "true" } }, ...series.map((v, i) => {
+    const c = el("i", { title: `${v}` });
+    c.style.setProperty("--a", v ? String(0.25 + (0.75 * v) / max) : "0");
+    c.style.setProperty("--d", String(i));
+    return c;
+  }));
+}
+
+function chart(m: DiskLifeMetric): Element | null {
+  if (m.empty) return null;
+  if (m.kind === "hours" && m.series) return el("div", {}, barChart(m.series, m.series.map((_, h) => `${h}:00`), "dkl-hours"), el("div", { cls: "life-axis" }, ...HOURS_LABEL.map((x) => el("span", { textContent: x }))));
+  if (m.kind === "calendar" && m.series) return heat(m.series);
+  if (m.kind === "list") return m.list?.length ? el("ul", { cls: "life-list" }, ...m.list.map((x) => el("li", { textContent: x }))) : null;
+  if (m.kind === "swatches" && !m.list?.length) return null;
+  if ((m.kind === "spark" || m.kind === "line") && m.series && !m.series.some(Boolean)) return el("div", { cls: "dkl-flat", textContent: "пока ровно" });
+  return miniChart(m.kind, m.series, m.labels, m.list);
+}
+
+function tile(m: DiskLifeMetric, color: string, i: number): HTMLElement {
+  const ring = typeof m.ring === "number" && !m.empty ? ringChart(m.ring) : null;
+  const c = chart(m);
+  const t = el("article", { cls: "dkl-tile" + (m.empty ? " is-empty" : ""), title: m.hint, attrs: { tabindex: "0", "data-id": m.id } },
+    el("div", { cls: "dkl-tile-top" },
+      el("span", { cls: "dkl-ic" }, lifeGlyph(m.icon, m.group, 22)),
+      el("div", { cls: "dkl-name" }, el("strong", { textContent: m.title }), el("small", { textContent: m.hint }))),
+    el("div", { cls: "dkl-value-row" }, el("div", { cls: "dkl-value", textContent: m.value }), ring),
+    m.detail && !m.empty ? el("p", { cls: "dkl-detail", textContent: m.detail }) : null,
+    c ? el("div", { cls: "dkl-chart" }, c) : null);
+  t.style.setProperty("--g", color);
+  t.style.setProperty("--i", String(i));
+  return t;
+}
+
+/** The six groups shown on the quiet card of an empty Disk. */
+const BLANK_GLYPHS: [string, string][] = [["kinds", "#38bdf8"], ["pulse", "#22c55e"], ["words", "#6366f1"], ["links", "#fb7185"], ["media", "#84cc16"], ["fun", "#ff6fa8"]];
+
+/** `isEmpty` says the Disk has no files at all (nor in the trash): then one quiet card instead of 150 dashes. */
+export function diskLifePanel(isEmpty: () => boolean = () => false): { root: HTMLElement; refresh: () => void; reveal: () => void } {
+  const root = el("section", { cls: "dkl", attrs: { id: "disk-life", "aria-label": "Жизнь документов" } });
+  let data: DiskLife | null = null, error = "", loading = false, stale = true, visible = false, timer = 0;
+  let group = store.get();
+  const body = el("div", { cls: "dkl-body" });
+  const refreshBtn = iconButton("refresh", "Пересчитать показатели", () => void load(), "icon-btn dkl-refresh");
+  // no title of its own: the block opens straight with the highlights; refresh sits by the open group's name
+  root.append(body);
+
+  const color = (id: string) => data?.groups.find((g) => g.id === id)?.color ?? "var(--brand)";
+  function flash(id: string) {
+    const t = body.querySelector<HTMLElement>(`.dkl-tile[data-id="${CSS.escape(id)}"]`);
+    if (!t) return;
+    t.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    t.classList.remove("flash"); void t.offsetWidth; t.classList.add("flash");
+    t.focus({ preventScroll: true });
+  }
+
+  const blank = el("div", { cls: "dkl-blank" },
+    el("span", { cls: "dkl-ic lg" }, lifeGlyph("pulse", "core", 26)),
+    el("div", { cls: "dkl-blank-text" },
+      el("b", { textContent: "Жизнь документов начнётся с первого файла" }),
+      el("small", { textContent: "150 показателей: типы файлов, пульс загрузок, слова, связи между документами и забавные рекорды" })),
+    el("div", { cls: "dkl-blank-glyphs", attrs: { "aria-hidden": "true" } }, ...BLANK_GLYPHS.map(([name, c]) => {
+      const i = el("span", { cls: "dkl-ic sm" }, lifeGlyph(name, "core", 18));
+      i.style.setProperty("--g", c);
+      return i;
+    })));
+
+  let blankShown = false;
+  function render() {
+    refreshBtn.classList.toggle("spin", loading);
+    refreshBtn.disabled = loading;
+    blankShown = isEmpty();
+    if (blankShown) { body.replaceChildren(blank); return; }
+    if (!data) {
+      body.replaceChildren(error
+        ? el("div", { cls: "life-empty dkl-empty" }, el("span", {}, icon("alert", 26)), el("p", { textContent: error }), refreshBtn)
+        : el("div", { cls: "dkl-skeleton", attrs: { "aria-label": "Считаю показатели" } }, ...Array.from({ length: 10 }, () => el("i"))));
+      return;
+    }
+    const d = data;
+    const a = d.analysis;
+    refreshBtn.title = [
+      "Пересчитать показатели",
+      `посчитано ${agoText(d.generatedAt)}`,
+      a.documents ? `прочитано ${a.read} из ${a.documents} документов` : "",
+      a.images ? `измерено ${a.measured} из ${a.images} снимков` : "",
+    ].filter(Boolean).join(" · ");
+    if (!d.groups.some((g) => g.id === group)) group = d.groups[0]!.id;
+    const byId = new Map(d.metrics.map((m) => [m.id, m]));
+    const hl = el("div", { cls: "dkl-hl" }, ...d.highlights.map((id) => byId.get(id)).filter((m): m is DiskLifeMetric => !!m).map((m, i) => {
+      const g = d.groups.find((x) => x.id === m.group)!;
+      const c = m.empty ? null : m.kind && m.kind !== "list" ? miniChart(m.kind, m.series, m.labels, m.list) : typeof m.ring === "number" ? ringChart(m.ring) : null;
+      const card = el("button", { type: "button", cls: "dkl-hl-card" + (m.empty ? " is-empty" : ""), title: `${m.hint} — открыть «${g.title}»` },
+        el("span", { cls: "dkl-ic" }, lifeGlyph(m.icon, m.group, 22)),
+        el("b", { textContent: m.value }), el("small", { textContent: m.title }),
+        c ? el("span", { cls: "dkl-hl-chart" }, c) : null);
+      card.style.setProperty("--g", g.color);
+      card.style.setProperty("--i", String(i));
+      card.addEventListener("click", () => { group = m.group; store.set(group); render(); flash(m.id); });
+      return card;
+    }));
+    const tabs = el("div", { cls: "dkl-tabs", attrs: { role: "tablist", "aria-label": "Группы показателей" } }, ...d.groups.map((g) => {
+      const ready = readyIn(d.metrics, g.id), total = d.metrics.filter((m) => m.group === g.id).length;
+      // the bar along the bottom fills with the share of figures that already have data
+      const b = el("button", { type: "button", cls: "dkl-tab", attrs: { role: "tab", "aria-selected": String(g.id === group), title: `${g.title}: ${g.note} · с данными ${ready} из ${total}` } },
+        el("span", { cls: "dkl-ic" }, lifeGlyph(g.icon, g.id, 20)),
+        el("span", { cls: "dkl-tab-name", textContent: g.title }),
+        el("i", { cls: "dkl-tab-bar", attrs: { "aria-hidden": "true" } }));
+      b.style.setProperty("--g", g.color);
+      b.style.setProperty("--p", String(total ? Math.round((100 * ready) / total) : 0));
+      b.addEventListener("click", () => { group = g.id; store.set(group); render(); });
+      return b;
+    }));
+    tabs.addEventListener("keydown", (e) => {
+      if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
+      const i = d.groups.findIndex((g) => g.id === group), n = d.groups.length;
+      group = d.groups[(i + (e.key === "ArrowRight" ? 1 : n - 1)) % n]!.id; store.set(group); render();
+      root.querySelector<HTMLElement>('.dkl-tab[aria-selected="true"]')?.focus();
+    });
+    const g = d.groups.find((x) => x.id === group)!;
+    const items = d.metrics.filter((m) => m.group === g.id);
+    const gh = el("div", { cls: "dkl-group-head" }, el("span", { cls: "dkl-ic lg" }, lifeGlyph(g.icon, g.id, 26)), el("div", { cls: "dkl-group-text" }, el("h3", { textContent: g.title }), el("p", { textContent: g.note })), refreshBtn);
+    gh.style.setProperty("--g", g.color);
+    body.replaceChildren(hl, tabs, gh, el("div", { cls: "dkl-grid" }, ...items.map((m, i) => tile(m, g.color, i))));
+  }
+
+  async function load() {
+    if (loading) return;
+    if (isEmpty()) { render(); return; }
+    loading = true; stale = false; render();
+    const r = await api.diskLife();
+    loading = false;
+    if (r.ok && r.value.groups?.length) { data = r.value; error = ""; }
+    else error = data ? "" : "Не удалось посчитать: " + (r.ok ? "пустой ответ" : r.error.message);
+    render();
+  }
+  // figures are counted only when the block is on screen, and again after the catalogue changes
+  const io = typeof IntersectionObserver === "function" ? new IntersectionObserver((es) => { visible = es.some((e) => e.isIntersecting); if (visible && stale) void load(); }, { rootMargin: "300px" }) : null;
+  if (io) io.observe(root); else visible = true;
+  render();
+  return {
+    root,
+    refresh: () => { stale = true; clearTimeout(timer); if (isEmpty() !== blankShown) render(); if (visible) timer = window.setTimeout(() => void load(), data ? 1200 : 0); },
+    reveal: () => { root.scrollIntoView({ behavior: "smooth", block: "start" }); if (stale) void load(); },
+  };
+}
