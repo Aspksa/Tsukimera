@@ -121,3 +121,42 @@ test("settings validation and code syntax support stock Node without packages",a
   assert.match(bat,/DisableDelayedExpansion/);
   assert.match(bat,/bootstrap-node\.ps1/);
 });
+
+
+test("Kiyomira typography, line-height and 4-32px spacing are ported without breaking Tsukimera settings",async()=>{
+  const css=await readFile(join(root,"web/tsukimera.css"),"utf8");
+  const html=await readFile(join(root,"web/index.html"),"utf8");
+  // Exact source values: Kiyomira/10-Веб/02-Стиль.css.
+  assert.match(css,/--mono:ui-monospace,SFMono-Regular,Menlo,Consolas/);
+  assert.match(css,/--font:var\(--mono\)/);
+  assert.match(css,/font-size:clamp\(14px,\.5vw \+ 8px,30px\)/);
+  assert.match(css,/--gap:clamp\(12px,\.6rem \+ \.8vw,32px\)/);
+  assert.match(css,/--pad:clamp\(16px,1rem \+ 2\.2vw,72px\)/);
+  assert.match(css,/body\{font-family:var\(--font\);line-height:1\.5/);
+  // Exact design tokens: Kiyomira/10-Веб/05-ЕдиныйИнтерфейс.css.
+  assert.match(css,/--ki-space-1:4px;--ki-space-2:8px;--ki-space-3:12px/);
+  assert.match(css,/--ki-space-4:16px;--ki-space-5:24px;--ki-space-6:32px/);
+  assert.match(css,/--ki-type-small:clamp\(11px,\.7vw \+ 8px,13px\)/);
+  assert.match(css,/--ki-type-body:clamp\(13px,\.45vw \+ 11px,16px\)/);
+  assert.match(css,/--ki-type-title:clamp\(17px,\.75vw \+ 13px,22px\)/);
+  for(const selector of [".nav-item{",".pg-card{",".pg-head{",".set-layout{",
+      ".set-card .set-row{",".set-toc-link{",".set-card-head h2{",".set-search{",
+      ".beh-field{",".quick-list li{",".content-main{"]){
+    assert.ok(css.includes(selector),"Missing Kiyomira layout override "+selector);
+  }
+  assert.match(css,/\.nav-item\{\s*gap:var\(--ki-space-3\);\s*padding:\.75rem \.8rem/);
+  assert.match(css,/\.btn\{padding:\.7em 1\.2em;line-height:1\.5\}/);
+  assert.match(css,/\.set-row small\{[^}]*line-height:1\.6\}/);
+  // Visual overrides must load after all JUUNIBI layers.
+  const vendor=html.indexOf('href="/juunibi-design.css"');
+  const custom=html.indexOf('href="/tsukimera.css"');
+  assert.ok(vendor>=0&&custom>vendor);
+  // Existing UI-size options and mobile layout remain functional.
+  for(const scale of ["sm","md","lg"])
+    assert.ok(css.includes(":root[data-scale="+scale+"]"),"Scale setting lost: "+scale);
+  assert.match(css,/@media\(max-width:860px\)\{[\s\S]*?\.content-main\{padding:var\(--ki-space-4\) var\(--ki-space-3\) 95px\}/);
+  assert.match(css,/@media\(max-width:450px\)\{/);
+  const client=await readFile(join(root,"web/app.js"),"utf8");
+  assert.match(client,/scale:pick\('scale',\['sm','md','lg'\],'md'\)/);
+  assert.match(client,/html\.dataset\.scale=ui\.scale/);
+});
