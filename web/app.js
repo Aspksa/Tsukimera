@@ -517,7 +517,7 @@ async function saveSettings(patch) {
     if(!response.ok)throw Error(json.error||'Ошибка сохранения');
     config=json.settings;serverAvailable=true;
     toast('Настройки сохранены локально');
-    if(route==='settings')renderMain();
+    // Do not destroy unsaved edits elsewhere in the settings form.
     renderMenu();return true;
   }catch(err){toast('Не сохранено: '+err.message);return false;}
 }
@@ -554,6 +554,136 @@ function choices(title,desc,options,value,onSelect) {
   }
   return line(title,desc,container);
 }
+async function tsApi(path,options){
+  const result=await fetch(path,options);
+  const data=await result.json().catch(()=>({}));
+  if(!result.ok)throw Error("HTTP "+result.status+" · "+(data.error||"Ошибка запроса"));
+  return data;
+}
+function tsPost(path,record){
+  return tsApi(path,{method:"POST",headers:{
+    "Content-Type":"application/json","X-Tsukimera-Request":"1"},
+    body:JSON.stringify(record)});
+}
+let cachedCloudModels=[];
+function modelPicker(label,currentField){
+  const box=el("div","set-model-chooser");
+  const search=el("input","set-model-search");search.type="search";
+  search.placeholder="Поиск по списку Cloud.ru";search.setAttribute("aria-label",label+": поиск модели");
+  const select=el("select","set-model-list");select.setAttribute("aria-label",label+": выбрать модель");
+  select.disabled=true;
+  const status=el("small","set-note","Получаю список моделей только при наличии ключа.");
+  const update=()=>{
+    const q=search.value.trim().toLowerCase();
+    const models=cachedCloudModels.filter(model=>model.toLowerCase().includes(q));
+    select.replaceChildren();
+    const placeholder=el("option","",models.length?"Выберите модель из "+models.length:"Нет совпадений");
+    placeholder.value="";select.append(placeholder);
+    for(const name of models){const opt=el("option","",name);opt.value=name;select.append(opt);}
+    select.disabled=models.length===0;
+    status.textContent=cachedCloudModels.length+" доступных моделей · "+models.length+" найдено";
+  };
+  search.addEventListener("input",update);
+  select.addEventListener("change",()=>{if(select.value)currentField.input.value=select.value;});
+  const refresh=btn("Обновить список",async()=>{
+    refresh.disabled=true;
+    try{
+      const out=await tsApi("/api/cloud/models");
+      cachedCloudModels=out.models||[];update();
+    }catch(error){status.textContent=error.message;}
+    finally{refresh.disabled=false;}
+  },"btn");
+  box.append(search,select,refresh,status);
+  void tsApi("/api/cloud/status").then(info=>{
+    if(!box.isConnected)return;
+    if(info.configured)refresh.click();
+    else status.textContent="Добавьте API-ключ в разделе «Подключение».";
+  }).catch(()=>{status.textContent="Сервис Cloud.ru недоступен.";});
+  return box;
+}
+function cloudConnectionPanel(body){
+  const key=el("input","set-cloud-key");key.type="password";key.maxLength=4096;
+  key.autocomplete="off";key.spellcheck=false;
+  key.placeholder="Key Secret Cloud.ru (не сохраняется на диск)";
+  key.setAttribute("aria-label","API-ключ Foundation Models");
+  const status=el("p","set-connection-state","Проверяю Cloud.ru…");
+  status.setAttribute("role","status");
+  const check=btn("Проверить подключение",async()=>{
+    check.disabled=true;status.textContent="Проверяю ключ по GET /v1/models…";
+    try{
+      if(key.value.trim()){await tsPost("/api/cloud/key",{key:key.value});key.value="";}
+      const result=await tsApi("/api/cloud/models");
+      cachedCloudModels=result.models;
+      status.textContent="Подключено · Cloud.ru вернул "+result.models.length+
+        " моделей · "+new Date(result.checkedAt).toLocaleString("ru-RU");
+      status.dataset.state="ok";
+    }catch(error){
+      status.dataset.state="error";
+      status.textContent=error.message+" · модель не вызывалась, расходы на генерацию не создавались.";
+    }finally{check.disabled=false;}
+  },"btn primary");
+  const disconnect=btn("Отключить",async()=>{
+    try{await tsPost("/api/cloud/clear",{});cachedCloudModels=[];
+      status.dataset.state="off";status.textContent="Cloud.ru отключён от этого запуска.";}
+    catch(error){status.textContent=error.message;}
+  });
+  const buttons=el("div","set-controls");buttons.append(check,disconnect);
+  body.append(line("Foundation Models","Официальный endpoint: foundation-models.api.cloud.ru/v1",
+    el("span","set-cloud-endpoint","Только чтение списка моделей")),
+    line("Ключ API","Принимается только локальным сервером. Не записывается в SQLite, JSON или браузерное хранилище.",key),
+    buttons,status);
+  const help=el("p","set-note");
+  const link=el("a","","Документация Cloud.ru");
+  link.href="https://cloud.ru/docs/foundation-models/ug/topics/api-ref__authentication";
+  link.target="_blank";link.rel="noopener noreferrer";
+  help.append("Ключ также можно задать в переменной окружения CLOUD_RU_FOUNDATION_MODELS_API_KEY. ",link,
+    ". Здесь нет платного тестового запроса к LLM.");
+  body.append(help);
+  void tsApi("/api/cloud/status").then(result=>{
+    if(!status.isConnected)return;
+    status.dataset.state=result.verified?"ok":result.lastError?"error":"off";
+    status.textContent=result.verified?"Cloud.ru проверен · моделей: "+result.modelsCount:
+      result.lastError?result.lastError.message:
+        result.configured?"Ключ настроен ("+result.source+"), нажмите «Проверить подключение».":"Ключ не указан.";
+  }).catch(()=>{if(status.isConnected)status.textContent="Локальный сервер Cloud.ru недоступен.";});
+}
+function memoryCenterPanel(body){
+  const summary=el("div","set-health-grid");
+  summary.append(el("p","set-note","Читаю реальное состояние SQLite и возможностей памяти…"));
+  body.append(summary);
+  const actions=el("div","set-controls");
+  actions.append(btn("Открыть заметки",()=>go("tasks"),"btn primary"),
+    btn("Перейти к диагностике",()=>{
+      const node=document.getElementById("set-data");
+      node?.classList.remove("collapsed");const inner=node?.querySelector(".set-card-body");
+      if(inner)inner.hidden=false;
+      node?.scrollIntoView({block:"start",behavior:"smooth"});
+    }));
+  body.append(actions);
+  void tsApi("/api/capabilities").then(info=>{
+    if(!summary.isConnected)return;
+    summary.replaceChildren(
+      line("Локальная память заметок",info.notes.stored+" сохранено в SQLite",el("span","set-state ready","Работает")),
+      line("Семантический поиск",info.vectorSearch.reason,el("span","set-state pending","Не подключён")),
+      line("Сводки длинных диалогов",info.summaries.reason,el("span","set-state pending","Не подключены")),
+      line("Автосохранение фактов","Нет работающего движка извлечения и проверки фактов",
+        el("span","set-state pending","Не подключено"))
+    );
+  }).catch(error=>{summary.textContent="Состояние памяти недоступно: "+error.message;});
+  text(body,"Ранее сохранённые предпочтения памяти не стираются, но не исполняются до создания соответствующего модуля.","set-note");
+}
+function toolSafetyPanel(body){
+  body.append(el("p","set-note","Ручные действия пользователя с Диском работают как раньше. Здесь указаны разрешения только для будущих действий ИИ — исполнитель инструментов пока не подключён."));
+  const state=el("div","set-health-grid");body.append(state);
+  void tsApi("/api/capabilities").then(info=>{
+    if(!state.isConnected)return;
+    state.replaceChildren(
+      line("Интернет для ИИ",info.aiTools.reason,el("span","set-state pending","Запрещено")),
+      line("Запись файлов от имени ИИ","Нет исполняющего модуля; настройка не выдаёт доступ к диску",el("span","set-state pending","Запрещено")),
+      line("Предыдущие предпочтения","Интернет: "+(config.tools.web?"да":"нет")+
+        " · запись: "+(config.tools.writeFiles?"да":"нет"),el("span","set-state","Не активны")));
+  }).catch(error=>{state.textContent="Не удалось проверить разрешения: "+error.message;});
+}
 function saveButton(handler) {
   return btn('Сохранить',()=>void handler(),'btn primary');
 }
@@ -581,14 +711,15 @@ function sectionCard(sec) {
 }
 function setupCard(id,body) {
   if(id==='conn') {
-    body.append(line('Подключение Cloud.ru','В новый проект перенесены только дизайн и настройки.',el('span','route-status','Не подключено')));
-    text(body,'В Tsukimera ещё нет облачного клиента. API-ключ не запрашивается и никуда не отправляется. После подключения реального API здесь появятся проверка ключа и статус соединения.','set-note warn');
+    cloudConnectionPanel(body);
   } else if(id==='model') {
     const primary=field('Основная модель',config.model.primary,'text',120);
     const fallback=field('Запасная модель',config.model.fallback,'text',120);
     const reasoning=el('input');reasoning.type='checkbox';reasoning.checked=config.model.reasoning;
     reasoning.setAttribute('aria-label','Включить размышления');
-    body.append(primary.wrap,fallback.wrap,line('Размышления','Предпочтение для будущего подключения модели.',reasoning));
+    body.append(primary.wrap,modelPicker("Основная модель",primary),
+      fallback.wrap,modelPicker("Запасная модель",fallback),
+      line('Размышления','Предпочтение для будущего подключения чата.',reasoning));
     const act=el('div','set-controls');
     act.append(saveButton(()=>saveSettings({model:{primary:primary.input.value.trim(),
       fallback:fallback.input.value.trim(),reasoning:reasoning.checked}})));
@@ -601,32 +732,27 @@ function setupCard(id,body) {
     body.append(saveButton(()=>saveSettings({instructions:{about:about.input.value,style:style.input.value}})));
     text(body,'Инструкции пока не передаются модели: ИИ-движок в Tsukimera не установлен.','set-note');
   } else if(id==='memory') {
-    body.append(switcher('Поиск по смыслу','Резервная настройка эмбеддингов; индексация не работает.',config.memory.embeddings,
-      v=>saveSettings({memory:{embeddings:v}})));
-    body.append(switcher('Сводки длинных диалогов','Настройка для будущей подсистемы.',config.memory.summaries,
-      v=>saveSettings({memory:{summaries:v}})));
-    body.append(choices('Предлагать сохранение фактов','Пока не запускает фоновую память.',
-      [{id:'off',label:'Выключено'},{id:'rules',label:'По правилу'},{id:'smart',label:'Умное'}],
-      config.memory.suggestions,v=>void saveSettings({memory:{suggestions:v}})));
+    memoryCenterPanel(body);
   } else if(id==='tools') {
-    body.append(switcher('Доступ к интернету','Только запомнить предпочтение. Реальных инструментов нет.',config.tools.web,
-      v=>saveSettings({tools:{web:v}})));
-    body.append(switcher('Разрешать запись файлов','Не даёт файловых разрешений действующему процессу.',config.tools.writeFiles,
-      v=>saveSettings({tools:{writeFiles:v}})));
-    text(body,'Эти переключатели не запускают внешние инструменты и не меняют права операционной системы.','set-note');
+    toolSafetyPanel(body);
   } else if(id==='quick') {
     const list=el('ul','quick-list');
     for(const item of config.quickCommands){
       const li=el('li');li.append(el('code','','/'+item.name),el('span','grow',item.text));
-      li.append(iconBtn('trash','Удалить команду',()=>void saveSettings({quickCommands:config.quickCommands.filter(x=>x.name!==item.name)})));
+      li.append(iconBtn('trash','Удалить команду',async()=>{
+        if(await saveSettings({quickCommands:config.quickCommands.filter(x=>x.name!==item.name)}))renderMain();
+      }));
       list.append(li);
     }
     body.append(list);
     const name=field('Название команды, без /','','text',24);
     const value=field('Текст команды','','textarea',1500);
     body.append(name.wrap,value.wrap);
-    body.append(saveButton(()=>saveSettings({quickCommands:[...config.quickCommands,
-      {name:name.input.value.trim(),text:value.input.value.trim()}]})));
+    body.append(saveButton(async()=>{
+      const ok=await saveSettings({quickCommands:[...config.quickCommands,
+        {name:name.input.value.trim(),text:value.input.value.trim()}]});
+      if(ok)renderMain();
+    }));
     text(body,'Шаблоны сохраняются локально. Выполнение команд будет доступно после подключения чата.','set-note');
   } else if(id==='look') {
     const option=(id,label)=>({id,label});
