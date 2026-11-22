@@ -467,7 +467,7 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
     if (focusId && !shown.some((f) => f.id === focusId)) focusId = null;
     const canWindow=(mode==="list"||mode==="table")&&groupBy==="none"&&shown.length>180;
     let visible:DiskFile[];
-    let before=0,after=0;
+    let beforePx=0,afterPx=0;
     if(canWindow){
       const scroller=document.querySelector<HTMLElement>(".content");
       const r=filesBox.getBoundingClientRect();
@@ -475,11 +475,11 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
       const viewport=scroller?.clientHeight??window.innerHeight;
       const rowHeight=mode==="table"?51:69;
       const win=fileWindow(shown.length,Math.max(0,top-r.top),viewport,rowHeight,24);
-      visible=shown.slice(win.start,win.end);before=win.before;after=win.after;
+      visible=shown.slice(win.start,win.end);beforePx=win.before;afterPx=win.after;
       currentWindow=win.start+"-"+win.end;
     }else{visible=shown.slice(0,limit);currentWindow="";}
     const nodes:HTMLElement[]=[];
-    if(canWindow&&before>0)nodes.push(el("div",{cls:"dk-window-spacer",attrs:{
+    if(canWindow&&beforePx>0)nodes.push(el("div",{cls:"dk-window-spacer",attrs:{
       role:"presentation","aria-hidden":"true"}}));
     let group = "";
     for(const f of visible){
@@ -489,12 +489,12 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
       }
       nodes.push(card(f));
     }
-    if(canWindow&&after>0)nodes.push(el("div",{cls:"dk-window-spacer",attrs:{
+    if(canWindow&&afterPx>0)nodes.push(el("div",{cls:"dk-window-spacer",attrs:{
       role:"presentation","aria-hidden":"true"}}));
     if(canWindow){
       const spacers=nodes.filter(n=>n.classList.contains("dk-window-spacer"));
-      if(before>0)spacers[0]!.style.height=before+"px";
-      if(after>0)spacers[spacers.length-1]!.style.height=after+"px";
+      if(beforePx>0)spacers[0]!.style.height=beforePx+"px";
+      if(afterPx>0)spacers[spacers.length-1]!.style.height=afterPx+"px";
     }
     if(!focusId&&nodes.length){
       const first=nodes.find(n=>n.classList.contains("dk-file"));
