@@ -785,11 +785,11 @@ function setupCard(id,body) {
     }).catch(()=>{if(storage.isConnected)storage.textContent='Не удалось проверить SQLite';});
     text(body,'Экспорт включает настройки, заметки, их ссылки по ID и параметры просмотра Диска — без ключей API. Содержимое файлов и версии нужно сохранить отдельно в разделе «Диск».','set-note');
     const actions=el('div','section-actions');
-    actions.append(btn('Скачать резервную копию',downloadBackup,'btn primary'));
+    actions.append(btn('Скачать резервную копию',()=>void downloadBackup(),'btn primary'));
     const input=el('input');input.type='file';input.accept='application/json,.json';input.setAttribute('aria-label','Импорт файла резервной копии');
     input.addEventListener('change',async()=>{
       const f=input.files?.[0];if(!f)return;
-      if(f.size>100000){toast('Слишком большой файл');return;}
+      if(f.size>1024*1024){toast('Слишком большой файл');return;}
       try {await restoreBackup(JSON.parse(await f.text()));}
       catch(err){toast('Ошибка импорта: '+err.message);}
     });
@@ -810,14 +810,16 @@ function setupCard(id,body) {
 }
 function renderSettings() {
   const page=el('div','page settings-page');
-  const head=heading('Настройки','Из JUUNIBI перенесены разделы, компоновка и управление. Важные параметры сохраняются локально.','settings');
+  const head=heading('Настройки','Локальные настройки Tsukimera · SQLite · реальные возможности помечены по состоянию.','settings');
   page.append(head);
   const search=el('div','set-search');
   search.append(icon('search'));
   const searchInput=el('input');searchInput.type='search';searchInput.placeholder='Поиск по настройкам';
   searchInput.setAttribute('aria-label','Поиск по настройкам');
+  const results=el('small','set-search-results','Поиск по разделам и отдельным параметрам');
+  results.setAttribute('role','status');
   search.append(searchInput,el('kbd','kbd','Ctrl+,'));
-  page.append(search);
+  page.append(search,results);
   const layout=el('div','set-layout');
   const left=el('aside','set-side'),toc=el('nav','set-toc');
   toc.setAttribute('aria-label','Разделы настроек');
@@ -827,9 +829,11 @@ function renderSettings() {
   for(const sec of SECTIONS) {
     const link=btn('',null,'set-toc-link');
     link.append(icon(sec.icon,17),el('span','grow',sec.label));
-    if(['conn','memory','tools'].includes(sec.id)){
-      link.dataset.unavailable='true';link.append(el('i','set-hdot'));
-    }
+    const readiness={conn:'partial',model:'partial',persona:'pending',memory:'partial',
+      tools:'pending',quick:'partial',look:'ready',chat:'pending',data:'ready',about:'ready'};
+    link.dataset.readiness=readiness[sec.id];
+    link.title=readiness[sec.id]==='ready'?'Работает':
+      readiness[sec.id]==='partial'?'Часть возможностей работает':'Функционал пока не подключён';
     link.addEventListener('click',()=>{
       searchInput.value='';filter('');
       document.getElementById('set-'+sec.id)?.scrollIntoView({behavior:'smooth',block:'start'});
@@ -840,15 +844,43 @@ function renderSettings() {
     main.append(section);cards.set(sec.id,section);
   }
   function filter(query) {
-    const q=query.trim().toLowerCase().replaceAll('ё','е');
-    for(const sec of SECTIONS) {
-      const match=!q||[sec.label,sec.hint,cards.get(sec.id).textContent].join(' ').toLowerCase().replaceAll('ё','е').includes(q);
-      cards.get(sec.id).hidden=!match;
-      links.get(sec.id).hidden=!match;
-      if(q&&match){cards.get(sec.id).classList.remove('collapsed');cards.get(sec.id).querySelector('.set-card-body').hidden=false;}
+    const norm=value=>String(value||'').toLowerCase().replaceAll('ё','е');
+    const terms=norm(query.trim()).split(/\s+/).filter(Boolean);
+    let matches=0,sections=0;
+    for(const sec of SECTIONS){
+      const card=cards.get(sec.id),link=links.get(sec.id);
+      const heading=norm(sec.label+' '+sec.hint),whole=norm(card.textContent);
+      const full=terms.every(t=>heading.includes(t));
+      const rowNodes=[...card.querySelector('.set-card-body').children];
+      const hits=rowNodes.filter(node=>terms.every(t=>norm(node.textContent).includes(t)));
+      const match=!terms.length||full||hits.length>0||terms.every(t=>whole.includes(t));
+      card.hidden=!match;link.hidden=!match;
+      if(match)sections++;
+      if(terms.length&&match){
+        card.classList.remove('collapsed');
+        card.querySelector('.set-card-body').hidden=false;
+        for(const node of rowNodes){
+          // A section match keeps all fields; otherwise highlight the exact
+          // matching controls while retaining context and surrounding hints.
+          node.classList.toggle('set-search-hit',hits.includes(node));
+        }
+        matches+=full?rowNodes.length:hits.length||1;
+      }else rowNodes.forEach(node=>node.classList.remove('set-search-hit'));
     }
+    results.textContent=terms.length?sections+' разделов · '+matches+' совпадений':
+      '10 разделов · работает / частично / не подключено';
+    search.dataset.empty=String(terms.length>0&&sections===0);
   }
   searchInput.addEventListener('input',()=>filter(searchInput.value));
+  searchInput.addEventListener('keydown',event=>{
+    if(event.key==='Enter'){
+      event.preventDefault();
+      const first=[...cards.values()].find(card=>!card.hidden);
+      first?.scrollIntoView({block:'start',behavior:'smooth'});
+      first?.querySelector('input,button,textarea')?.focus({preventScroll:true});
+    }
+  });
+  filter('');
   const controls=el('div','set-controls');
   controls.append(btn('Свернуть все',()=>{
     sectionPrefs.collapsed=SECTIONS.map(s=>s.id);writeLocal(KEY_SETTINGS,sectionPrefs);renderMain();
@@ -858,55 +890,47 @@ function renderSettings() {
   left.append(controls);
   layout.append(left,main);page.append(layout);mainNode.append(page);
 }
-function downloadBackup() {
-  const diskPrefs={};
-  for(const key of DISK_PREF_KEYS){
-    try{const value=localStorage.getItem(key);if(value!==null)diskPrefs[key]=value;}
-    catch{toast('Не удалось прочитать настройки Диска для копии');return;}
-  }
-  const payload={kind:'tsukimera-settings-v1',version:1,created:new Date().toISOString(),
-    menu,ui,sections:sectionPrefs,notes,settings:config,diskPrefs};
-  const blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'});
-  const href=URL.createObjectURL(blob);
-  const a=el('a');a.href=href;a.download='Tsukimera-settings.json';
-  document.body.append(a);a.click();a.remove();
-  setTimeout(()=>URL.revokeObjectURL(href),5000);
-  toast('Резервная копия подготовлена');
+async function downloadBackup(){
+  try{
+    const [pref,store,notesSaved]=await Promise.all([
+      tsApi('/api/preferences'),tsApi('/api/settings'),tsApi('/api/notes')
+    ]);
+    const decoded=key=>{try{return JSON.parse(pref.preferences[key]||'null');}catch{return null;}};
+    const diskPrefs={};
+    for(const key of DISK_PREF_KEYS)if(Object.hasOwn(pref.preferences,key))
+      diskPrefs[key]=pref.preferences[key];
+    const payload={kind:'tsukimera-settings-v1',version:1,created:new Date().toISOString(),
+      menu:decoded(KEY_NAV)||menu,ui:decoded(KEY_UI)||ui,
+      sections:decoded(KEY_SETTINGS)||sectionPrefs,
+      notes:notesSaved.notes,settings:store.settings,diskPrefs};
+    const blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'});
+    const href=URL.createObjectURL(blob);
+    const a=el('a');a.href=href;a.download='Tsukimera-settings.json';
+    document.body.append(a);a.click();a.remove();
+    setTimeout(()=>URL.revokeObjectURL(href),5000);
+    toast('Копия настроек и заметок скачана. Файлы Диска сохраняются отдельно.');
+  }catch(error){toast('Не удалось создать копию: '+error.message);}
 }
-async function restoreBackup(payload) {
+async function restoreBackup(payload){
   if(!payload||payload.kind!=='tsukimera-settings-v1'||payload.version!==1)
     throw Error('Это не резервная копия Tsukimera');
-  if(!payload.settings||typeof payload.settings!=='object'||Array.isArray(payload.settings))
-    throw Error('Нет настроек');
-  if(!Array.isArray(payload.notes)||payload.notes.length>200)
-    throw Error('Некорректные заметки');
-  const diskPrefs=payload.diskPrefs??{};
-  if(!diskPrefs||typeof diskPrefs!=='object'||Array.isArray(diskPrefs)||
-    Object.entries(diskPrefs).some(([key,value])=>
-      !DISK_PREF_KEYS.includes(key)||typeof value!=='string'||value.length>16000))
-    throw Error('Некорректные настройки Диска');
-  const restored=payload.notes.filter(n=>n&&typeof n.id==='string'&&typeof n.text==='string'&&n.text.length<3000);
-  if(restored.length!==payload.notes.length)throw Error('Некорректные заметки');
-  // Restore saved notes into the authoritative database before changing the
-  // browser mirror. A rejected import never deletes existing database notes.
-  const imported=await fetch('/api/notes/import',{method:'POST',
-    headers:{'X-Tsukimera-Request':'1','Content-Type':'application/json'},
-    body:JSON.stringify({notes:restored,action:'replace'})});
-  const importedData=await imported.json();
-  if(!imported.ok)throw Error(importedData.error||'Не удалось восстановить заметки SQLite');
-  if(!(await saveSettings(payload.settings)))throw Error('Не удалось сохранить параметры');
-  menu=cleanMenu(payload.menu||{});
-  ui=cleanUi(payload.ui||{});
-  sectionPrefs={collapsed:Array.isArray(payload.sections?.collapsed)?
-    payload.sections.collapsed.filter(x=>SECTIONS.some(s=>s.id===x)):[]};
-  notes=importedData.notes;
-  const changes={
-    [KEY_NAV]:JSON.stringify(menu),[KEY_UI]:JSON.stringify(ui),
-    [KEY_SETTINGS]:JSON.stringify(sectionPrefs),...diskPrefs};
-  await savePrefChanges(changes);
-  for(const [key,value] of Object.entries(changes))localStorage.setItem(key,value);
+  if(!confirm('Восстановить настройки и заметки из копии? Перед изменениями будет создан снимок SQLite. Данные Диска и файлов не затрагиваются.'))
+    return;
+  const restored=await tsPost('/api/settings/restore',payload);
+  config=restored.settings;
+  notes=restored.notes;
+  const prefs=restored.preferences;
+  // Restore the browser mirror only after the whole SQLite transaction succeeds.
+  for(const key of SQLITE_PREF_KEYS){
+    if(Object.hasOwn(prefs,key))localStorage.setItem(key,prefs[key]);
+    else localStorage.removeItem(key);
+  }
+  menu=cleanMenu(readLocal(KEY_NAV,{collapsed:false,order:IDS,hidden:[]}));
+  ui=cleanUi(readLocal(KEY_UI,DEFAULT_UI));
+  sectionPrefs=readLocal(KEY_SETTINGS,{collapsed:[]});
   writeLocal(KEY_NOTES,notes);
-  applyUi();renderMenu();renderMain();toast('Настройки и заметки восстановлены. Для файлов импортируйте отдельную копию Диска.');
+  applyUi();renderMenu();renderMain();
+  toast('Восстановлено. Предыдущая SQLite сохранена: '+restored.backup);
 }
 function createModal(title) {
   const overlay=el('div','modal-ts');
