@@ -21,6 +21,12 @@ import {
 import { createUploader, readDropped } from "./disk-upload";
 import { btn, emptyState } from "./kit";
 import { openSheet } from "./sheet";
+import {
+  readColumns,writeColumns,readSmartRules,matchesSmartRule,animateChange,
+  openColumnSettings,openSmartManager,openDiskMap,openBatchRename,
+  openDiskCommands,copyDiskLink,
+  type SmartRule,type TableColumns,type RenamePlan
+} from "./disk-extras";
 import "./disk.css";
 
 export interface DiskDeps {
@@ -127,6 +133,8 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
   const expanded = new Set<string>(JSON.parse(store.get("juunibi.disk.open") ?? "[]") as string[]);
   let treeSort: "pinned" | "name" | "files" | "size" | "created" = "pinned", treeQuery = "";
   let treeHidden = store.get("juunibi.disk.tree") === "hidden";
+  let smartCurrent:string|null=null;
+  let columns:TableColumns=readColumns();
   let shown: DiskFile[] = [];
 
   const page = el("div", { cls: "page disk-page" });
@@ -200,6 +208,10 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
     { icon: "folderUp", label: "Загрузить папку…", run: chooseFolder },
     { icon: "zipDown", label: current && view === "all" && virtual === "none" ? "Скачать папку ZIP-архивом" : "Скачать весь Диск ZIP-архивом", run: () => void downloadZip({ folder: view === "all" && virtual === "none" ? current : "" }) },
     { icon: "chronicle", label: "Жизнь документов", run: () => life.reveal() },
+    { icon: "search", label: "Палитра команд · Ctrl+K", run: () => showCommands() },
+    { icon: "folder", label: "Карта занятого места", run: () => openDiskMap(all,folder=>go({folder})) },
+    { icon: "folderPlus", label: "Умные папки", run: () => editSmartFolders() },
+    { icon: "table", label: "Колонки таблицы", run: () => customizeColumns() },
     { icon: "audit", label: "Проверка файлов", run: () => void openAudit() },
     { icon: "history", label: "История", run: () => void openHistory() },
     { icon: "undo", label: "Отменить последнее", run: () => void undoLast() },
@@ -243,11 +255,17 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
   const sortSel = el("select", { cls: "dk-select", attrs: { "aria-label": "Порядок файлов" } },
     ...([["new", "Сначала новые"], ["old", "Сначала старые"], ["name", "По имени"], ["size", "По размеру"]] as const).map(([v, t]) => el("option", { value: v, textContent: t })));
   sortSel.value = sort;
-  sortSel.addEventListener("change", () => { sort = sortSel.value as SortKey; store.set("juunibi.disk.sort", sort); renderFiles(); });
+  sortSel.addEventListener("change", () => animateChange(() => {
+    sort = sortSel.value as SortKey; store.set("juunibi.disk.sort", sort); renderFiles();
+  }));
   const modeBox = el("div", { cls: "dk-modes", attrs: { role: "group", "aria-label": "Вид" } },
     ...MODES.map((m) => {
       const b = el("button", { type: "button", cls: "icon-btn", title: m.label, attrs: { "aria-label": "Вид: " + m.label, "aria-pressed": String(mode === m.id), "data-mode": m.id } }, dIcon(m.icon, 18));
-      b.addEventListener("click", () => { mode = m.id; store.set("juunibi.disk.view", mode); for (const x of modeBox.children) x.setAttribute("aria-pressed", String((x as HTMLElement).dataset.mode === mode)); renderFiles(); });
+      b.addEventListener("click", () => animateChange(() => {
+        mode = m.id; store.set("juunibi.disk.view", mode);
+        for (const x of modeBox.children) x.setAttribute("aria-pressed", String((x as HTMLElement).dataset.mode === mode));
+        renderFiles();
+      }));
       return b;
     }));
   const num = (label: string) => el("input", { type: "number", min: 0, step: 1, cls: "mem-input", placeholder: label, attrs: { "aria-label": label } });
@@ -303,6 +321,7 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
           act("copy", "Копировать", () => { clipboard = { ids, cut: false }; showToast("Скопировано: " + filesWord(ids.length) + ". Откройте папку и нажмите «Вставить» или Ctrl+V."); renderSelBar(); }),
           act("cut", "Вырезать", () => { clipboard = { ids, cut: true }; showToast("Вырезано: " + filesWord(ids.length) + ". Откройте папку и нажмите «Вставить» или Ctrl+V."); renderSelBar(); }),
           act("move", "Переместить", () => void moveFiles(ids)),
+          act("rename", "Переименовать массово", () => openBatchRename(ids.map(byId).filter((f):f is DiskFile=>!!f),all,applyBulkRename)),
           act("star", ids.every((id) => byId(id)?.favorite) ? "Убрать из избранного" : "В избранное", () => void favoriteFiles(ids)),
           act("zipDown", "Скачать ZIP", () => void downloadZip({ ids })),
           ...(deps.attach && ids.some((id) => askable(byId(id)?.name ?? "")) ? [act("chatIn", "В беседу", () => void attachToChat(ids))] : []),
@@ -334,7 +353,14 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
   const dropzone = el("div", { cls: "dk-dropzone", attrs: { "aria-hidden": "true" } }, dIcon("upload", 34), el("strong"), el("span", { textContent: "До 500 МБ на файл, можно целые папки" }));
   const main = el("section", { cls: "dk-main" }, head, selBar, trashBar, filesBox, dropzone);
   const sourceList = () => view === "trash" ? trash
-    : all.filter((f) => (view !== "favorites" || f.favorite) && matchesVirtual(f, virtual) && (view !== "all" || virtual !== "none" || everywhere || f.folder === current));
+    : all.filter(f=>{
+      if(smartCurrent){
+        const rule=readSmartRules().find(x=>x.id===smartCurrent);
+        return !!rule&&matchesSmartRule(f,rule);
+      }
+      return (view!=="favorites"||f.favorite)&&matchesVirtual(f,virtual)&&
+        (view!=="all"||virtual!=="none"||everywhere||f.folder===current);
+    });
   const thumbFor = (f: DiskFile, size: number) => {
     const box = el("span", { cls: "dk-thumb" });
     if (f.color) box.style.setProperty("--tag", f.color);
@@ -375,6 +401,11 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
         el("strong", { cls: "dk-name", textContent: f.name, title: f.name + (f.tags?.length ? "\nМетки: " + f.tags.join(", ") : "") }),
         el("small", { textContent: meta }),
         ...(f.tags?.length && mode !== "table" ? [el("span", { cls: "dk-tags" }, ...f.tags.slice(0, 3).map((t) => el("i", { textContent: t })))] : [])),
+      ...(mode==="table"&&view!=="trash"?[
+        el("small",{cls:"dkx-col dkx-col-size",textContent:human(f.size)}),
+        el("small",{cls:"dkx-col dkx-col-date",textContent:fmtDate(f.uploadedAt)}),
+        el("small",{cls:"dkx-col dkx-col-folder",textContent:f.folder||"Корень"})
+      ]:[]),
       ...(f.favorite && view !== "trash" ? [el("span", { cls: "dk-fav", title: "В избранном" }, dIcon("star", 15))] : []),
       el("button", { type: "button", cls: "icon-btn sm dk-more", attrs: { "aria-label": "Действия: " + f.name, "aria-haspopup": "menu", "aria-expanded": "false" } }, dIcon("more", 18)));
     return c;
@@ -396,7 +427,8 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
       el("div", { cls: "dk-empty-actions" }, up, btn("Загрузить папку", chooseFolder, {}), btn("Новая папка", () => void createFolder(uploadFolder()), { icon: "plus" })));
   };
   const renderFiles = () => {
-    filesBox.className = "dk-files mode-" + mode;
+    filesBox.className = "dk-files mode-" + mode+
+      (columns.size?"":" dkx-hide-size")+(columns.date?"":" dkx-hide-date")+(columns.folder?"":" dkx-hide-folder");
     if (!loaded) { filesBox.replaceChildren(...skeleton()); return; }
     shown = filterFiles(sourceList(), { text: query, contentIds, ext, minKb, maxKb, after, sort });
     const total = sourceList().length;
@@ -453,7 +485,13 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
     if (t.closest(".dk-check")) { if (t instanceof HTMLInputElement) pick(f.id, e, true); return; }
     focusId = f.id;
     if (e.shiftKey || e.ctrlKey || e.metaKey || selected.size || view === "trash") { e.preventDefault(); pick(f.id, e, !e.shiftKey); return; }
-    openViewer(f);
+    openInfo(f.id);
+  });
+  filesBox.addEventListener("dblclick",(e)=>{
+    const c=(e.target as HTMLElement).closest<HTMLElement>(".dk-file");
+    if(!c||e.target instanceof HTMLInputElement||(e.target as HTMLElement).closest(".dk-more"))return;
+    const file=byId(c.dataset.id!);
+    if(file&&view!=="trash")openViewer(file);
   });
   filesBox.addEventListener("contextmenu", (e) => {
     const c = (e.target as HTMLElement).closest<HTMLElement>(".dk-file"); const f = c && byId(c.dataset.id!);
@@ -476,6 +514,7 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
   ] : [
     { icon: "eye", label: "Открыть", run: () => openViewer(f), hint: "Enter" },
     { icon: "info", label: "Сведения", run: () => openInfo(f.id) },
+    { icon: "attach", label: "Скопировать ссылку для чата", run: () => void copyDiskLink(f) },
     ...(deps.ask && askable(f.name) ? [{ icon: "ask", label: "Спросить JUUNIBI о файле", run: () => askAbout(f) } as MenuItem] : []),
     ...(deps.attach && askable(f.name) ? [{ icon: "chatIn", label: "Прикрепить к беседе", run: () => void attachToChat([f.id]) } as MenuItem] : []),
     { icon: "download", label: "Скачать", run: () => download(f) },
@@ -1301,8 +1340,8 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
     go({ folder: f.folder }); reveal(f.id);
     if (previewKind(f.name)) openViewer(f); else openInfo(f.id);
   }
-  const onLink = () => { if (!page.isConnected) { removeEventListener("juunibi:disk-link", onLink); return; } if (loaded) showLinked(); };
-  addEventListener("juunibi:disk-link", onLink);
+  const onLink = () => { if (!page.isConnected) { removeEventListener("tsukimera:disk-link", onLink); return; } if (loaded) showLinked(); };
+  addEventListener("tsukimera:disk-link", onLink);
 
   /* ---------------------------------------------------------------- keyboard */
   page.addEventListener("keydown", (e) => {
