@@ -5,7 +5,7 @@ import { fileBadge } from "./disk-icons";
 import { human } from "./disk-model";
 
 const LIMIT = 500 * 1024 * 1024;
-type Row = { file: File; folder: string; root: HTMLElement; bar: HTMLElement; note: HTMLElement; state: "wait" | "run" | "ok" | "fail" | "off"; xhr?: XMLHttpRequest };
+type Row = { file: File; folder: string; root: HTMLElement; bar: HTMLElement; note: HTMLElement; state: "wait" | "run" | "ok" | "fail" | "off"; xhr?: XMLHttpRequest; abort?: AbortController };
 
 export interface Uploader {
   readonly root: HTMLElement;
@@ -43,9 +43,75 @@ export function createUploader(o: { onUploaded: (f: DiskUploaded) => void; onIdl
   };
   const stop = (r: Row) => {
     if (r.state === "wait") mark(r, "off", "Отменено");
-    else if (r.state === "run") r.xhr?.abort();
+    else if (r.state === "run") { r.xhr?.abort();r.abort?.abort(); }
   };
-  const send = (r: Row) => new Promise<void>((resolve) => {
+  /** Files above 8 MiB use persisted 4 MiB chunks. Re-selecting the exact same
+   * local file after an interruption resumes from the server-confirmed offset.
+   * The file is not available in the catalog until the last chunk is committed. */
+  const resumableKey=(r:Row)=>"tsukimera.upload."+
+    [r.folder,r.file.name,r.file.size,r.file.lastModified].map(encodeURIComponent).join("|");
+  const sendResumable=async(r:Row):Promise<void>=>{
+    const ctl=new AbortController();r.abort=ctl;
+    const key=resumableKey(r);
+    const headers={"X-Tsukimera-Request":"1"};
+    const readJson=async(res:Response)=>{
+      const value=await res.json().catch(()=>({}));
+      if(!res.ok)throw new Error(value.error||"HTTP "+res.status);
+      return value;
+    };
+    mark(r,"run","Подготовка загрузки…");
+    try{
+      let id="";
+      try{id=localStorage.getItem(key)||"";}catch{}
+      let status:{id:string;offset:number;size:number;name:string;folder:string}|null=null;
+      if(id){
+        const response=await fetch("/api/disk/uploads/"+encodeURIComponent(id),{signal:ctl.signal});
+        if(response.ok){
+          const data=await response.json();
+          if(data.size===r.file.size&&data.name===r.file.name&&data.folder===r.folder)status=data;
+        }
+      }
+      if(!status){
+        const response=await fetch("/api/disk/uploads",{
+          method:"POST",headers:{...headers,"Content-Type":"application/json"},
+          body:JSON.stringify({name:r.file.name,folder:r.folder,size:r.file.size}),signal:ctl.signal
+        });
+        status=await readJson(response);
+        id=status.id;
+        try{localStorage.setItem(key,id);}catch{}
+      }
+      let offset=status.offset;
+      const CHUNK_SIZE=4*1024*1024;
+      while(offset<r.file.size){
+        if(ctl.signal.aborted)throw new DOMException("Отменено","AbortError");
+        const part=r.file.slice(offset,Math.min(r.file.size,offset+CHUNK_SIZE));
+        const response=await fetch("/api/disk/uploads/"+encodeURIComponent(id),{
+          method:"PATCH",headers:{...headers,"Content-Type":"application/octet-stream",
+            "X-Upload-Offset":String(offset)},
+          body:part,signal:ctl.signal
+        });
+        const updated=await readJson(response);
+        if(updated.offset<=offset||updated.offset>r.file.size)throw new Error("Неверный ответ сервера о позиции файла");
+        offset=updated.offset;
+        const pct=Math.round(offset/r.file.size*100);
+        r.bar.style.width=pct+"%";
+        r.note.textContent=pct+"% · "+human(offset)+" из "+human(r.file.size);
+      }
+      const finish=await fetch("/api/disk/uploads/"+encodeURIComponent(id)+"/complete",{
+        method:"POST",headers:headers,signal:ctl.signal
+      });
+      const result=await readJson(finish) as DiskUploaded;
+      try{localStorage.removeItem(key);}catch{}
+      r.bar.style.width="100%";
+      mark(r,"ok",human(r.file.size));
+      o.onUploaded(result);
+    }catch(error){
+      if(ctl.signal.aborted){mark(r,"off","Остановлено. Выберите тот же файл снова для продолжения.");}
+      else mark(r,"fail",(error instanceof Error?error.message:"Ошибка")+
+        ". Выберите тот же файл снова для продолжения.");
+    }finally{r.abort=undefined;}
+  };
+  const send = (r: Row) => r.file.size>8*1024*1024 ? sendResumable(r) : new Promise<void>((resolve) => {
     const xhr = new XMLHttpRequest();
     r.xhr = xhr;
     xhr.open("POST", "/api/disk/files/binary?name=" + encodeURIComponent(r.file.name) + "&folder=" + encodeURIComponent(r.folder));
@@ -63,7 +129,7 @@ export function createUploader(o: { onUploaded: (f: DiskUploaded) => void; onIdl
       }
       resolve();
     };
-    xhr.onerror = () => { mark(r, "fail", "Нет связи с JUUNIBI"); resolve(); };
+    xhr.onerror = () => { mark(r, "fail", "Нет связи с Tsukimera"); resolve(); };
     xhr.onabort = () => { mark(r, "off", "Отменено"); resolve(); };
     mark(r, "run", "0%");
     xhr.send(r.file);
