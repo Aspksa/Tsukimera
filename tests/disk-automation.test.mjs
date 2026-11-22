@@ -58,9 +58,9 @@ test("SQLite v3 updates only touched files, preserves metadata and notes, surviv
         db.exec("CREATE TRIGGER log_touch AFTER UPDATE ON disk_entries BEGIN INSERT INTO update_changes(id) VALUES(new.id); END");
         const renamed=await api(s.url,"/api/disk/files/"+a.id,"PATCH",{name:"Переименован.txt"});
         assert.equal(renamed.status,200,JSON.stringify(renamed.result));
-        assert.equal(db.prepare("SELECT count(*) AS n FROM temp_changes").get().n,1,
+        assert.equal(db.prepare("SELECT count(*) AS n FROM update_changes").get().n,1,
           "A one-file edit must update exactly one normalized catalogue row");
-        assert.equal(db.prepare("SELECT id FROM temp_changes").get().id,a.id);
+        assert.equal(db.prepare("SELECT id FROM update_changes").get().id,a.id);
         assert.equal(db.prepare("SELECT data FROM disk_entries WHERE id=?").get(b.id).data,original,
           "Untouched file metadata must not be rewritten");
         assert.equal(db.prepare("SELECT name FROM disk_files WHERE id=?").get(a.id).name,"Переименован.txt");
