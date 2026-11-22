@@ -40,6 +40,11 @@ test("first start creates SQLite and retains original interface and 150 metrics"
         assert.equal(db.prepare("SELECT value FROM metadata WHERE key='schema_version'").get().value,"1");
         assert.equal(db.prepare("SELECT count(*) AS n FROM disk_files").get().n,0);
       }finally{db.close();}
+      const seeded=await fetch(origin+"/api/disk/files/binary?name=sqlite-seed.txt&folder=",{
+        method:"POST",headers:{"X-Tsukimera-Request":"1","Content-Type":"application/octet-stream"},
+        body:Buffer.from("Данные для аналитики Tsukimera. ".repeat(30))
+      });
+      assert.equal(seeded.status,201);
       const life=await api(origin,"/api/disk/life");
       assert.equal(life.status,200);
       assert.equal(life.value.metrics.length,150);
@@ -153,7 +158,13 @@ test("browser notes import idempotently, links survive restart, CRUD remains in 
       const removed=await api(second.origin,"/api/notes/another-uuid","DELETE");
       assert.equal(removed.status,200);
       assert.equal((await api(second.origin,"/api/notes")).value.notes.length,2);
+      const seeded=await fetch(second.origin+"/api/disk/files/binary?name=notes-seed.txt&folder=",{
+        method:"POST",headers:{"X-Tsukimera-Request":"1","Content-Type":"application/octet-stream"},
+        body:Buffer.from("Документ для аналитики и заметок. ".repeat(30))
+      });
+      assert.equal(seeded.status,201);
       const unchanged=await api(second.origin,"/api/disk/life");
+      assert.equal(unchanged.status,200);
       assert.equal(unchanged.value.metrics.length,150);
     }finally{await second.stop();}
   }finally{await rm(dir,{recursive:true,force:true});}
