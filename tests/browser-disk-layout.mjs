@@ -149,9 +149,14 @@ try{
   assert.ok(details.dialog&&details.method&&details.source,
     "A verified metric must show methodology and its real source link: "+JSON.stringify(details));
   await evaluate("document.querySelector('.dkl-detail-sheet .btn.primary').click()");
-  await pause(250);
-  const linked=await evaluate("(()=>({panel:!!document.querySelector('.dk-info:not([hidden])'),expanded:document.querySelector('.disk-page').classList.contains('dk-life-expanded')}))()");
-  assert.ok(linked.panel&&!linked.expanded,"Verified source document did not open in the Disk inspector");
+  let linked;
+  for(let attempt=0;attempt<25;attempt++){
+    linked=await evaluate("(()=>({panel:!!document.querySelector('.dk-info:not([hidden])'),expanded:document.querySelector('.disk-page').classList.contains('dk-life-expanded'),infoHidden:document.querySelector('.dk-info')?.hidden,layoutClasses:document.querySelector('.dk-layout')?.className,visibleCards:document.querySelectorAll('.dk-file').length,toast:document.querySelector('.toast-ts')?.textContent,files:document.querySelector('.dk-count')?.textContent}))()");
+    if(linked?.panel&&!linked.expanded)break;
+    await pause(120);
+  }
+  console.log("Verified life-file navigation:",JSON.stringify(linked));
+  assert.ok(linked.panel&&!linked.expanded,"Verified source document did not open in the Disk inspector: "+JSON.stringify(linked));
   await evaluate("document.querySelector('.dkl-expand').click()");
   // Life 5.0: search all groups, filter missing data and keep the source untouched.
   const hits=await evaluate("(()=>{const x=document.querySelector('.dkl-search');x.value='слова';x.dispatchEvent(new Event('input',{bubbles:true}));return {shown:document.querySelectorAll('.dkl-tile').length,open:!document.querySelector('.dkl-discover').hidden,coverage:document.querySelector('.dkl-coverage').textContent.includes('500 документами')}})()");
