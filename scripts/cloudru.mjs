@@ -31,6 +31,7 @@ export function parseCloudModels(json){
   for(const item of json.data){
     const name=item?.id;
     if(typeof name==="string"&&name.length>0&&name.length<=150&&
+      !name.includes("..")&&!name.startsWith("/")&&!name.includes("//")&&
       /^[a-zA-Z0-9_.:@+-]+(?:\/[a-zA-Z0-9_.:@+-]+)*$/.test(name))names.add(name);
   }
   return [...names].sort((a,b)=>a.localeCompare(b));
@@ -82,7 +83,7 @@ export function createCloudConnection({
       const detail=cloudFailure(result.status);
       lastCheck=false;lastModels=[];lastError={code:detail.code,message:detail.reason,retryable:detail.retryable};
       checkedAt=new Date().toISOString();
-      throw err(detail.reason,result.status>=500?502:result.status,detail.code);
+      throw err(detail.reason,result.status,detail.code);
     }
     let body;
     try{
