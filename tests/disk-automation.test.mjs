@@ -209,3 +209,25 @@ test("Smart Folders 3.0 support verified AND/OR multi-conditions and bounded vie
   assert.ok(middle.start>0&&middle.after>0);
   assert.equal(middle.end-middle.start<=100,true);
 });
+
+
+test("six-hour maintenance task uses SQLite optimize and quick_check without deleting data",async()=>{
+  const dir=await mkdtemp(join(tmpdir(),"tsukimera-maintain-"));
+  try{
+    const s=await start(dir);
+    try{
+      const file=await upload(s.url,"Сохранить.txt","Важный оригинальный документ");
+      const {createDiskAutomation}=await import("../scripts/disk-background.mjs");
+      const {initializeDatabase}=await import("../scripts/tsukimera-db.mjs");
+      const database=await initializeDatabase(dir);
+      const worker=createDiskAutomation({database,diskRoot:join(dir,"disk"),
+        readText:()=>Promise.resolve({text:""}),maintenanceHours:0,logger:{error:()=>{}}});
+      await worker.runNow();
+      const status=worker.status();worker.stop();
+      assert.equal(status.counts.optimization,"ok");
+      assert.ok(status.counts.lastOptimized);
+      assert.equal((await api(s.url,"/api/disk")).result.files.find(f=>f.id===file.id).name,"Сохранить.txt");
+      assert.equal((await api(s.url,"/api/storage/diagnostics")).result.integrity,"ok");
+    }finally{await s.close();}
+  }finally{await rm(dir,{recursive:true,force:true});}
+});
