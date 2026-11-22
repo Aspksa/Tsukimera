@@ -39,6 +39,9 @@ jobs:
           grep -q 'dk-file' /tmp/tsukimera-disk-rendered.html
           grep -q 'dkx-smart-head' /tmp/tsukimera-disk-rendered.html
           grep -q 'Умные папки' /tmp/tsukimera-disk-rendered.html
+          grep -q 'aria-label="Изменить ширину панели папок"' /tmp/tsukimera-disk-rendered.html
+          grep -q 'aria-label="Размер плиток"' /tmp/tsukimera-disk-rendered.html
+          node tests/browser-disk-layout.mjs http://127.0.0.1:49678
           echo 'Chrome rendered the complete JUUNIBI Disk page.'
   linux-node24:
     runs-on: ubuntu-latest

@@ -686,3 +686,218 @@ button.dk-crumb:hover{background:var(--hover);color:var(--fg)}
   .disk-page .dk-file,.dkx-map-fill{transition:none!important;animation:none!important}
   .disk-page .dk-file:hover{transform:none}
 }
+
+
+/* --------------------------------------------------------------------------
+   Full-bleed Disk 3.0 — pane widths respond to the actual workspace, not
+   viewport breakpoints (the JUUNIBI navigation can be collapsed independently).
+   Grid areas: folders | drag handle | files | drag handle | life/inspector.
+   -------------------------------------------------------------------------- */
+.disk-page{
+  container-name:diskspace;container-type:inline-size;
+  width:100%;max-width:none;min-width:0;
+  --dk-tile-size:220px;
+  font-family:var(--font,ui-monospace,monospace);
+}
+.disk-page .dk-layout{
+  --dk-tree-width:266px;--dk-right-width:340px;
+  display:grid;
+  width:100%;min-width:0;
+  grid-template-columns:
+    minmax(210px,min(var(--dk-tree-width),30cqw))
+    8px
+    minmax(0,1fr)
+    8px
+    minmax(260px,min(var(--dk-right-width),30cqw));
+  gap:0;row-gap:var(--ki-space-5,24px);
+  align-items:start;
+  transition:grid-template-columns .22s ease;
+}
+.disk-page .dk-layout.dk-resizing{transition:none;cursor:col-resize}
+.disk-page .dk-layout > .dk-side{
+  grid-column:1;grid-row:1;
+  min-width:0;width:100%;box-sizing:border-box;
+  margin:0;max-height:calc(100dvh - 26px);
+  border:0;border-radius:0;background:transparent;
+  border-right:0;
+  padding:var(--ki-space-2,8px) var(--ki-space-3,12px) var(--ki-space-3,12px) 0;
+}
+.disk-page .dk-layout > .dk-main{
+  grid-column:3;grid-row:1;min-width:0;width:100%;
+  padding:var(--ki-space-2,8px) var(--ki-space-3,12px);
+  box-sizing:border-box;
+}
+.disk-page .dk-layout > .dkl,
+.disk-page .dk-layout > .dk-info{
+  grid-column:5;grid-row:1;min-width:0;width:100%;box-sizing:border-box;
+}
+.disk-page .dk-layout > .dkl{
+  padding:var(--ki-space-2,8px) 0 var(--ki-space-3,12px) var(--ki-space-3,12px);
+  background:transparent;
+}
+.disk-page .dk-layout > .dk-info{
+  position:sticky;top:8px;right:auto;bottom:auto;
+  max-height:calc(100dvh - 22px);
+  border:0;border-radius:0;box-shadow:none;
+  border-left:0;background:transparent;
+  padding:var(--ki-space-3,12px);
+}
+.disk-page .dk-layout.with-info > .dkl{display:none}
+.disk-page .dk-resize-handle{
+  display:flex;justify-content:center;align-items:stretch;
+  position:sticky;top:var(--ki-space-3,12px);
+  height:min(70dvh,700px);min-height:200px;z-index:4;
+  touch-action:none;cursor:col-resize;user-select:none;
+  border:0;background:transparent;outline-offset:-1px;
+  transition:background .18s ease;
+}
+.disk-page .dk-resize-handle > span{
+  display:block;width:1px;height:100%;
+  background:var(--line);border-radius:2px;
+  transition:width .18s ease,background .18s ease;
+}
+.disk-page .dk-resize-handle:hover > span,
+.disk-page .dk-resize-handle:focus-visible > span,
+.disk-page .dk-layout.dk-resizing .dk-resize-handle > span{
+  width:3px;background:color-mix(in srgb,var(--brand) 65%,transparent);
+}
+.disk-page .dk-resize-handle:focus-visible{outline:2px solid var(--brand);border-radius:6px}
+.disk-page .dk-layout > .dk-resize-left{grid-column:2;grid-row:1}
+.disk-page .dk-layout > .dk-resize-right{grid-column:4;grid-row:1}
+.disk-page .dk-layout.no-tree{
+  grid-template-columns:0 0 minmax(0,1fr) 8px minmax(260px,min(var(--dk-right-width),30cqw));
+}
+.disk-page .dk-layout.no-tree > .dk-side,
+.disk-page .dk-layout.no-tree > .dk-resize-left{display:none}
+.disk-page .dk-side-head{padding:var(--ki-space-2,8px) var(--ki-space-2,8px) var(--ki-space-1,4px)}
+.disk-page .dk-side-tools{gap:var(--ki-space-2,8px)}
+.disk-page .dk-tree{min-width:0}
+.disk-page .dk-node{min-width:0;min-height:35px}
+.disk-page .dk-node-name{
+  overflow:hidden;text-overflow:ellipsis;
+  line-height:1.5;-webkit-line-clamp:2;
+}
+.disk-page .dk-section{padding:var(--ki-space-2,8px);border-radius:var(--r-sm)}
+.disk-page .dk-node.current{background:color-mix(in srgb,var(--brand) 10%,transparent)}
+.disk-page .dk-node.current .dk-node-label{color:var(--brand)}
+.disk-page .dk-main .dk-bar,.disk-page .dk-head{gap:var(--ki-space-3,12px)}
+.disk-page .dk-files:not(.mode-table){gap:var(--ki-space-2,8px)}
+.disk-page .dk-files.mode-tiles{
+  grid-template-columns:repeat(auto-fill,minmax(min(100%,var(--dk-tile-size)),1fr));
+}
+.disk-page .dk-files.mode-large{
+  grid-template-columns:repeat(auto-fill,minmax(min(100%,calc(var(--dk-tile-size) + 20px)),1fr));
+}
+.disk-page .dk-files.mode-tiles .dk-file{
+  min-height:76px;align-items:center;
+  padding:var(--ki-space-3,12px);
+  gap:var(--ki-space-3,12px);
+}
+.disk-page .dk-files.mode-tiles .dk-thumb{
+  width:clamp(40px,calc(var(--dk-tile-size) / 5),56px);
+  height:clamp(40px,calc(var(--dk-tile-size) / 5),56px);
+}
+.disk-page .dk-files.mode-tiles .dk-name,
+.disk-page .dk-files.mode-large .dk-name{
+  display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;
+  white-space:normal;overflow:hidden;overflow-wrap:anywhere;
+  text-overflow:ellipsis;line-height:1.45;
+  min-height:0;
+}
+.disk-page .dk-files.mode-list .dk-name,
+.disk-page .dk-files.mode-table .dk-name{
+  white-space:nowrap;display:block;overflow:hidden;text-overflow:ellipsis;
+}
+.disk-page .dk-file{
+  border-color:transparent;box-shadow:none;
+  background:color-mix(in srgb,var(--surface) 76%,var(--bg));
+}
+.disk-page .dk-file:hover{border-color:color-mix(in srgb,var(--brand) 35%,transparent)}
+.disk-page .dk-head{padding-block:var(--ki-space-1,4px)}
+.disk-page .dk-tile-scale{
+  display:flex;align-items:center;gap:var(--ki-space-2,8px);
+  border-left:1px solid var(--line);padding-left:var(--ki-space-3,12px);
+  font-size:var(--fs-xs);color:var(--muted);white-space:nowrap;
+}
+.disk-page .dk-tile-scale[hidden]{display:none}
+.disk-page .dk-tile-scale input{
+  width:clamp(70px,8vw,125px);max-width:100%;
+  cursor:pointer;accent-color:var(--brand);min-height:20px;
+}
+.disk-page .dk-tile-scale output{font-variant-numeric:tabular-nums;min-width:4ch;text-align:right}
+.disk-page .dk-group{grid-column:1/-1}
+.disk-page .dk-file .dk-name{font-family:var(--font);font-size:var(--ki-type-body,var(--fs-md))}
+.disk-page .dk-file .dk-meta small{font-size:var(--ki-type-small,var(--fs-xs));line-height:1.45}
+@container diskspace (max-width:1180px){
+  .disk-page .dk-layout,.disk-page .dk-layout.with-info{
+    grid-template-columns:minmax(210px,min(var(--dk-tree-width),36cqw)) 8px minmax(0,1fr);
+  }
+  .disk-page .dk-layout.no-tree{grid-template-columns:minmax(0,1fr)}
+  .disk-page .dk-layout > .dk-side{grid-column:1;grid-row:1}
+  .disk-page .dk-layout > .dk-resize-left{grid-column:2;grid-row:1}
+  .disk-page .dk-layout > .dk-main{grid-column:3;grid-row:1}
+  .disk-page .dk-layout.no-tree > .dk-main{grid-column:1;grid-row:1}
+  .disk-page .dk-layout > .dk-resize-right{display:none}
+  .disk-page .dk-layout > .dkl{
+    grid-column:1/-1;grid-row:2;
+    position:relative;z-index:1;display:flex;
+    padding:var(--ki-space-4,16px) 0 0;
+    border-top:1px solid var(--line);
+    background:var(--bg);
+  }
+  .disk-page .dk-layout > .dk-info{
+    grid-column:auto;grid-row:auto;
+    position:fixed;right:0;top:0;bottom:0;
+    z-index:96;width:min(390px,92vw);max-height:none;
+    border-radius:var(--r-lg) 0 0 var(--r-lg);
+    padding:var(--ki-space-4,16px);
+    background:var(--surface);
+    box-shadow:-20px 0 48px -24px #000a;
+  }
+  .disk-page .dk-layout.with-info > .dkl{display:flex}
+}
+@container diskspace (max-width:760px){
+  .disk-page .dk-layout,.disk-page .dk-layout.with-info,
+  .disk-page .dk-layout.no-tree{grid-template-columns:minmax(0,1fr)}
+  .disk-page .dk-layout > .dk-main{
+    grid-column:1;grid-row:1;padding:var(--ki-space-2,8px) 0;
+  }
+  .disk-page .dk-layout > .dk-resize-left{display:none}
+  .disk-page .dk-layout > .dk-side,
+  .disk-page .dk-layout.no-tree > .dk-side{
+    display:flex;grid-column:auto;grid-row:auto;
+    position:fixed;top:0;bottom:0;left:0;
+    z-index:95;width:min(320px,86vw);max-height:none;
+    transform:translateX(-105%);
+    transition:transform .22s ease;
+    padding:var(--ki-space-3,12px);
+    border-right:1px solid var(--line);
+    border-radius:0 var(--r-lg) var(--r-lg) 0;
+    background:var(--surface);
+    box-shadow:20px 0 40px -24px #000a;
+  }
+  .disk-page.drawer-open .dk-layout > .dk-side{transform:translateX(0)}
+  .disk-page .dk-drawer-btn,.disk-page .dk-side-close{display:inline-flex}
+  .disk-page .dk-scrim{
+    position:fixed;inset:0;z-index:94;background:#0007;display:none;
+  }
+  .disk-page.drawer-open .dk-scrim{display:block}
+  .disk-page .dk-layout > .dkl{grid-column:1;grid-row:2;min-width:0}
+  .disk-page .dk-bar-actions{min-width:0}
+  .disk-page .dk-head-tools{min-width:0;flex-wrap:wrap}
+  .disk-page .dk-tile-scale{padding-left:var(--ki-space-2,8px)}
+}
+@container diskspace (max-width:520px){
+  .disk-page .dk-files.mode-tiles,
+  .disk-page .dk-files.mode-large{
+    grid-template-columns:repeat(auto-fill,minmax(min(100%,var(--dk-tile-size)),1fr));
+  }
+  .disk-page .dk-files.mode-tiles .dk-file{min-height:62px;padding:var(--ki-space-2,8px)}
+  .disk-page .dk-tile-scale output{display:none}
+  .disk-page .dk-tile-scale input{width:76px}
+  .disk-page .dk-file .dk-name{line-height:1.35}
+}
+@media(prefers-reduced-motion:reduce){
+  .disk-page .dk-layout,.disk-page .dk-resize-handle,
+  .disk-page .dk-resize-handle > span,.disk-page .dk-file{transition:none!important}
+}

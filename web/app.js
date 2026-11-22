@@ -322,6 +322,8 @@ function heading(label,lead,ic) {
 function renderMain() {
   if(!mainNode)return;
   mainNode.replaceChildren();mainNode.dataset.route=route;
+  // Only Disk escapes the centered JUUNIBI page width. Other routes keep their layout.
+  mainNode.classList.toggle('disk-workspace',route==='disk');
   const item=NAV.find(n=>n.id===route);
   topTitle.textContent='Tsukimera · '+(item?.label||'Настройки');
   if(route==='settings') return renderSettings();
