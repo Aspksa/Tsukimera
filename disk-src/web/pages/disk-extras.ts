@@ -1,3 +1,4 @@
+import {writePreference} from "../preferences";
 import {el,iconButton,copyText} from "../dom";
 import {btn} from "./kit";
 import {openSheet} from "./sheet";
@@ -14,7 +15,7 @@ export function readColumns():TableColumns{
   try{value=JSON.parse(localStorage.getItem(COLUMN_KEY)||"{}");}catch{}
   return {size:value?.size!==false,date:value?.date!==false,folder:value?.folder===true};
 }
-export function writeColumns(columns:TableColumns){localStorage.setItem(COLUMN_KEY,JSON.stringify(columns));}
+export function writeColumns(columns:TableColumns){writePreference(COLUMN_KEY,JSON.stringify(columns));}
 export function readSmartRules():SmartRule[]{
   try{
     const rows=JSON.parse(localStorage.getItem(SMART_KEY)||"[]");
@@ -23,7 +24,7 @@ export function readSmartRules():SmartRule[]{
       r.name.length<=40&&r.pattern.length<=80&&["name","folder","extension","tag"].includes(r.field)).slice(0,30);
   }catch{return [];}
 }
-function saveSmartRules(rows:SmartRule[]){localStorage.setItem(SMART_KEY,JSON.stringify(rows));}
+function saveSmartRules(rows:SmartRule[]){writePreference(SMART_KEY,JSON.stringify(rows));}
 export function matchesSmartRule(file:DiskFile,rule:SmartRule):boolean{
   const hay=rule.field==="name"?file.name:rule.field==="folder"?file.folder:
     rule.field==="extension"?(file.name.split(".").pop()||""):((file.tags||[]).join(" "));
@@ -57,7 +58,7 @@ export function animateChange(action:()=>void){
 }
 export function openColumnSettings(current:TableColumns,onSave:(next:TableColumns)=>void){
   const wrapper=el("div",{cls:"dkx-stack"});
-  const heading=el("p",{textContent:"Выберите дополнительные колонки режима «Таблица». Настройки останутся в этом браузере."});
+  const heading=el("p",{textContent:"Выберите дополнительные колонки режима «Таблица». Настройки сохраняются в локальной базе SQLite."});
   wrapper.append(heading);
   const inputs=new Map<keyof TableColumns,HTMLInputElement>();
   for(const [key,label] of [["size","Размер"],["date","Дата загрузки"],["folder","Папка"]] as const){
