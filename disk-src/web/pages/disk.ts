@@ -1530,8 +1530,14 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
    * Do not discard it: the faster SQLite v3 catalogue can beat DOM mounting. */
   async function loadCatalog(withStyles = true) {
     const gen = ++loadGen;
+    page.dataset.catalogStage="fetching-"+gen;
+    try{
     const [r, st, tr] = await Promise.all([api.diskList(), withStyles || !loaded ? api.diskFolderStyles() : Promise.resolve(null), loaded ? Promise.resolve(null) : api.diskTrash()]);
-    if (gen !== loadGen || (catalogResolvedOnce && !page.isConnected)) return;
+    page.dataset.catalogStage="received-"+gen;
+    if (gen !== loadGen || (catalogResolvedOnce && !page.isConnected)){
+      page.dataset.catalogStage="discarded-"+gen;
+      return;
+    }
     catalogResolvedOnce = true;
     if (!r.ok) {
       loaded = true;
@@ -1544,8 +1550,17 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
     if (current && !folders.includes(current)) current = "";
     if(smartCurrent&&!readSmartRules().some(r=>r.id===smartCurrent))smartCurrent=null;
     loaded = true;
+    page.dataset.catalogStage="rendering-"+gen;
     redraw();
     showLinked();
+    page.dataset.catalogStage="ready-"+gen;
+    }catch(error){
+      page.dataset.catalogStage="error-"+(error instanceof Error?error.message:String(error));
+      loaded=true;
+      filesBox.replaceChildren(emptyState("alert","Не удалось загрузить каталог",
+        error instanceof Error?error.message:"Неизвестная ошибка",btn("Повторить",()=>void loadCatalog(),{small:true,icon:"refresh"})));
+      console.error("Tsukimera Disk catalog:",error);
+    }
   }
   /** A file opened from «Дела»: its folder, the file flashed, and the preview or «Сведения». */
   function showLinked() {
@@ -1665,6 +1680,10 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
   renderFiles();
   // Route shell evaluates diskPage() before appending its result. Wait until
   // the next frame so the first catalog request belongs to a mounted page.
-  requestAnimationFrame(()=>{if(page.isConnected)void loadCatalog();});
+  page.dataset.catalogStage="awaiting-mount";
+  requestAnimationFrame(()=>{
+    page.dataset.catalogStage=page.isConnected?"mounted":"unmounted";
+    if(page.isConnected)void loadCatalog();
+  });
   return page;
 }
