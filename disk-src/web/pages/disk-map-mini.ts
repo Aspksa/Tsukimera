@@ -14,6 +14,8 @@ import {graphFromCatalog,graphInitial,graphForceStep,type GraphNode,type GraphPo
   type GraphScene,type GraphLink} from "./disk-map-graph";
 import {normalizeMiniView,MINI_VIEW_KEY,clampView} from "./disk-map-mini-model";
 import {SPATIAL_DENSITY_KEY} from "./disk-map-spatial";
+import {graphScreen,graphBounds,graphCamera,anchoredZoom,graphMotionBudget,graphLerp,
+  type GraphBounds,type GraphScreen} from "./disk-map-responsive";
 import {writePreference} from "../preferences";
 
 type Actions={openFolder:(folder:string)=>void;openFile:(id:string)=>void};
@@ -60,6 +62,8 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
   let mode:Mode="all",includeTags=true,includeDuplicates=true;
   let semantic:SemanticIndex|null=null,analysisGeneration=0;
   let coords=new Map<string,GraphPoint>(),appearing=new Map<string,number>();
+  let bounds:GraphBounds=graphBounds([]),screen:GraphScreen=graphScreen(320,280);
+  let lastScreenKey="",highlightTimer=0;
   let fading:Array<{point:GraphPoint;node:GraphNode;until:number}>=[];
   let hovered:string|null=null,selected:string|null=null;
   let expanded=false,anchor:Node|null=null,nextSibling:Node|null=null,homePage:HTMLElement|null=null;
@@ -75,15 +79,18 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
       writePreference(MINI_VIEW_KEY,JSON.stringify({zoom,panX,panY,focus:""}));
     },220);
   }
+  function measure():GraphScreen{
+    const rect=frame.getBoundingClientRect();
+    return graphScreen(rect.width||320,rect.height||280,window.devicePixelRatio||1,
+      zoom,expanded);
+  }
   function viewport(){
-    const bounds=frame.getBoundingClientRect();
-    const w=Math.max(1,bounds.width),h=Math.max(1,bounds.height);
-    // Fit dynamic force positions automatically. No crop or card-shaped frame.
-    let extent=180;
-    for(const p of coords.values())extent=Math.max(extent,Math.hypot(p.x,p.y)+28);
-    extent=Math.min(950,extent);
-    const fit=Math.min((w-30)/(extent*2),(h-30)/(extent*2));
-    return {w,h,scale:Math.max(.08,fit)*zoom,cx:w/2+panX,cy:h/2+panY};
+    screen=measure();
+    const cam=graphCamera(bounds,screen,zoom,panX,panY);
+    return {w:screen.width,h:screen.height,cx:cam.cx,cy:cam.cy,
+      scale:cam.scale,dpr:screen.dpr,pxW:screen.pixelWidth,pxH:screen.pixelHeight,
+      markerScale:screen.markerScale,lineScale:screen.lineScale,
+      touchRadius:screen.touchRadius,labelSize:screen.labelSize};
   }
   function pointerHit(clientX:number,clientY:number):GraphNode|null{
     const bounds=canvas.getBoundingClientRect(),mx=clientX-bounds.left,my=clientY-bounds.top;
@@ -92,7 +99,7 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
     for(const n of scene.nodes){
       const p=coords.get(n.id);if(!p)continue;
       const d=Math.hypot(cx+p.x*scale-mx,cy+p.y*scale-my);
-      if(d<Math.max(12,(n.kind==="folder"?6:3.5)*Math.max(1,scale)+7)&&d<dist){
+      if(d<Math.max(screen.touchRadius,(n.kind==="folder"?6:3.5)*screen.markerScale*Math.max(.65,scale)+7)&&d<dist){
         nearest=n;dist=d;
       }
     }
@@ -127,8 +134,22 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
   function focus(n:GraphNode){
     selected=n.id;hovered=n.id;fileHighlight(n);draw();
   }
-  function changeZoom(factor:number){
-    zoom=clampView(zoom*factor,.65,4);persist();draw();
+  function changeZoom(factor:number,atX?:number,atY?:number){
+    const previous=viewport();
+    const next=clampView(zoom*factor,.65,4);
+    if(Math.abs(next-zoom)<.00001)return;
+    const anchorX=atX===undefined?previous.w/2:clamp(atX,0,previous.w);
+    const anchorY=atY===undefined?previous.h/2:clamp(atY,0,previous.h);
+    const oldDetail=screen.detail;
+    const afterScreen=graphScreen(previous.w,previous.h,window.devicePixelRatio||1,
+      next,expanded);
+    const camera=graphCamera(bounds,screen,zoom,panX,panY);
+    const shift=anchoredZoom(camera,afterScreen,bounds,next,anchorX,anchorY);
+    zoom=next;panX=clamp(shift.panX,-1800,1800);
+    panY=clamp(shift.panY,-1800,1800);
+    persist();
+    // Only changes in actual level of detail require new graph nodes.
+    if(oldDetail!==afterScreen.detail)rebuild();else draw();
   }
   function setExpanded(value:boolean){
     if(value===expanded)return;
@@ -195,9 +216,14 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
   function rebuild(){
     const oldNodes=new Map(scene.nodes.map(n=>[n.id,n]));
     const oldPositions=coords;
+    screen=measure();
     const detailed=localStorage.getItem(SPATIAL_DENSITY_KEY)==="detailed";
+    const detail=screen.detail;
+    const areaBudget=Math.round(screen.maxNodes*(detailed?1.15:1));
+    const limit=clamp(areaBudget,24,240);
     scene=graphFromCatalog(files,folders,current,{
-      depth,limit:expanded?(detailed?190:146):(detailed?82:64),
+      depth:detail==="detail"?3:detail==="overview"?Math.min(depth,2):depth,
+      limit,perFolder:screen.perFolder,detailLevel:detail,
       includeTags,includeDuplicates,semantic,viewMode:mode
     });
     const currentTime=performance.now();
@@ -216,6 +242,13 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
       else if(appearing.has(n.id))entering.set(n.id,appearing.get(n.id)!);
     }
     coords=next;appearing=entering;physicsFrame=0;
+    // Freeze camera extents for each physics burst. Continual re-fitting
+    // during every force tick would produce a nauseating zoom wobble.
+    bounds=graphBounds(coords.values());
+    lastScreenKey=screen.width+"x"+screen.height+":"+detail;
+    canvas.dataset.detail=detail;
+    canvas.dataset.capacity=String(limit);
+    canvas.dataset.aspect=screen.ultrawide?"ultrawide":"standard";
     canvas.dataset.layer="graph";
     canvas.dataset.nodes=String(scene.nodes.length);
     canvas.dataset.links=String(scene.links.length);
@@ -226,15 +259,15 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
   // Rich glow and grouping are painted INSIDE the Canvas: never DOM cards.
   function draw(){
     if(!root.isConnected)return;
-    const {w,h,scale,cx,cy}=viewport();
-    const dpr=Math.min(2,devicePixelRatio||1);
-    const pw=Math.round(w*dpr),ph=Math.round(h*dpr);
+    const {w,h,scale,cx,cy,dpr,pxW:pw,pxH:ph,lineScale,markerScale,labelSize}=viewport();
     if(canvas.width!==pw||canvas.height!==ph){canvas.width=pw;canvas.height=ph;}
     const ctx=canvas.getContext("2d");if(!ctx)return;
     ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,w,h);
     const now=performance.now();
     // A diffuse nebula makes real clusters legible without hard outlines.
     const groups=new Map<string,GraphPoint[]>();
+    const folderCounts=new Map(scene.nodes.filter(n=>n.kind==="folder")
+      .map(n=>[n.folder,n.count||0]));
     for(const n of scene.nodes){
       if(n.kind!=="file")continue;
       const p=coords.get(n.id);if(!p)continue;
@@ -245,8 +278,10 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
       if(positions.length<3||cloud++>8)continue;
       const x=cx+positions.reduce((sum,p)=>sum+p.x,0)/positions.length*scale;
       const y=cy+positions.reduce((sum,p)=>sum+p.y,0)/positions.length*scale;
+      const descendants=folderCounts.get([...groups.keys()].find(k=>groups.get(k)===positions)||"")||positions.length;
       const radius=clamp(positions.reduce((max,p)=>Math.max(max,Math.hypot(
-        cx+p.x*scale-x,cy+p.y*scale-y)),0)+27,32,Math.min(w,h)*.49);
+        cx+p.x*scale-x,cy+p.y*scale-y)),0)+
+        16+Math.sqrt(descendants)*2.5,28,Math.min(w,h)*.48);
       const grad=ctx.createRadialGradient(x,y,2,x,y,radius);
       grad.addColorStop(0,"rgba(219,166,83,.11)");
       grad.addColorStop(.44,"rgba(154,112,68,.045)");
@@ -279,13 +314,15 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
       const partOfPath=rootPath.has(e.source+"|"+e.target);
       const fade=!!active&&!highlighted&&!partOfPath;
       const rgb=relationColors[e.kind]||relationColors.contains;
-      const opacity=fade?.06:highlighted?.93:partOfPath?.72:
-        e.kind==="contains"?.22:.36;
+      const activePulse=highlighted&&!reduced()?
+        .08*Math.sin(now/230):0;
+      const opacity=fade?.055:highlighted?.82+activePulse:partOfPath?.69:
+        e.kind==="contains"?.18:.31;
       const strength=clamp(e.weight??1,.25,1.6);
       ctx.save();
       ctx.beginPath();ctx.moveTo(sx,sy);ctx.lineTo(tx,ty);
       ctx.strokeStyle="rgba("+rgb+","+opacity+")";
-      ctx.lineWidth=(highlighted?1.35:.5)+strength*(highlighted?1.2:.65);
+      ctx.lineWidth=((highlighted?1.25:.45)+strength*(highlighted?1.1:.5))*lineScale;
       if(e.kind==="lexical"||e.kind==="entity")ctx.setLineDash([3.2,5.1]);
       if(highlighted||partOfPath){
         ctx.shadowColor="rgba("+rgb+",.75)";
@@ -312,7 +349,9 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
       const importance=n.id===scene.focus?6.3:
         n.kind==="folder"?5.1:n.kind==="file"?
         2.8+Math.min(1.6,Math.log10(1+Math.max(0,n.size))*.18):4.3;
-      const radius=clamp(importance*Math.sqrt(Math.max(.46,scale)),2.1,12);
+      const countFactor=n.kind==="folder"?1+Math.min(.75,Math.log2(1+(n.count||0))/10):1;
+      const radius=clamp(importance*Math.sqrt(Math.max(.46,scale))*
+        markerScale*countFactor,2,16);
       if(isActive){
         const halo=ctx.createRadialGradient(x,y,radius,x,y,radius+22);
         const hex=tint(n);
@@ -338,7 +377,7 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
       const x=cx+point.x*scale,y=cy+point.y*scale;
       const text=chosen.name.length>(expanded?70:31)?
         chosen.name.slice(0,expanded?69:30)+"…":chosen.name;
-      ctx.font=(expanded?"500 13px":"500 11px")+" system-ui,sans-serif";
+      ctx.font="500 "+Math.round(labelSize)+"px system-ui,sans-serif";
       const tw=ctx.measureText(text).width,pad=7;
       const px=clamp(x+12,4,Math.max(4,w-tw-pad*2-4));
       const py=clamp(y-25,5,Math.max(5,h-26));
@@ -356,12 +395,25 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
   }
   function schedule(){
     if(raf)cancelAnimationFrame(raf);
-    const budget=reduced()?1:scene.nodes.length>140?56:94;
+    const budget=graphMotionBudget(scene.nodes.length,reduced(),document.visibilityState==="visible");
     const step=()=>{
       raf=0;if(!root.isConnected)return;
       const kinetic=physicsFrame<budget?
         graphForceStep(scene.nodes,scene.links,coords,Math.max(.27,1-physicsFrame/budget*.65)):0;
-      physicsFrame++;draw();
+      physicsFrame++;
+      // Ease the viewport toward the stable post-physics bounds. This uses
+      // real node positions and prevents clipping after the graph grows.
+      if(physicsFrame%10===0||kinetic<.04){
+        const target=graphBounds(coords.values());
+        const rate=kinetic<.04?.18:.07;
+        bounds={
+          minX:graphLerp(bounds.minX,target.minX,rate),
+          maxX:graphLerp(bounds.maxX,target.maxX,rate),
+          minY:graphLerp(bounds.minY,target.minY,rate),
+          maxY:graphLerp(bounds.maxY,target.maxY,rate)
+        };
+      }
+      draw();
       const now=performance.now();
       const transitions=!reduced()&&([...appearing.values()].some(t=>now-t<360)||
         fading.some(t=>t.until>now));
@@ -441,14 +493,23 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
     if(menu&&!menu.contains(e.target as Node)&&e.target!==canvas)dismissMenu();
   });
   frame.addEventListener("wheel",e=>{
-    e.preventDefault();changeZoom(e.deltaY>0?.88:1.14);
+    e.preventDefault();
+    const rect=frame.getBoundingClientRect();
+    const x=e.clientX-rect.left,y=e.clientY-rect.top;
+    const valid=x>=0&&x<=rect.width&&y>=0&&y<=rect.height;
+    changeZoom(e.deltaY>0?.88:1.14,
+      valid?x:undefined,valid?y:undefined);
   },{passive:false});
   let pinch=0;
   frame.addEventListener("touchmove",e=>{
     if(e.touches.length!==2){pinch=0;return;}
     const a=e.touches[0]!,b=e.touches[1]!;
     const d=Math.hypot(a.clientX-b.clientX,a.clientY-b.clientY);
-    if(pinch>0&&d)changeZoom(d/pinch);
+    if(pinch>0&&d){
+      const rect=frame.getBoundingClientRect();
+      changeZoom(d/pinch,(a.clientX+b.clientX)/2-rect.left,
+        (a.clientY+b.clientY)/2-rect.top);
+    }
     pinch=d;e.preventDefault();
   },{passive:false});
   frame.addEventListener("touchend",()=>{pinch=0;});
@@ -485,7 +546,13 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
     if(e.key==="Escape"&&expanded&&root.isConnected)setExpanded(false);
   });
   if(typeof ResizeObserver!=="undefined"){
-    const observer=new ResizeObserver(()=>{if(root.isConnected)repaint();});
+    const observer=new ResizeObserver(()=>{
+      if(!root.isConnected)return;
+      const next=measure();
+      const key=next.width+"x"+next.height+":"+next.detail;
+      if(key!==lastScreenKey)rebuild();
+      else repaint();
+    });
     observer.observe(frame);
   }
   return {root,highlightFile,update(newFiles,newFolders,folder){
