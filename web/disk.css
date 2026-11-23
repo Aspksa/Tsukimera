@@ -2024,196 +2024,8 @@ button.dk-crumb:hover{background:var(--hover);color:var(--fg)}
 }
 
 
-/* Disk 13.0 — genuine Obsidian-inspired local force graph, no orbit cards.
- * One instance, compact beneath folders or temporarily expanded on top.
- * The expanded instance is moved to body to avoid transformed drawer clips. */
-.disk-page.dk-map-left .dk-layout>.dk-side>.dk-graph-view,
-.dk-graph-view.dk-graph-expanded{
-  display:flex;flex-direction:column;gap:7px;min-width:0;
-  font-family:inherit;
-}
-.disk-page.dk-map-left .dk-layout>.dk-side>.dk-graph-view{
-  padding:9px 5px;border-top:1px solid var(--line);
-  background:transparent;border-radius:0;
-}
-.dk-graph-head{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:7px}
-.dk-graph-title{display:flex;flex-direction:column;gap:3px;min-width:0}
-.dk-graph-title strong{font-size:.88rem;font-weight:650;letter-spacing:-.01em}
-.dk-graph-count{font-size:.66rem;line-height:1.3;color:var(--muted)}
-.dk-graph-actions{display:flex;gap:4px;align-items:center}
-.dk-graph-btn{
-  border:1px solid color-mix(in srgb,var(--brand) 17%,var(--line));
-  color:var(--fg);background:rgba(28,29,34,.65);
-  border-radius:8px;min-width:29px;height:29px;padding:2px 7px;
-  cursor:pointer;font:inherit;font-size:.85rem;
-}
-.dk-graph-btn:hover,.dk-graph-btn[aria-pressed="true"]{
-  color:var(--brand);border-color:color-mix(in srgb,var(--brand) 55%,transparent);
-  background:rgba(203,159,85,.11);
-}
-.dk-graph-btn:focus-visible,.dk-graph-canvas:focus-visible,
-.dk-graph-row:focus-visible,.dk-graph-crumb:focus-visible{
-  outline:2px solid var(--brand);outline-offset:2px;
-}
-.dk-graph-close{display:none}
-.dk-graph-utility{display:flex;flex-direction:column;min-width:0;gap:6px}
-.dk-graph-trail{display:flex;gap:4px;align-items:center;min-width:0;width:100%;
-  overflow-x:auto;scrollbar-width:none}
-.dk-graph-trail>span{color:var(--muted)}
-.dk-graph-crumb{border:none;background:transparent;color:var(--muted);
-  white-space:nowrap;cursor:pointer;font:inherit;font-size:.72rem;
-  max-width:130px;overflow:hidden;text-overflow:ellipsis;padding:3px}
-.dk-graph-crumb:last-child{color:var(--brand)}
-.dk-graph-search-wrap{display:flex;min-width:0}
-.dk-graph-search{width:100%;height:32px;box-sizing:border-box;
-  background:var(--bg);color:var(--fg);
-  border:1px solid var(--line);border-radius:8px;padding:5px 9px;
-  font-size:.77rem}
-.dk-graph-search:focus{outline:1px solid var(--brand);border-color:var(--brand)}
-.dk-graph-controls{display:flex;gap:5px;align-items:center;min-width:0;flex-wrap:wrap}
-.dk-graph-depth-label{font-size:.65rem;color:var(--muted);white-space:nowrap}
-.dk-graph-zoom{display:flex;gap:3px;align-items:center;margin-left:auto}
-.disk-page.dk-experience-v8.dk-map-left .dk-layout>.dk-side>.dk-graph-view .dk-graph-stage{
-  position:relative;width:100%;height:285px;min-height:285px;max-height:none;
-  box-sizing:border-box;overflow:hidden;border-radius:11px;
-  border:1px solid rgba(209,169,103,.15);
-  background:#08090e;touch-action:none;
-}
-.dk-graph-view .dk-graph-canvas{
-  display:block;position:absolute;inset:0;width:100%;height:100%;
-  z-index:1;touch-action:none;cursor:crosshair;
-}
-.dk-graph-view .dk-graph-canvas:active{cursor:grabbing}
-.dk-graph-tooltip{
-  position:absolute;left:8px;bottom:8px;right:8px;
-  background:rgba(16,17,23,.92);border:1px solid rgba(187,156,106,.3);
-  border-radius:7px;padding:5px 7px;font-size:.68rem;
-  pointer-events:none;color:#e9d7bc;z-index:2;white-space:nowrap;
-  overflow:hidden;text-overflow:ellipsis;
-}
-.dk-graph-tooltip[hidden]{display:none}
-.dk-graph-footer{display:flex;flex-direction:column;gap:4px;min-width:0}
-.dk-graph-status{font-size:.7rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.dk-graph-legend{display:flex;flex-wrap:wrap;gap:9px;font-size:.65rem}
-.dk-graph-legend-folder{color:#dbad62}
-.dk-graph-legend-file{color:#bbc6d9}
-.dk-graph-legend-tag{color:#af8ce2}
-.dk-graph-list-panel{
-  border-top:1px solid var(--line);padding-top:5px;
-  font-size:.7rem;min-width:0
-}
-.dk-graph-list-panel>summary{color:var(--muted);cursor:pointer;user-select:none}
-.dk-graph-list{
-  display:flex;flex-direction:column;gap:3px;
-  max-height:190px;overflow-y:auto;padding:6px 0 0
-}
-.dk-graph-row{width:100%;text-align:left;display:block;
-  background:transparent;color:var(--fg);border:1px solid transparent;
-  border-radius:6px;padding:5px;cursor:pointer;font-size:.72rem;
-  overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
-.dk-graph-row:hover,.dk-graph-row:focus{border-color:rgba(211,159,72,.3);background:rgba(192,147,65,.1)}
-/* Same Canvas takes over a large work area: no cloned graph, no mode switch. */
-.dk-graph-view.dk-graph-expanded{
-  position:fixed;inset:3dvh 3vw;z-index:200;
-  overflow:hidden;background:#090a0f;
-  border:1px solid rgba(220,177,99,.34);border-radius:15px;
-  box-shadow:0 0 0 200vmax rgba(0,0,0,.79),0 30px 90px rgba(0,0,0,.7);
-  padding:16px 22px;box-sizing:border-box;color:var(--fg);
-}
-.dk-graph-expanded .dk-graph-title strong{font-size:1.04rem}
-.dk-graph-expanded .dk-graph-head{flex:none}
-.dk-graph-expanded .dk-graph-utility{flex:none;flex-direction:row;align-items:center}
-.dk-graph-expanded .dk-graph-search-wrap{flex:1;max-width:440px}
-.dk-graph-expanded .dk-graph-trail{flex:1}
-.dk-graph-expanded .dk-graph-close{display:block}
-.dk-graph-expanded .dk-graph-stage{
-  position:relative;flex:1;min-height:180px;max-height:none;height:auto;
-  width:100%;background:#08090e;border-radius:12px;
-  border:1px solid rgba(211,165,95,.16);overflow:hidden;touch-action:none;
-}
-.dk-graph-expanded .dk-graph-footer{flex:none;flex-direction:row;align-items:center;justify-content:space-between}
-.dk-graph-expanded .dk-graph-list-panel{flex:none}
-.dk-graph-expanded .dk-graph-list{max-height:86px;display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr))}
-@media(max-width:620px){
-  .dk-graph-expanded.dk-graph-view{inset:0;border-radius:0;padding:12px 10px}
-  .dk-graph-expanded .dk-graph-utility{flex-direction:column;align-items:stretch}
-  .dk-graph-expanded .dk-graph-footer{flex-direction:column;align-items:stretch}
-  .dk-graph-expanded .dk-graph-stage{min-height:210px}
-}
-@media(prefers-reduced-motion:reduce){
-  .dk-graph-view *{transition:none!important;animation:none!important}
-}
-
-
-/* Disk 14 — evidence-led semantic map (same graph, no second framework). */
-.dk-graph-mode{
-  max-width:100%;min-width:94px;height:30px;padding:3px 7px;
-  border:1px solid color-mix(in srgb,var(--brand) 18%,var(--line));
-  border-radius:8px;background:#13141b;color:#ded6c8;
-  font:inherit;font-size:.72rem;cursor:pointer;
-}
-.dk-graph-mode:focus-visible,.dk-graph-analyze:focus-visible{
-  outline:2px solid var(--brand);outline-offset:2px;
-}
-.dk-graph-mode option{background:#11131a;color:#e1e3e7}
-.dk-graph-analyze{
-  white-space:nowrap;color:#f1d4a1;font-size:.72rem;
-  background:linear-gradient(110deg,rgba(212,154,70,.20),rgba(109,87,49,.06));
-  border-color:rgba(220,176,100,.45);
-}
-.dk-graph-analyze:disabled{opacity:.48;cursor:wait}
-.dk-graph-inspect{
-  display:flex;flex-direction:column;gap:5px;min-width:0;max-height:160px;
-  border:1px solid rgba(202,167,107,.17);border-radius:9px;
-  padding:8px 9px;background:rgba(13,16,22,.82);
-  overflow-y:auto;scrollbar-width:thin;
-}
-.dk-graph-inspect>strong{
-  color:#e8cfaa;font-size:.76rem;white-space:nowrap;
-  text-overflow:ellipsis;overflow:hidden
-}
-.dk-graph-inspect>small{font-size:.66rem;color:#b6b1ad;line-height:1.45}
-.dk-graph-summary{
-  margin:1px 0 3px;font-size:.7rem;line-height:1.5;
-  color:#b9c2cf;overflow-wrap:anywhere;
-  display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;
-}
-.dk-graph-inspect-link{
-  display:grid;grid-template-columns:minmax(0,1fr);
-  gap:2px;padding:5px 0;border-top:1px solid rgba(210,178,122,.09);
-}
-.dk-graph-inspect-link>span{
-  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
-  font-size:.68rem;color:#e4d9c7;
-}
-.dk-graph-inspect-link>small{
-  font-size:.64rem;color:#a9b3bf;line-height:1.35;
-}
-.dk-graph-expanded .dk-graph-inspect{
-  flex:0 0 auto;max-height:170px;min-height:65px;
-  padding:9px 13px;display:grid;
-  grid-template-columns:minmax(130px,1fr) minmax(0,2fr);
-  column-gap:14px;align-content:start
-}
-.dk-graph-expanded .dk-graph-inspect>strong{grid-column:1}
-.dk-graph-expanded .dk-graph-inspect>.dk-graph-summary{
-  grid-column:1/-1;max-width:950px;
-}
-.dk-graph-expanded .dk-graph-inspect-link{grid-column:2}
-.dk-graph-expanded .dk-graph-controls{gap:8px}
-.dk-graph-view .dk-graph-tooltip{line-height:1.35;white-space:normal;max-height:58px;overflow:hidden}
-.disk-page.dk-map-left .dk-side .dk-graph-mode{flex:1 1 85px}
-.disk-page.dk-map-left .dk-side .dk-graph-controls{gap:4px}
-.disk-page.dk-map-left .dk-side .dk-graph-analyze{flex:1 1 70px}
-@media(max-width:620px){
- .dk-graph-expanded .dk-graph-inspect{display:flex;max-height:118px;min-height:0}
- .dk-graph-expanded .dk-graph-inspect-link{grid-column:auto}
- .dk-graph-expanded .dk-graph-controls{flex-wrap:wrap}
-}
-@media(prefers-reduced-motion:reduce){
- .dk-graph-analyze,.dk-graph-inspect{animation:none!important;transition:none!important}
-}
-
+/* Disk 18: retired the 9 KB Disk 13–14 graph toolbar/inspector styles.
+ * The real borderless single-Canvas graph is styled by Disk 15–16 below. */
 
 /* Disk 15 — PURE GRAPH. Default markup contains only section > frame > canvas.
  * No permanent labels, controls, lists, cards, counters, border or panel.
@@ -2338,5 +2150,323 @@ button.dk-crumb:hover{background:var(--hover);color:var(--fg)}
   .disk-page.dk-experience-v8.dk-map-left .dk-layout>.dk-side>.dk-graph-only .dk-graph-stage{
     height:clamp(172px,55dvh,238px)!important;
     min-height:172px!important;
+  }
+}
+
+
+/* ============================================================================
+   Disk 18 — single layout contract for the live Disk page.
+   These are the canonical finishing rules. They supersede historical JUUNIBI
+   spacing without adding panels, resetting saved splitter widths or changing
+   file operations. The graph itself stays an unframed Canvas.
+   ============================================================================ */
+.disk-page.dk-experience-v8.dk-map-left{
+  --dk18-u1:4px;--dk18-u2:8px;--dk18-u3:12px;
+  --dk18-u4:16px;--dk18-u5:24px;
+  --dk18-rail:color-mix(in srgb,var(--line) 73%,transparent);
+  --dk18-text:var(--fg);
+  --dk18-subtext:var(--muted);
+  --dk18-focus:var(--brand);
+  min-width:0;
+}
+.disk-page.dk-experience-v8.dk-map-left :is(
+  .dk-bar,.dk-layout,.dk-side,.dk-main,.dk-info,.dkl,.dk-files,
+  .dk-head,.dk-file,.dk-meta,.dk-tree-panel,.dk-graph-only,
+  .dk-files-section-head,.dk-node,.dk-node-label,.dk-bar-actions){
+  min-width:0;box-sizing:border-box;
+}
+.disk-page.dk-experience-v8.dk-map-left .dk-layout{
+  width:100%;max-width:100%;min-width:0;
+  align-items:start;gap:0;
+}
+.disk-page.dk-experience-v8.dk-map-left .dk-layout>:is(
+  .dk-side,.dk-main,.dkl,.dk-info){
+  margin:0;min-width:0;max-width:100%;
+}
+.disk-page.dk-experience-v8.dk-map-left .dk-layout>.dk-side{
+  gap:var(--dk18-u2);
+  padding:var(--dk18-u3) var(--dk18-u2) var(--dk18-u3) 0;
+  border:0;background:transparent;
+  overflow-y:auto;overflow-x:hidden;overscroll-behavior-y:contain;
+  scrollbar-gutter:stable;
+}
+.disk-page.dk-experience-v8.dk-map-left .dk-layout>.dk-main{
+  padding:var(--dk18-u3);
+  gap:var(--dk18-u3);
+  overflow:visible; /* file virtualization uses the parent scroll host */
+}
+.disk-page.dk-experience-v8.dk-map-left .dk-layout>.dkl{
+  padding:var(--dk18-u3) 0 var(--dk18-u3) var(--dk18-u3);
+  min-width:0;overflow-wrap:anywhere;
+}
+.disk-page.dk-experience-v8.dk-map-left .dk-layout>.dk-info{
+  padding:var(--dk18-u3) var(--dk18-u2) var(--dk18-u3) var(--dk18-u4);
+  min-width:0;overflow-y:auto;overscroll-behavior:contain;
+  scrollbar-gutter:stable;
+  border-left:1px solid var(--dk18-rail);box-shadow:none;
+}
+.disk-page.dk-experience-v8.dk-map-left .dk-resize-handle{
+  z-index:4;
+  align-self:start;outline-offset:-2px;
+}
+.disk-page.dk-experience-v8.dk-map-left .dk-resize-handle>span{
+  width:1px;background:var(--dk18-rail);
+}
+.disk-page.dk-experience-v8.dk-map-left .dk-layout>.dk-side>.dk-tree-panel{
+  min-height:92px;max-height:clamp(130px,32dvh,350px);
+  flex:0 1 auto;
+  margin:0;padding:0;
+  overflow-y:auto;overflow-x:hidden;
+  scrollbar-gutter:stable;overscroll-behavior:contain;
+}
+.disk-page.dk-experience-v8.dk-map-left .dk-tree,
+.disk-page.dk-experience-v8.dk-map-left .dk-tree-panel .dk-branch{
+  min-width:0;
+}
+.disk-page.dk-experience-v8.dk-map-left .dk-side-head{
+  padding:var(--dk18-u2) var(--dk18-u2) var(--dk18-u1);
+  min-height:36px;align-items:center;gap:var(--dk18-u2);
+}
+.disk-page.dk-experience-v8.dk-map-left .dk-side-head strong{
+  font-weight:650;line-height:1.35;min-width:0;
+}
+.disk-page.dk-experience-v8.dk-map-left .dk-tree-commands{
+  min-height:32px;gap:var(--dk18-u1);
+  padding:0 var(--dk18-u1) var(--dk18-u1);
+  align-items:center;
+}
+.disk-page.dk-experience-v8.dk-map-left :is(.dk-node,.dk-section){
+  min-width:0;border-radius:8px;
+}
+.disk-page.dk-experience-v8.dk-map-left .dk-node{
+  min-height:36px;
+}
+.disk-page.dk-experience-v8.dk-map-left .dk-node-label{
+  min-width:0;min-height:34px;gap:var(--dk18-u2);
+  display:flex;align-items:center;
+}
+.disk-page.dk-experience-v8.dk-map-left .dk-node-name{
+  flex:1 1 auto;min-width:0;
+  overflow:hidden;overflow-wrap:anywhere;
+  display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;
+  line-height:1.4;
+}
+.disk-page.dk-experience-v8.dk-map-left :is(.dk-node-n,.dk-node-ic){
+  flex-shrink:0;
+}
+.disk-page.dk-experience-v8.dk-map-left .dk-node-ic{
+  display:inline-flex;align-items:center;justify-content:center;
+}
+.disk-page.dk-experience-v8.dk-map-left .dk-layout>.dk-side>.dk-graph-only{
+  margin:var(--dk18-u1) 0 0!important;padding:0!important;
+  border:0!important;border-radius:0!important;
+  box-shadow:none!important;background:transparent!important;
+  overflow:visible!important;
+}
+.disk-page.dk-experience-v8.dk-map-left .dk-layout>.dk-side>.dk-graph-only>.dk-graph-stage{
+  margin:0!important;padding:0!important;
+  border:0!important;border-radius:0!important;
+  outline:0!important;box-shadow:none!important;background:transparent!important;
+  width:100%!important;
+}
+.disk-page.dk-experience-v8.dk-map-left .dk-files-section-head{
+  display:flex;align-items:center;justify-content:flex-start;
+  gap:var(--dk18-u2);padding:var(--dk18-u2) var(--dk18-u3);
+  margin:0;min-height:38px;border-bottom:1px solid var(--dk18-rail);
+}
+.disk-page.dk-experience-v8.dk-map-left .dk-files-section-head h2{
+  margin:0;min-width:0;font-size:var(--fs-md);font-weight:650;line-height:1.45;
+}
+.disk-page.dk-experience-v8.dk-map-left .dk-files-section-head small{
+  color:var(--dk18-subtext);line-height:1.4;
+}
+.disk-page.dk-experience-v8.dk-map-left .dk-bar{
+  display:flex;align-items:center;min-width:0;
+  gap:var(--dk18-u2);padding:var(--dk18-u2) var(--dk18-u3);
+  border-bottom:1px solid var(--dk18-rail);
+  min-height:60px;
+}
+.disk-page.dk-experience-v8.dk-map-left .dk-search{
+  min-width:0;flex:1 1 280px;max-width:100%;
+  min-height:42px;border-radius:10px;
+  padding:0 var(--dk18-u3);gap:var(--dk18-u2);
+  align-items:center;
+}
+.disk-page.dk-experience-v8.dk-map-left .dk-search-input{
+  min-width:0;width:100%;min-height:40px;
+  line-height:1.45;
+}
+.disk-page.dk-experience-v8.dk-map-left .dk-bar-chips{
+  margin-right:0;min-width:0;
+  flex-wrap:wrap;gap:var(--dk18-u1);
+}
+.disk-page.dk-experience-v8.dk-map-left .dk-bar-actions{
+  display:flex;align-items:center;justify-content:flex-end;
+  gap:var(--dk18-u2);margin-left:auto;flex:0 1 auto;
+}
+.disk-page.dk-experience-v8.dk-map-left :is(
+  .dk-bar-actions>.btn,.dk-bar-actions>.icon-btn,
+  .dk-more-btn,.dk-focus-btn,.dk-drawer-btn){
+  min-height:40px;box-sizing:border-box;
+  display:inline-flex;align-items:center;justify-content:center;
+  border-radius:9px;
+}
+.disk-page.dk-experience-v8.dk-map-left :is(
+  .dk-bar-actions button,.dk-head-tools button,.dk-tree-commands button){
+  vertical-align:middle;
+}
+.disk-page.dk-experience-v8.dk-map-left .dk-head{
+  position:sticky;top:0;z-index:28;
+  min-width:0;gap:var(--dk18-u2);
+  padding:var(--dk18-u2) 0;
+  border-radius:0;border-bottom:1px solid var(--dk18-rail);
+}
+.disk-page.dk-experience-v8.dk-map-left .dk-head-tools{
+  min-width:0;gap:var(--dk18-u2);align-items:center;
+}
+.disk-page.dk-experience-v8.dk-map-left .dk-crumbs{
+  min-width:0;max-width:100%;overscroll-behavior-x:contain;
+}
+.disk-page.dk-experience-v8.dk-map-left .dk-files{
+  min-width:0;max-width:100%;
+}
+.disk-page.dk-experience-v8.dk-map-left .dk-files:not(.mode-table){
+  gap:var(--dk18-u2);
+}
+.disk-page.dk-experience-v8.dk-map-left :is(
+  .dk-files.mode-tiles,.dk-files.mode-large){
+  grid-auto-rows:auto;align-items:stretch;
+}
+.disk-page.dk-experience-v8.dk-map-left .dk-files.mode-tiles .dk-file{
+  min-height:88px;
+  display:flex;align-items:center;gap:var(--dk18-u3);
+  padding:var(--dk18-u3);border-radius:10px;
+}
+.disk-page.dk-experience-v8.dk-map-left .dk-files.mode-large .dk-file{
+  min-height:0;align-items:stretch;
+  padding:var(--dk18-u3);gap:var(--dk18-u2);
+}
+.disk-page.dk-experience-v8.dk-map-left .dk-file{
+  min-width:0;max-width:100%;
+  box-shadow:none;
+}
+.disk-page.dk-experience-v8.dk-map-left .dk-file .dk-meta{
+  min-width:0;flex:1 1 0;gap:var(--dk18-u1);
+  align-items:stretch;justify-content:center;
+}
+.disk-page.dk-experience-v8.dk-map-left .dk-file .dk-name{
+  min-width:0;max-width:100%;overflow:hidden;
+  overflow-wrap:anywhere;font-weight:600;
+  line-height:1.4;letter-spacing:normal;
+}
+.disk-page.dk-experience-v8.dk-map-left :is(
+  .dk-files.mode-tiles,.dk-files.mode-large) .dk-name{
+  display:-webkit-box;-webkit-box-orient:vertical;
+  -webkit-line-clamp:2;white-space:normal;overflow:hidden;
+  max-height:2.8em;text-overflow:ellipsis;
+}
+.disk-page.dk-experience-v8.dk-map-left :is(
+  .dk-files.mode-list,.dk-files.mode-table) .dk-name{
+  display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.disk-page.dk-experience-v8.dk-map-left .dk-file .dk-file-sub,
+.disk-page.dk-experience-v8.dk-map-left .dk-file .dk-meta small{
+  min-width:0;max-width:100%;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  line-height:1.4;color:var(--dk18-subtext);
+}
+.disk-page.dk-experience-v8.dk-map-left .dk-file .dk-thumb{
+  flex-shrink:0;object-fit:contain;align-self:center;
+}
+.disk-page.dk-experience-v8.dk-map-left .dk-file-labels{
+  min-width:0;align-items:center;
+  gap:var(--dk18-u1);
+}
+.disk-page.dk-experience-v8.dk-map-left .dk-tags{
+  min-width:0;gap:var(--dk18-u1);overflow:hidden;
+}
+.disk-page.dk-experience-v8.dk-map-left .dk-tags i{
+  min-width:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;
+}
+.disk-page.dk-experience-v8.dk-map-left :is(
+  .dk-file.picked,.dk-file.dk-map-linked,.dk-node.current){
+  outline-offset:-2px;
+}
+.disk-page.dk-experience-v8.dk-map-left :is(
+  .dk-file,.dk-node,.dk-graph-canvas){
+  -webkit-tap-highlight-color:transparent;
+}
+.disk-page.dk-experience-v8.dk-map-left .dk-empty-actions{
+  min-width:0;display:flex;justify-content:center;
+  gap:var(--dk18-u2);flex-wrap:wrap;
+}
+.disk-page.dk-experience-v8.dk-map-left .dk-empty-actions>.btn{
+  min-height:40px;
+}
+.disk-page.dk-experience-v8.dk-map-left :is(
+  .dk-info,.dk-tree,.dk-tree-panel){
+  overscroll-behavior:contain;
+  scrollbar-width:thin;
+}
+@container diskspace (min-width:1800px){
+  .disk-page.dk-experience-v8.dk-map-left .dk-layout>.dk-main{
+    padding-inline:var(--dk18-u4);
+  }
+  .disk-page.dk-experience-v8.dk-map-left .dk-files:not(.mode-table){
+    gap:var(--dk18-u3);
+  }
+}
+@container diskspace (max-width:1180px){
+  .disk-page.dk-experience-v8.dk-map-left .dk-layout>.dk-main{
+    padding-inline:var(--dk18-u2);
+  }
+  .disk-page.dk-experience-v8.dk-map-left .dk-layout>.dkl{
+    padding:var(--dk18-u4) 0 0;
+  }
+  .disk-page.dk-experience-v8.dk-map-left .dk-layout>.dk-info{
+    position:fixed;
+    max-width:min(390px,92vw);
+    padding:var(--dk18-u4);
+    border-left:1px solid var(--dk18-rail);
+  }
+}
+@container diskspace (max-width:760px){
+  .disk-page.dk-experience-v8.dk-map-left .dk-bar{
+    padding:var(--dk18-u2);gap:var(--dk18-u2);
+  }
+  .disk-page.dk-experience-v8.dk-map-left .dk-search{
+    order:3;flex:1 1 100%;
+  }
+  .disk-page.dk-experience-v8.dk-map-left .dk-bar-actions{
+    order:1;flex:1 1 auto;justify-content:flex-end;
+  }
+  .disk-page.dk-experience-v8.dk-map-left .dk-layout>.dk-main{
+    padding:var(--dk18-u2) 0;
+  }
+  .disk-page.dk-experience-v8.dk-map-left .dk-layout>.dk-side{
+    padding:var(--dk18-u3);
+    overflow-y:auto;
+    scrollbar-gutter:stable;
+  }
+  .disk-page.dk-experience-v8.dk-map-left .dk-layout>.dk-side>.dk-tree-panel{
+    max-height:37dvh;
+  }
+  .disk-page.dk-experience-v8.dk-map-left .dk-files-section-head{
+    padding-inline:var(--dk18-u2);
+  }
+  .disk-page.dk-experience-v8.dk-map-left .dk-head{
+    padding:var(--dk18-u2) 0;
+  }
+}
+@media (max-height:700px) and (min-width:761px){
+  .disk-page.dk-experience-v8.dk-map-left .dk-layout>.dk-side>.dk-tree-panel{
+    max-height:min(28dvh,240px);
+    min-height:72px;
+  }
+}
+@media (prefers-reduced-motion:reduce){
+  .disk-page.dk-experience-v8.dk-map-left :is(
+    .dk-file,.dk-head,.dk-search,.dk-layout,.dk-resize-handle){
+    animation:none!important;transition:none!important;
   }
 }
