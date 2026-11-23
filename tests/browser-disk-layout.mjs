@@ -1,5 +1,5 @@
 import {spawn} from "node:child_process";
-import {mkdtemp,readFile,rm} from "node:fs/promises";
+import {mkdtemp,readFile,rm,mkdir,writeFile} from "node:fs/promises";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import assert from "node:assert/strict";
@@ -70,11 +70,53 @@ try{
     if(result.exceptionDetails)throw Error(result.exceptionDetails.text||JSON.stringify(result.exceptionDetails));
     return result.result?.value;
   }
-  async function device(width,height=960){
+  async function device(width,height=960,dpr=1){
     await send("Emulation.setDeviceMetricsOverride",{
-      width,height,deviceScaleFactor:1,mobile:width<600
+      width,height,deviceScaleFactor:dpr,mobile:width<600
     });
     await pause(300);
+  }
+  // Disk 18: real Chrome PNGs and measurable alignment on every viewport.
+  const screenshotFolder=join(process.cwd(),".runtime","disk-ui-screenshots");
+  async function screenshot(label){
+    const captured=await send("Page.captureScreenshot",{format:"png",fromSurface:true});
+    const bytes=Buffer.from(captured.data||"","base64");
+    assert.equal(bytes.subarray(0,8).toString("hex"),"89504e470d0a1a0a");
+    assert.ok(bytes.length>6000,"Empty screenshot: "+label);
+    const w=bytes.readUInt32BE(16),h=bytes.readUInt32BE(20);
+    assert.ok(w>240&&h>200,"Invalid PNG dimensions: "+label);
+    await mkdir(screenshotFolder,{recursive:true});
+    await writeFile(join(screenshotFolder,label+".png"),bytes);
+    return {width:w,height:h,bytes:bytes.length};
+  }
+  const diskAlignment="("+(()=>{
+    const r=q=>{const rect=document.querySelector(q)?.getBoundingClientRect();
+      return rect?{x:rect.x,y:rect.y,right:rect.right,bottom:rect.bottom,
+        width:rect.width,height:rect.height}:null;};
+    const search=r(".dk-search"),actions=r(".dk-bar-actions"),side=r(".dk-side"),
+      tree=r(".dk-tree-panel"),graph=r(".dk-graph-stage"),files=r(".dk-main");
+    const overlaps=(a,b)=>!!(a&&b&&a.x<b.right-1&&b.x<a.right-1&&
+      a.y<b.bottom-1&&b.y<a.bottom-1);
+    const element=document.querySelector(".dk-graph-stage");
+    return {width:innerWidth,scrollWidth:document.documentElement.scrollWidth,
+      dpr:devicePixelRatio,filesWidth:files?.width,sideWidth:side?.width,
+      searchActionOverlap:overlaps(search,actions),
+      folderGraphOverlap:overlaps(tree,graph),
+      border:element?getComputedStyle(element).borderTopWidth:null,
+      background:element?getComputedStyle(element).backgroundColor:null,
+      canvasCount:document.querySelectorAll(".dk-graph-only canvas").length};
+  }).toString()+")()";
+  async function assertAlignment(label,withDrawer=false){
+    const a=await evaluate(diskAlignment);
+    assert.ok(!a.searchActionOverlap,"Toolbar collision "+label+": "+JSON.stringify(a));
+    if(withDrawer)assert.ok(!a.folderGraphOverlap,
+      "Folder / graph overlap "+label+": "+JSON.stringify(a));
+    assert.ok(a.scrollWidth<=a.width+4,
+      "Unexpected page overflow "+label+": "+JSON.stringify(a));
+    assert.equal(a.border,"0px","Graph stage must remain borderless");
+    assert.equal(a.background,"rgba(0, 0, 0, 0)");
+    assert.equal(a.canvasCount,1);
+    return a;
   }
   const metrics="("+(()=> {
     const q=x=>document.querySelector(x);
