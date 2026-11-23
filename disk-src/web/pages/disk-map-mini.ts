@@ -542,29 +542,43 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
         focusNodes?!focusNodes.has(n.id):
         !!active&&!neighbor.has(n.id);
       const entered=appearing.get(n.id);
-      const shown=entered===undefined||reduced()?1:clamp((now-entered)/350,0,1);
-      const importance=n.id===scene.focus?6.3:
-        n.kind==="folder"?5.1:n.kind==="file"?
-        2.8+Math.min(1.6,Math.log10(1+Math.max(0,n.size))*.18):4.3;
-      const countFactor=n.kind==="folder"?1+Math.min(.75,Math.log2(1+(n.count||0))/10):1;
-      const radius=clamp(importance*Math.sqrt(Math.max(.46,scale))*
-        markerScale*countFactor,2,16);
-      if(isActive){
-        const halo=ctx.createRadialGradient(x,y,radius,x,y,radius+22);
-        const hex=tint(n);
-        halo.addColorStop(0,"rgba(235,188,116,.29)");
-        halo.addColorStop(.25,"rgba(230,177,93,.15)");
-        halo.addColorStop(1,"rgba(230,177,93,0)");
-        ctx.fillStyle=halo;ctx.beginPath();ctx.arc(x,y,radius+22,0,Math.PI*2);ctx.fill();
-        ctx.strokeStyle=hex;ctx.globalAlpha=.75;
-        ctx.lineWidth=.8;ctx.beginPath();ctx.arc(x,y,radius+4,0,Math.PI*2);ctx.stroke();
+      const shown=entered===undefined||reduced()?1:
+        artEase((now-entered)/390);
+      const base=n.id===scene.focus?6.1:
+        n.kind==="folder"?4.8:n.kind==="file"?
+        2.7+Math.min(1.4,Math.log10(1+Math.max(0,n.size))*.17):4.15;
+      const countFactor=n.kind==="folder"?
+        1+Math.min(.55,Math.log2(1+(n.count||0))/11):1;
+      const radius=clamp(base*Math.sqrt(Math.max(.46,scale))*
+        markerScale*countFactor*artImportance(n,art)*artDepth(n.id,art),2,17);
+      const color=tint(n),rgb=artRgb(color);
+      const lum=artImportance(n,art);
+      if(isActive||n.id===scene.focus||lum>1.23){
+        const reach=radius+(isActive?25:lum>1.45?15:8);
+        const halo=ctx.createRadialGradient(x,y,radius*.22,x,y,reach);
+        halo.addColorStop(0,"rgba("+rgb+","+(isActive?.34:.18)+")");
+        halo.addColorStop(.5,"rgba("+rgb+","+(isActive?.14:.065)+")");
+        halo.addColorStop(1,"rgba("+rgb+",0)");
+        ctx.save();ctx.globalAlpha=(dim?.14:1)*shown;
+        ctx.fillStyle=halo;ctx.beginPath();
+        ctx.arc(x,y,reach,0,Math.PI*2);ctx.fill();
+        if(isActive){
+          ctx.strokeStyle="rgba("+rgb+",.63)";ctx.lineWidth=.75;
+          ctx.beginPath();ctx.arc(x,y,radius+4,0,Math.PI*2);ctx.stroke();
+        }
+        ctx.restore();
       }
-      ctx.globalAlpha=(dim?.19:1)*shown;
-      ctx.fillStyle=tint(n);ctx.beginPath();ctx.arc(x,y,radius,0,Math.PI*2);
+      ctx.save();
+      ctx.globalAlpha=(dim?.16:artDepth(n.id,art)===.90?.78:1)*shown;
+      const orb=ctx.createRadialGradient(x-radius*.3,y-radius*.4,.1,x,y,radius);
+      orb.addColorStop(0,"#fff3df");
+      orb.addColorStop(.25,color);
+      orb.addColorStop(1,"rgba("+rgb+",.61)");
+      ctx.fillStyle=orb;ctx.beginPath();ctx.arc(x,y,radius,0,Math.PI*2);
       if(isActive||n.id===scene.focus||routeNodes?.has(n.id)){
-        ctx.shadowBlur=isActive?16:7;ctx.shadowColor=tint(n);
+        ctx.shadowBlur=isActive?15:7;ctx.shadowColor=color;
       }
-      ctx.fill();ctx.shadowBlur=0;ctx.globalAlpha=1;
+      ctx.fill();ctx.restore();
     }
     // Names are not permanent UI. Only the actively examined node gets
     // a legible on-canvas label, with a bounded dark vignette behind it.
@@ -640,6 +654,8 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
       raf=0;if(!root.isConnected)return;
       const kinetic=physicsFrame<budget?
         graphForceStep(scene.nodes,scene.links,coords,Math.max(.27,1-physicsFrame/budget*.65)):0;
+      if(physicsFrame<budget&&!reduced())
+        artClusterStep(art,scene.nodes,coords,.14*(1-physicsFrame/budget*.55));
       physicsFrame++;
       // Ease the viewport toward the stable post-physics bounds. This uses
       // real node positions and prevents clipping after the graph grows.
@@ -657,7 +673,8 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
       const now=performance.now();
       const transitions=!reduced()&&([...appearing.values()].some(t=>now-t<360)||
         fading.some(t=>t.until>now));
-      if(physicsFrame<budget&&(kinetic>.04||transitions))
+      if((physicsFrame<budget&&(kinetic>.04||transitions))||
+        (!reduced()&&routePulseUntil>now))
         raf=requestAnimationFrame(step);
     };
     raf=requestAnimationFrame(step);
