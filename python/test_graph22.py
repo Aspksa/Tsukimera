@@ -105,7 +105,12 @@ class Graph22(unittest.TestCase):
         self.drain()
         result=graph(self.conn,folder="Акты",limit=60)
         self.assertTrue(all(n["folder"]=="Акты" or
-          n["id"]==folder_node("Акты") for n in result["nodes"]))
+          n["id"]==folder_node("Акты") or
+          n["kind"] in ("project","organization") for n in result["nodes"]))
+        self.assertTrue(all(
+          e["source"]==file_node(self.ids[1]) or
+          e["target"]==file_node(self.ids[1]) or
+          e["kind"]=="contains" for e in result["links"]))
         no=shortest(self.conn,"file:unknown","file:also-unknown")
         self.assertFalse(no["found"])
         initial=graph(self.conn,limit=50)
