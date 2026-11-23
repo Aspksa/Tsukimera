@@ -1657,3 +1657,78 @@ button.dk-crumb:hover{background:var(--hover);color:var(--fg)}
     transition:none!important;
   }
 }
+
+
+/* Disk 8.3 — navigation-first rail; responsive diagram, zero search/sort clutter. */
+.disk-page.dk-experience-v8 .dk-layout>.dk-side{
+  --dk83-map-height:clamp(110px,22dvh,224px);
+  min-height:0;
+}
+.disk-page.dk-experience-v8 .dk-layout>.dk-side>.dk-tree-panel{
+  flex:1 1 auto;
+  max-height:none;
+  min-height:min(140px,26dvh);
+  overflow:hidden;
+}
+.disk-page.dk-experience-v8 .dk-layout>.dk-side .dk-tree{
+  min-height:0;
+  overscroll-behavior:contain;
+}
+.disk-page.dk-experience-v8 .dk-mini-map{
+  flex:0 0 auto;
+  min-height:0;
+  padding-top:10px;
+}
+.disk-page.dk-experience-v8 .dk-mini-map-frame{
+  height:var(--dk83-map-height);
+  min-height:90px;
+  max-height:29dvh;
+  touch-action:none;
+}
+.disk-page.dk-experience-v8 .dk-mini-map-canvas{
+  cursor:grab;
+  touch-action:none;
+}
+.disk-page.dk-experience-v8 .dk-mini-map-canvas:active{
+  cursor:grabbing;
+}
+.disk-page.dk-experience-v8 .dk-mini-map-reset{
+  align-self:flex-start;
+  background:transparent;
+  border:0;
+  border-radius:6px;
+  padding:2px 5px;
+  color:var(--muted);
+  cursor:pointer;
+  font:inherit;
+  font-size:var(--fs-xs);
+}
+.disk-page.dk-experience-v8 .dk-mini-map-reset:hover,
+.disk-page.dk-experience-v8 .dk-mini-map-reset:focus-visible{
+  color:var(--brand);
+  background:var(--dk8-hover);
+}
+@container diskspace (max-width:760px){
+  .disk-page.dk-experience-v8 .dk-layout>.dk-side{
+    --dk83-map-height:clamp(100px,19dvh,166px);
+  }
+  .disk-page.dk-experience-v8 .dk-layout>.dk-side>.dk-tree-panel{
+    max-height:none;
+    min-height:min(120px,24dvh);
+  }
+  .disk-page.dk-experience-v8 .dk-mini-map-frame{
+    height:var(--dk83-map-height);
+  }
+}
+@media(max-height:610px){
+  .disk-page.dk-experience-v8 .dk-layout>.dk-side{
+    --dk83-map-height:clamp(92px,16dvh,130px);
+  }
+  .disk-page.dk-experience-v8 .dk-mini-map{gap:3px;padding-top:5px}
+  .disk-page.dk-experience-v8 .dk-mini-map-status{max-height:38px;overflow:hidden}
+}
+@media(prefers-reduced-motion:reduce){
+  .disk-page.dk-experience-v8 .dk-mini-map-canvas{
+    transition:none!important;
+  }
+}
