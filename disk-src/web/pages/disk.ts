@@ -29,6 +29,8 @@ import {
 } from "./disk-extras";
 import {createDiskSplitters,tileSize,TILE_KEY} from "./disk-layout";
 import {fileWindow} from "./disk-window";
+import {readSidebarPrefs,writeSidebarPrefs,reorderSections,folderAncestors,safeFolderDrop,
+  type SectionId,type SidebarPrefs} from "./disk-sidebar";
 import {writePreference} from "../preferences";
 import "./disk.css";
 
@@ -136,6 +138,8 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
   const expanded = new Set<string>(JSON.parse(store.get("juunibi.disk.open") ?? "[]") as string[]);
   let treeSort: "pinned" | "name" | "files" | "size" | "created" = "pinned", treeQuery = "";
   let treeHidden = store.get("juunibi.disk.tree") === "hidden";
+  let sidebarPrefs:SidebarPrefs=readSidebarPrefs();
+  let draggingFolder="";
   let smartCurrent:string|null=null;
   let columns:TableColumns=readColumns();
   let shown: DiskFile[] = [];
@@ -981,11 +985,82 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
     ...([["pinned", "Закреплённые"], ["name", "По имени"], ["files", "По числу файлов"], ["size", "По размеру"], ["created", "Новые сверху"]] as const).map(([v, t]) => el("option", { value: v, textContent: t })));
   treeSortSel.addEventListener("change", () => { treeSort = treeSortSel.value as typeof treeSort; renderTree(); });
   const treeCount = el("small", { cls: "muted" });
+  const expandAll=iconButton("maximize","Развернуть все папки",()=>{
+    folders.forEach(folder=>expanded.add(folder));saveOpen();renderTree();
+  },"icon-btn sm dk-tree-all");
+  const collapseAll=iconButton("minimize","Свернуть все папки",()=>{
+    expanded.clear();saveOpen();renderTree();
+  },"icon-btn sm dk-tree-all");
+  const treeCommands=el("div",{cls:"dk-tree-commands",attrs:{"aria-label":"Управление иерархией"}},
+    el("span",{cls:"dk-tree-commands-title",textContent:"Иерархия"}),expandAll,collapseAll);
   const sections = el("div", { cls: "dk-sections", attrs: { role: "list", "aria-label": "Разделы" } });
+  const sectionsRegion=el("div",{cls:"dk-sections-region"},sections);
+  sectionsRegion.hidden=sidebarPrefs.collapsed;
+  const sectionsToggle=el("button",{type:"button",cls:"dk-side-sep dk-section-toggle",
+    attrs:{"aria-controls":"dk-sections-region","aria-expanded":String(!sidebarPrefs.collapsed)}},
+    dIcon("chevronRight",14),el("span",{textContent:"Разделы"}));
+  const sectionSettings=el("button",{type:"button",cls:"icon-btn sm dk-section-settings",
+    attrs:{"aria-label":"Настроить разделы",title:"Порядок и видимость разделов"}},dIcon("settings",16));
+  const sectionHead=el("div",{cls:"dk-section-head"},sectionsToggle,sectionSettings);
+  sectionsRegion.id="dk-sections-region";
+  const setSectionCollapsed=(collapsed:boolean)=>{
+    sidebarPrefs=writeSidebarPrefs({...sidebarPrefs,collapsed});
+    sectionsRegion.hidden=collapsed;
+    sectionsToggle.setAttribute("aria-expanded",String(!collapsed));
+    sectionHead.classList.toggle("collapsed",collapsed);
+  };
+  sectionHead.classList.toggle("collapsed",sidebarPrefs.collapsed);
+  sectionsToggle.addEventListener("click",()=>setSectionCollapsed(!sidebarPrefs.collapsed));
+  const configureSections=()=>{
+    let draft=structuredClone(sidebarPrefs);
+    const content=el("div",{cls:"dkx-stack dk-section-editor"});
+    const list=el("div",{cls:"dk-section-editor-list"});
+    const draw=()=>{
+      list.replaceChildren();
+      for(const id of draft.order){
+        const def=SECTIONS.find(x=>x.id===id);
+        if(!def)continue;
+        const checkbox=el("input",{type:"checkbox",checked:!draft.hidden.includes(id),
+          attrs:{"aria-label":"Показывать раздел "+def.label}});
+        checkbox.addEventListener("change",()=>{
+          draft.hidden=checkbox.checked?draft.hidden.filter(x=>x!==id):[...draft.hidden,id];
+        });
+        const up=iconButton("arrowUp","Выше: "+def.label,()=>{
+          const i=draft.order.indexOf(id);if(i<1)return;
+          [draft.order[i-1],draft.order[i]]=[draft.order[i]!,draft.order[i-1]!];draw();
+        },"icon-btn sm");
+        const down=iconButton("arrowDown","Ниже: "+def.label,()=>{
+          const i=draft.order.indexOf(id);if(i<0||i===draft.order.length-1)return;
+          [draft.order[i],draft.order[i+1]]=[draft.order[i+1]!,draft.order[i]!];draw();
+        },"icon-btn sm");
+        const row=el("div",{cls:"dk-section-editor-row"},
+          el("label",{},checkbox,dIcon(def.icon,17),el("span",{textContent:def.label})),up,down);
+        list.append(row);
+      }
+    };
+    draw();
+    content.append(
+      el("p",{cls:"muted",textContent:"Меняйте порядок стрелками и скрывайте ненужные разделы. Все файлы и умные папки останутся на месте."}),
+      list,
+      el("div",{cls:"dk-form-actions"},
+        btn("По умолчанию",()=>{
+          draft={order:SECTIONS.map(s=>s.id as SectionId),hidden:[],collapsed:false};
+          draw();
+        },{small:true}),
+        btn("Отмена",()=>sheet.close(),{small:true}),
+        btn("Сохранить",()=>{
+          sidebarPrefs=writeSidebarPrefs(draft);
+          setSectionCollapsed(sidebarPrefs.collapsed);
+          renderTree();sheet.close();
+        },{primary:true})));
+    const sheet=openSheet({title:"Настройка разделов",icon:"settings",content});
+  };
+  sectionSettings.addEventListener("click",configureSections);
+  const treePanel=el("div",{cls:"dk-tree-panel"},
+    el("div",{cls:"dk-side-tools"},treeFind,treeSortSel),treeCommands,tree);
   const side = el("aside", { cls: "dk-side", attrs: { "aria-label": "Папки и разделы" } },
     el("div", { cls: "dk-side-head" }, el("strong", { textContent: "Папки" }), treeCount, iconButton("x", "Закрыть", () => setDrawer(false), "icon-btn sm dk-side-close")),
-    el("div", { cls: "dk-side-tools" }, treeFind, treeSortSel), tree,
-    el("div", { cls: "dk-side-sep", textContent: "Разделы" }), sections);
+    treePanel,sectionHead,sectionsRegion);
   const scrim = el("div", { cls: "dk-scrim" });
   const setDrawer = (open: boolean) => { page.classList.toggle("drawer-open", open); if (open) side.querySelector<HTMLElement>(".dk-node.current .dk-node-label, .dk-side-close")?.focus({ preventScroll: true }); };
   drawerBtn.addEventListener("click", () => setDrawer(true));
@@ -996,30 +1071,43 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
       const types = e.dataTransfer?.types ?? [];
       if (types.includes("application/x-juunibi-files") || types.includes("application/x-juunibi-folder")){
         e.preventDefault();
-        if(e.dataTransfer)e.dataTransfer.dropEffect="move";
-        target.classList.add("drop");
+        const check=draggingFolder?safeFolderDrop(draggingFolder,folder):{ok:true,reason:""};
+        if(e.dataTransfer)e.dataTransfer.dropEffect=check.ok?"move":"none";
+        target.classList.toggle("drop",check.ok);
+        target.classList.toggle("dk-drop-denied",!check.ok);
         moveHint.hidden=false;
-        moveHint.textContent=(folder===TRASH_DROP?"В корзину":folder?"В папку «"+folder+"»":"В корень Диска")+
-          (draggingCount?" · "+filesWord(draggingCount):"")+" · отпустите для перемещения";
+        moveHint.textContent=check.ok?(folder===TRASH_DROP?"В корзину":folder?"В папку «"+folder+"»":"В корень Диска")+
+          (draggingCount?" · "+filesWord(draggingCount):"")+" · отпустите для перемещения":check.reason;
       }
     });
     target.addEventListener("dragleave",(e)=>{
       if(e.relatedTarget instanceof Node&&target.contains(e.relatedTarget))return;
-      target.classList.remove("drop");
+      target.classList.remove("drop","dk-drop-denied");
       hideMoveHint();
     });
     target.addEventListener("drop", (e) => {
       hideMoveHint();
       draggingCount=0;
-      target.classList.remove("drop"); page.classList.remove("dk-dragging");
+      target.classList.remove("drop","dk-drop-denied"); page.classList.remove("dk-dragging");
       const moving = e.dataTransfer?.getData("application/x-juunibi-folder");
       const ids = e.dataTransfer?.getData("application/x-juunibi-files");
       if (!moving && !ids) return;
       e.preventDefault(); e.stopPropagation();
       if (folder === TRASH_DROP) { if (ids) void trashFiles(JSON.parse(ids) as string[]); else if (moving) showToast("Папку удаляют из её меню «⋯»"); return; }
       if (moving) {
-        if (moving === folder || folder.startsWith(moving + "/") || parentOf(moving) === folder) return;
-        void api.diskFolderMove(moving, folder).then((r) => { if (!r.ok) showToast(r.error.message); else { if (current === moving || current.startsWith(moving + "/")) current = r.value.name + current.slice(moving.length); void loadCatalog(); } });
+        draggingFolder="";
+        const check=safeFolderDrop(moving,folder);
+        if(!check.ok){showToast(check.reason);return;}
+        void (async()=>{
+          if(!(await askConfirm({title:"Переместить папку?",
+            text:"«"+moving+"» → «"+(folder||"Корень Диска")+"». Содержимое и вложенные папки также переместятся.",
+            ok:"Переместить",icon:"move"})))return;
+          const r=await api.diskFolderMove(moving,folder);
+          if(!r.ok){showToast(r.error.message);return;}
+          if(current===moving||current.startsWith(moving+"/"))
+            current=r.value.name+current.slice(moving.length);
+          await loadCatalog();
+        })();
       } else void moveFiles(JSON.parse(ids!) as string[], folder);
     });
   };
@@ -1035,6 +1123,7 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
       return a.localeCompare(b, "ru", { numeric: true });
     };
     const matches = (f: string) => !treeQuery || f.toLocaleLowerCase().includes(treeQuery) || folders.some((x) => x.startsWith(f + "/") && x.toLocaleLowerCase().includes(treeQuery));
+    const ancestry=new Set(view==="all"&&virtual==="none"&&!smartCurrent?folderAncestors(current):[]);
     const node = (folder: string, depth: number): HTMLElement | null => {
       if (folder && !matches(folder)) return null;
       const children = (kids.get(folder) ?? []).sort(order);
@@ -1042,7 +1131,9 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
       const isCur = !smartCurrent && view === "all" && virtual === "none" && current === folder;
       const t = totals.get(folder);
       const st = styles[folder];
-      const row = el("div", { cls: "dk-node" + (isCur ? " current" : ""), attrs: { role: "treeitem", "aria-level": String(depth + 1) } });
+      const row = el("div", { cls: "dk-node" + (isCur ? " current" : "")+
+        (folder&&ancestry.has(folder)?" dk-ancestor":""),attrs:{
+          role:"treeitem","aria-level":String(depth+1),"data-folder":folder} });
       if (children.length && folder) row.setAttribute("aria-expanded", String(open));
       row.style.setProperty("--depth", String(depth));
       const toggle = el("button", { type: "button", cls: "dk-node-toggle", tabIndex: -1, attrs: { "aria-label": open ? "Свернуть" : "Развернуть" } }, children.length && folder ? dIcon("chevronRight", 14) : null);
@@ -1067,14 +1158,24 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
       });
       if (folder) {
         label.draggable = true;
-        label.addEventListener("dragstart", (e) => { e.dataTransfer?.setData("application/x-juunibi-folder", folder); page.classList.add("dk-dragging"); });
-        label.addEventListener("dragend", () => page.classList.remove("dk-dragging"));
+        label.addEventListener("dragstart",(e)=>{
+          draggingFolder=folder;
+          e.dataTransfer?.setData("application/x-juunibi-folder",folder);
+          if(e.dataTransfer)e.dataTransfer.effectAllowed="move";
+          page.classList.add("dk-dragging");
+        });
+        label.addEventListener("dragend",()=>{
+          draggingFolder="";hideMoveHint();
+          page.classList.remove("dk-dragging");
+          side.querySelectorAll(".dk-drop-denied,.dk-node.drop").forEach(x=>x.classList.remove("dk-drop-denied","drop"));
+        });
       }
       const more = el("button", { type: "button", cls: "icon-btn sm dk-node-more disk-folder-menu", attrs: { "aria-label": "Действия с папкой " + (folder ? folderName(folder) : ""), "aria-haspopup": "menu", "aria-expanded": "false" } }, dIcon("more", 16));
       more.addEventListener("click", () => openMenu(more, folderMenu(folder), "Действия с папкой"));
       row.append(toggle, label, ...(folder ? [more] : []));
       dropFiles(row, folder);
       const wrap = el("div", { cls: "dk-branch" }, row);
+      wrap.style.setProperty("--branch-line",(20+depth*14)+"px");
       if (open && children.length) {
         const sub = el("div", { cls: "dk-branch-kids", attrs: { role: "group" } });
         for (const c of children) { const n = node(c, depth + 1); if (n) sub.append(n); }
@@ -1089,11 +1190,34 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
       recent: all.filter((f) => matchesVirtual(f, "recent")).length, images: all.filter((f) => matchesVirtual(f, "images")).length,
       documents: all.filter((f) => matchesVirtual(f, "documents")).length, large: all.filter((f) => matchesVirtual(f, "large")).length,
     };
-    sections.replaceChildren(...SECTIONS.map((s) => {
+    const visibleSections=sidebarPrefs.order.map(id=>SECTIONS.find(item=>item.id===id)).filter(
+      (entry):entry is (typeof SECTIONS)[number]=>!!entry&&!sidebarPrefs.hidden.includes(entry.id as SectionId));
+    sections.replaceChildren(...visibleSections.map((s) => {
       const on = s.id === "favorites" || s.id === "trash" ? view === s.id : view === "all" && virtual === s.id;
-      const b = el("button", { type: "button", cls: "dk-section" + (on ? " current" : ""), attrs: { role: "listitem", "aria-current": on ? "page" : "false" } },
-        el("span", { cls: "dk-node-ic" }, dIcon(s.icon, 17)), el("span", { cls: "dk-node-name", textContent: s.label }), el("small", { cls: "dk-node-n", textContent: String(counts[s.id] ?? "") }));
+      const b = el("button", { type: "button", cls: "dk-section dk-section-"+s.id+(on ? " current" : ""),
+        attrs: { role: "listitem", "aria-current": on ? "page" : "false","aria-label":s.label+" · "+String(counts[s.id]??0)} },
+        el("span", { cls: "dk-node-ic" }, dIcon(s.icon, 17)), el("span", { cls: "dk-node-name", textContent: s.label }), el("small", { cls: "dk-node-n", textContent: String(counts[s.id] ?? 0) }));
       b.addEventListener("click", () => { go(s.id === "favorites" || s.id === "trash" ? { view: s.id } : { virtual: s.id }); setDrawer(false); });
+      // Dragging *section buttons* reorders navigation only. Dragging files to
+      // the Trash remains a separate, unchanged operation.
+      b.draggable=true;
+      b.addEventListener("dragstart",event=>{
+        event.dataTransfer?.setData("application/x-tsukimera-section",s.id);
+        if(event.dataTransfer)event.dataTransfer.effectAllowed="move";
+      });
+      b.addEventListener("dragover",event=>{
+        if(!event.dataTransfer?.types.includes("application/x-tsukimera-section"))return;
+        event.preventDefault();event.stopPropagation();b.classList.add("dk-section-drop");
+      });
+      b.addEventListener("dragleave",()=>b.classList.remove("dk-section-drop"));
+      b.addEventListener("drop",event=>{
+        b.classList.remove("dk-section-drop");
+        const src=event.dataTransfer?.getData("application/x-tsukimera-section") as SectionId|undefined;
+        if(!src||!SECTIONS.some(x=>x.id===src))return;
+        event.preventDefault();event.stopPropagation();
+        sidebarPrefs=writeSidebarPrefs({...sidebarPrefs,order:reorderSections(sidebarPrefs.order,src,s.id as SectionId)});
+        renderTree();
+      });
       if (s.id === "trash") dropFiles(b, TRASH_DROP);
       return b;
     }));

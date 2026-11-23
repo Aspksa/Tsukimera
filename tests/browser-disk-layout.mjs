@@ -14,6 +14,13 @@ const uploaded=await fetch(origin+"/api/disk/files/binary?name="+encodeURICompon
   method:"POST",headers:{"X-Tsukimera-Request":"1","Content-Type":"application/octet-stream"},body:fixture
 });
 assert.equal(uploaded.status,201,"Could not seed Disk Life browser fixture: "+await uploaded.text());
+for(const name of ["Работа","Работа/2026"]){
+  const folder=await fetch(origin+"/api/disk/folders",{
+    method:"POST",headers:{"X-Tsukimera-Request":"1","Content-Type":"application/json"},
+    body:JSON.stringify({name})
+  });
+  assert.equal(folder.status,201,"Could not seed hierarchical Disk folder: "+name+" / "+await folder.text());
+}
 const dir=await mkdtemp(join(tmpdir(),"tsukimera-layout-chrome-"));
 const chrome=spawn("google-chrome",[
   "--headless=new","--no-sandbox","--disable-gpu","--disable-dev-shm-usage",
@@ -146,6 +153,44 @@ try{
   assert.notEqual(restored.side,"none");
   assert.equal(restored.left,beforeFocus.left,"Focus mode must not override manual panel sizes");
 
+  // Disk 8.1: new folder hierarchy and section configuration controls must be
+  // usable in a real Chrome page and must not mutate the original Disk files.
+  const initialTree=await evaluate("(()=>({actions:document.querySelectorAll('.dk-tree-all').length,folderNodes:document.querySelectorAll('.dk-node').length,sections:document.querySelectorAll('.dk-section:not(.dkx-smart)').length}))()");
+  assert.equal(initialTree.actions,2,"Expand/collapse hierarchy controls missing");
+  assert.equal(initialTree.sections,6,"All six original navigation sections must remain initially visible");
+  await evaluate("document.querySelector('.dk-tree-all[aria-label=\"Развернуть все папки\"]').click()");
+  const expandedTree=await evaluate("(()=>({folders:[...document.querySelectorAll('.dk-node')].map(x=>x.dataset.folder),nested:!!document.querySelector('.dk-node[data-folder=\"Работа/2026\"]')}))()");
+  assert.ok(expandedTree.nested,"Expand all did not reveal nested folder: "+JSON.stringify(expandedTree));
+  await evaluate("document.querySelector('.dk-node[data-folder=\"Работа/2026\"] .dk-node-label').click()");
+  const hierarchy=await evaluate("(()=>({selected:document.querySelector('.dk-node.current')?.dataset.folder,ancestors:[...document.querySelectorAll('.dk-node.dk-ancestor')].map(x=>x.dataset.folder)}))()");
+  assert.equal(hierarchy.selected,"Работа/2026");
+  assert.ok(hierarchy.ancestors.includes("Работа")&&hierarchy.ancestors.includes("Работа/2026"),
+    "Selected folder's complete parent path must be highlighted: "+JSON.stringify(hierarchy));
+  await evaluate("document.querySelector('.dk-tree-all[aria-label=\"Свернуть все папки\"]').click()");
+  assert.equal(await evaluate("document.querySelector('.dk-node[data-folder=\"Работа/2026\"]')===null"),true,
+    "Collapse all should hide descendants without deleting folder data");
+  await evaluate("document.querySelector('.dk-node[data-folder=\"\"] .dk-node-label').click()");
+  const beforeSections=await evaluate("(()=>({collapsed:document.querySelector('.dk-sections-region').hidden,first:document.querySelector('.dk-section:not(.dkx-smart)')?.textContent}))()");
+  assert.equal(beforeSections.collapsed,false);
+  await evaluate("document.querySelector('.dk-section-toggle').click()");
+  assert.equal(await evaluate("document.querySelector('.dk-sections-region').hidden"),true);
+  await evaluate("document.querySelector('.dk-section-toggle').click()");
+  assert.equal(await evaluate("document.querySelector('.dk-sections-region').hidden"),false);
+  await evaluate("document.querySelector('.dk-section-settings').click()");
+  assert.equal(await evaluate("document.querySelectorAll('.dk-section-editor-row').length"),6);
+  await evaluate("document.querySelector('.dk-section-editor-row button:last-child').click()");
+  await evaluate("(()=>{const row=[...document.querySelectorAll('.dk-section-editor-row')].find(x=>x.textContent.includes('Крупные файлы'));row.querySelector('input').click();document.querySelector('.dk-section-editor .dk-form-actions .btn.primary').click()})()");
+  const configured=await evaluate("(()=>({items:[...document.querySelectorAll('.dk-section:not(.dkx-smart)')].map(x=>x.textContent),saved:JSON.parse(localStorage.getItem('tsukimera.disk.sections.v1'))}))()");
+  assert.ok(configured.items[0].includes("Недавние"),"Section drag/arrow ordering not respected: "+JSON.stringify(configured));
+  assert.ok(!configured.items.some(x=>x.includes("Крупные файлы")),"Hidden section still rendered");
+  assert.equal(configured.saved.order[0],"recent");
+  assert.ok(configured.saved.hidden.includes("large"));
+  await evaluate("document.querySelector('.dk-section-settings').click()");
+  await evaluate("(()=>{const options=[...document.querySelectorAll('.dk-section-editor .dk-form-actions button')];options.find(x=>x.textContent.includes('По умолчанию')).click();options.find(x=>x.textContent.includes('Сохранить')).click()})()");
+  assert.equal(await evaluate("document.querySelectorAll('.dk-section:not(.dkx-smart)').length"),6,
+    "Restoring default sections should make all original categories available");
+
+
 
   // Life 4.0: verify six real highlight cards, 15 original groups in five areas,
   // the expanded full-width layout, a method dialog and a real-file source link.
@@ -230,7 +275,7 @@ try{
   assert.ok(opened,"The existing Disk menu did not expose the new live map");
   await pause(350);
   const canvas=await evaluate("(()=>{const c=document.querySelector('.dkx-map-canvas');const f=document.querySelector('.dkx-map-frame');return {ready:!!c,width:c?.width,height:c?.height,context:!!c?.getContext('2d'),controls:document.querySelectorAll('.dkx-map-controls button').length,legend:document.querySelectorAll('.dkx-map-legend span').length,frame:f?.getBoundingClientRect().width};})()");
-  assert.ok(canvas.ready&&canvas.context&&canvas.width>500&&canvas.height>250&&canvas.controls===4&&canvas.legend===5,
+  assert.ok(canvas.ready&&canvas.context&&canvas.width>500&&canvas.height>250&&canvas.controls===4&&canvas.legend===6,
     "Live Canvas graph did not render with real files: "+JSON.stringify(canvas));
   await evaluate("document.querySelector('.dkx-map-controls button[aria-label=\"Увеличить карту\"]').click()");
   const mapSearch=await evaluate("(()=>{const x=document.querySelector('.dkx-map-search');x.value='Тест';x.dispatchEvent(new Event('input',{bubbles:true}));return document.querySelector('.dkx-map-selected').textContent;})()");
