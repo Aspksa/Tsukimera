@@ -312,6 +312,19 @@ try{
   const twoK=await assertAlignment("2K 150%");
   assert.ok(twoK.filesWidth>600,"2K must leave enough file workspace");
   await screenshot("disk-2k-2560x1440");
+
+  // Disk 19: validate the new Canvas pipeline with actual pixels and the
+  // same no-chrome DOM contract; screenshot is a rendered test artifact.
+  const constellation=await evaluate("(()=>{const c=document.querySelector('.dk-graph-only canvas');if(!c)return null;const g=c.getContext('2d'),rgba=[...g.getImageData(3,3,1,1).data];return {communities:Number(c.dataset.communities),nodes:Number(c.dataset.nodes),links:Number(c.dataset.links),width:c.width,height:c.height,rgba,canvasCount:document.querySelectorAll('.dk-graph-only canvas').length}})()");
+  assert.ok(constellation&&Number.isFinite(constellation.communities)&&
+    constellation.communities>=1&&constellation.canvasCount===1,
+    "Living communities must render in the same single Canvas: "+JSON.stringify(constellation));
+  assert.ok(constellation.width*constellation.height<=10100000,
+    "No unbounded HiDPI Canvas: "+JSON.stringify(constellation));
+  assert.equal(constellation.rgba[3],255,
+    "Opaque deep-space rendering must cover the entire graph Canvas");
+  await screenshot("disk-19-constellations-2k");
+
   await device(3440,1440,1);
   await assertAlignment("Ultrawide 3440");
   await screenshot("disk-ultrawide-3440x1440");
