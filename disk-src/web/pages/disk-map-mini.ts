@@ -614,7 +614,9 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
     // Evidence appears ONLY while hovering the actual line. The explanation
     // always says what was observed, never infers personal acquaintance.
     if(hoverEdge&&!hovered){
-      const raw=graphEdgeExplanation(hoverEdge,scene.nodes);
+      const raw=graphEdgeExplanation(hoverEdge,scene.nodes)+
+        (hoverBundle&&hoverBundle.count>1?
+          " · "+hoverBundle.count+" реальных линий объединены визуально":"");
       const message=raw.length>170?raw.slice(0,169)+"…":raw;
       const maxWidth=Math.max(110,Math.min(360,w-24));
       ctx.font="500 "+Math.round(Math.max(10,labelSize-1))+"px system-ui,sans-serif";
@@ -696,7 +698,9 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
   canvas.addEventListener("pointerdown",e=>{
     if(e.button!==0)return;
     dismissMenu();
+    cancelCamera();
     pointerDown=true;pointMoved=false;
+    dragVelocityX=0;dragVelocityY=0;
     const hit=pointerHit(e.clientX,e.clientY);
     dragId=hit?.id||null;
     lastX=e.clientX;lastY=e.clientY;
@@ -712,9 +716,14 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
       const rect=canvas.getBoundingClientRect();
       hoverX=e.clientX-rect.left;hoverY=e.clientY-rect.top;
       const camera=viewport();
-      const line=hit?null:graphEdgeAt(scene,coords,camera,hoverX,hoverY,8);
-      if(next!==hovered||line!==hoverEdge){
-        hovered=next;hoverEdge=line;
+      // Hit-test the exact Bézier geometry visible on Canvas (including
+      // factual bundled representative edges); old segment hit is only a
+      // safe fallback before the first render.
+      const bundle=hit?null:artCurveHit(renderBundles,coords,camera,art,hoverX,hoverY,8);
+      const line=hit?null:bundle?.edge||
+        (renderBundles.length?null:graphEdgeAt(scene,coords,camera,hoverX,hoverY,8));
+      if(next!==hovered||line!==hoverEdge||bundle?.count!==hoverBundle?.count){
+        hovered=next;hoverEdge=line;hoverBundle=bundle;
         canvas.style.cursor=next?"pointer":line?"help":"grab";
         repaint();highlightPulse();
       }
@@ -734,6 +743,8 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
     }else{
       panX=clamp(originX+dx,-1800,1800);
       panY=clamp(originY+dy,-1800,1800);
+      dragVelocityX=clamp(e.clientX-prevMoveX,-24,24);
+      dragVelocityY=clamp(e.clientY-prevMoveY,-24,24);
     }
     prevMoveX=e.clientX;prevMoveY=e.clientY;
     repaint();
@@ -742,7 +753,26 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
     if(!pointerDown)return;
     const hit=dragId,wasMoved=pointMoved;
     pointerDown=false;dragId=null;pointMoved=false;
-    if(wasMoved){persist();return;}
+    if(wasMoved){
+      persist();
+      if(!hit&&!reduced()&&Math.hypot(dragVelocityX,dragVelocityY)>1){
+        let vx=dragVelocityX,vy=dragVelocityY,ticks=0;
+        const glide=()=>{
+          inertiaRaf=0;
+          if(pointerDown||!root.isConnected)return;
+          const slowed=artInertia(vx,vy);
+          vx=slowed.vx;vy=slowed.vy;
+          panX=clamp(panX+vx,-1800,1800);
+          panY=clamp(panY+vy,-1800,1800);
+          draw();
+          if(!slowed.done&&++ticks<42)
+            inertiaRaf=requestAnimationFrame(glide);
+          else persist();
+        };
+        inertiaRaf=requestAnimationFrame(glide);
+      }
+      return;
+    }
     if(hit){
       const n=scene.nodes.find(n=>n.id===hit);
       if(n){
@@ -751,7 +781,7 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
         else {focus(n);activate(n);}
       }
     }else{
-      selected=null;hovered=null;hoverEdge=null;draw();
+      selected=null;hovered=null;hoverEdge=null;hoverBundle=null;draw();
       if(e.pointerType==="touch"){
         const now=Date.now();
         if(now-lastTap<370)setExpanded(!expanded);
@@ -764,7 +794,7 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
   });
   canvas.addEventListener("pointerleave",()=>{
     pointerInsideGraph=false;clearTimeout(highlightTimer);
-    if(!pointerDown){hovered=null;hoverEdge=null;draw();}
+    if(!pointerDown){hovered=null;hoverEdge=null;hoverBundle=null;draw();}
   });
   canvas.addEventListener("dblclick",e=>{
     if(!pointerHit(e.clientX,e.clientY))setExpanded(!expanded);
