@@ -105,7 +105,12 @@ class Graph22(unittest.TestCase):
         self.drain()
         result=graph(self.conn,folder="Акты",limit=60)
         self.assertTrue(all(n["folder"]=="Акты" or
-          n["id"]==folder_node("Акты") for n in result["nodes"]))
+          n["id"]==folder_node("Акты") or
+          n["kind"] in ("project","organization") for n in result["nodes"]))
+        self.assertTrue(all(
+          e["source"]==file_node(self.ids[1]) or
+          e["target"]==file_node(self.ids[1]) or
+          e["kind"]=="contains" for e in result["links"]))
         no=shortest(self.conn,"file:unknown","file:also-unknown")
         self.assertFalse(no["found"])
         initial=graph(self.conn,limit=50)
@@ -113,5 +118,66 @@ class Graph22(unittest.TestCase):
         self.assertEqual([(n["id"],n["community"]) for n in initial["nodes"]],
                          [(n["id"],n["community"]) for n in later["nodes"]])
         self.assertEqual(sync(self.conn,20)["processed"],0)
+    def test_stage2_sql_view_reserves_evidence_and_blocks_stale_hashes(self):
+        self.drain()
+        scene=graph(self.conn,limit=12,level="near")
+        self.assertEqual(scene["queryMode"],"bounded-sql")
+        self.assertLessEqual(scene["visible"],12)
+        self.assertTrue(any(n["kind"]=="project" for n in scene["nodes"]))
+        self.assertTrue(any(edge["kind"]=="reference" for edge in scene["links"]))
+        # The disk changes before the background Python queue can reconcile it.
+        # Old graph22_nodes still have the old SHA, which must NOT prove an edge.
+        changed=self.ids[1]
+        self.conn.execute("UPDATE disk_files SET sha256=? WHERE id=?",
+                          ("9"*64,changed))
+        stale=graph(self.conn,limit=16,level="near")
+        self.assertFalse(any(e["source"]==file_node(changed) or
+                             e["target"]==file_node(changed)
+                             for e in stale["links"]))
+        self.assertFalse(shortest(self.conn,file_node(changed),
+                                  knowledge_node("contract","57/2026"))["found"])
+        self.assertFalse(impact(self.conn,file_node(changed))["connections"])
+
+    def test_stage2_scope_escapes_wildcards_and_pages_without_duplicates(self):
+        self.drain()
+        for i,folder in enumerate(("Про%цент","ПроXцент","Про_цент")):
+            id=(str(i+1)*36)
+            self.conn.execute("INSERT INTO disk_files VALUES(?,?,?,?,?,NULL,?)",
+                              (id,"Файл "+str(i),folder,10,str(i+4)*64,"2026-11-23"))
+        self.drain()
+        filtered=graph(self.conn,folder="Про%цент",limit=24)
+        file_ids=[n["id"] for n in filtered["nodes"] if n["kind"]=="file"]
+        self.assertEqual(file_ids,[file_node("1"*36)])
+        self.assertEqual(filtered["total"],2)  # file and its folder node
+        # File pagination retains a stable folder scaffold and excludes a
+        # previously visible document from later pages.
+        first=graph(self.conn,limit=4,offset=0)
+        second=graph(self.conn,limit=4,offset=3)
+        first_files={n["id"] for n in first["nodes"] if n["kind"]=="file"}
+        second_files={n["id"] for n in second["nodes"] if n["kind"]=="file"}
+        self.assertFalse(first_files & second_files)
+
+    def test_stage2_indexed_path_is_not_cut_off_by_unrelated_edges(self):
+        self.drain()
+        self.conn.execute("BEGIN IMMEDIATE")
+        try:
+            for i in range(1200):
+                node="folder:лишнее/"+str(i)
+                self.conn.execute("INSERT INTO graph22_nodes VALUES(?,?,?,?,?,?,?,?)",
+                                  (node,"folder",str(i),"лишнее","",
+                                   "fixture",1,"2026-11-23"))
+                self.conn.execute("INSERT INTO graph22_edges VALUES(?,?,?,?,?,?,?,?,?)",
+                                  ("folder:",node,"contains","folder-tree",
+                                   "Отдельная проверочная ветка",1,"fixture","",""))
+        finally:
+            self.conn.execute("COMMIT")
+        path=shortest(self.conn,file_node(self.ids[0]),
+                      knowledge_node("contract","57/2026"))
+        self.assertTrue(path["found"])
+        self.assertEqual(len(path["links"]),1)
+        scene=graph(self.conn,limit=22)
+        self.assertLessEqual(scene["visible"],22)
+        self.assertGreater(scene["omitted"],1000)
+
 if __name__=="__main__":
     unittest.main()
