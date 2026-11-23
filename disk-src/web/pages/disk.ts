@@ -1297,7 +1297,7 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
       const wrap = el("div", { cls: "dk-branch" }, row);
       wrap.style.setProperty("--branch-line",(20+depth*14)+"px");
       if (open && children.length) {
-        const sub = el("div", { cls: "dk-branch-kids"+(folder===justOpenedFolder?" dk21-enter":""), attrs: { role: "group" } });
+        const sub = el("div", { cls: "dk-branch-kids"+(folder===justOpenedFolder?" dk21-folder-enter":""), attrs: { role: "group" } });
         for (const c of children) { const n = node(c, depth + 1); if (n) sub.append(n); }
         wrap.append(sub);
       }
