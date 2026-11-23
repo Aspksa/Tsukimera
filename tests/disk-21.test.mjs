@@ -96,7 +96,7 @@ test("Disk 21 keeps graph canvas borderless, 150 Life metrics, folder actions, s
     "canvas.dataset.knowledge="])
     assert.ok(mini.includes(needle),"Graph feature missing: "+needle);
   for(const needle of ["diskTileInsights(ids)","dk21-link-count","dk21-index-state",
-    "miniMap.highlightFolder(folder)","dk21-enter","justOpenedFolder",
+    "miniMap.highlightFolder(folder)","dk21-folder-enter","justOpenedFolder",
     "Избранное","Корзина","Сведения"])
     assert.ok(disk.includes(needle),"File manager feature missing: "+needle);
   assert.ok(api.includes("diskTileInsights:(ids:readonly string[])"));
