@@ -7,6 +7,7 @@ import { createDiskRouter } from "./disk-routes.mjs";
 import { initializeDatabase } from "./tsukimera-db.mjs";
 import { createDiskAutomation } from "./disk-background.mjs";
 import { createCloudConnection } from "./cloudru.mjs";
+import { createSettingsBackupService } from "./settings-backups.mjs";
 
 const FILES = new Map([
   ["/", ["web/index.html", "text/html; charset=utf-8"]],
@@ -107,12 +108,14 @@ export function createAppServer({root,dataDir=join(root,"data"),cloudRequest,clo
   let diskStore = null;
   let automation = null;
   let database = null;
+  let settingsBackups = null;
   const cloud=createCloudConnection({request:cloudRequest??globalThis.fetch,
     envKey:cloudKey??process.env.CLOUD_RU_FOUNDATION_MODELS_API_KEY??""});
 
   async function load() {
     // The migration copies the complete old vault before creating SQLite.
     database = await initializeDatabase(dataDir);
+    settingsBackups=createSettingsBackupService({dataDir});
     const sqliteSettings = database.readSettings();
     try {
       const parsed = sqliteSettings ?? JSON.parse(await readFile(file, "utf8"));
@@ -138,6 +141,7 @@ export function createAppServer({root,dataDir=join(root,"data"),cloudRequest,clo
       uploadDir:join(dataDir,"uploads"),automation});
     await diskRouter.initUploads();
     automation.start();
+    settingsBackups.start();
   }
     // No background service or separate port: disk lives in this same loopback app.
   async function save() {
@@ -202,6 +206,9 @@ export function createAppServer({root,dataDir=join(root,"data"),cloudRequest,clo
       }
       if (pathname === "/api/storage/diagnostics" && req.method === "GET") {
         return json(res,200,database.diagnostics());
+      }
+      if (pathname === "/api/settings/backups" && req.method === "GET") {
+        return json(res,200,await settingsBackups.status());
       }
       if (pathname === "/api/cloud/status" && req.method === "GET") {
         return json(res,200,cloud.status());
@@ -347,6 +354,6 @@ export function createAppServer({root,dataDir=join(root,"data"),cloudRequest,clo
       json(res, error.status || 500, { error: error.status ? error.message : "Внутренняя ошибка сервера" });
     }
   });
-  server.on("close",()=>automation?.stop());
+  server.on("close",()=>{automation?.stop();settingsBackups?.stop();});
   return { server, load, getSettings: () => structuredClone(config), getDisk:()=>diskStore };
 }
