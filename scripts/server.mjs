@@ -138,7 +138,8 @@ export function createAppServer({root,dataDir=join(root,"data"),cloudRequest,clo
       readText:(id,limit)=>diskStore.readText(id,limit),
     });
     diskRouter=createDiskRouter({disk:diskStore,zipStream,zipLength,collectLife,
-      uploadDir:join(dataDir,"uploads"),automation,database});
+      uploadDir:join(dataDir,"uploads"),automation,database,graphRoot:root,
+      graphDbPath:join(dataDir,"tsukimera.db")});
     await diskRouter.initUploads();
     automation.start();
     settingsBackups.start();
