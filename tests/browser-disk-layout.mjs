@@ -138,7 +138,7 @@ try{
   const mobileFlow=await evaluate("(()=>{const side=document.querySelector('.dk-side'),tree=side.querySelector('.dk-tree-panel'),map=side.querySelector('.dk-omni-explorer'),frame=map?.querySelector('.dk-mini-map-frame');return {mapInside:!!map,topMap:!!document.querySelector('.disk-page > .dk-mini-map'),mapWidth:map?.getBoundingClientRect().width,sideWidth:side.getBoundingClientRect().width,below:map.getBoundingClientRect().top>=tree.getBoundingClientRect().top,frameHeight:frame?.getBoundingClientRect().height,drawer:document.querySelector('.disk-page').classList.contains('drawer-open')}})()");
   assert.ok(mobileFlow.mapInside&&!mobileFlow.topMap&&mobileFlow.drawer&&mobileFlow.below,
     "Mobile map must be accessible from the folder drawer: "+JSON.stringify(mobileFlow));
-  assert.ok(mobileFlow.mapWidth<=mobileFlow.sideWidth+3&&mobileFlow.frameHeight>=250&&mobileFlow.frameHeight<=320,
+  assert.ok(mobileFlow.mapWidth<=mobileFlow.sideWidth+3&&mobileFlow.frameHeight>=300&&mobileFlow.frameHeight<=440,
     "Compact mobile map should fit the folder drawer: "+JSON.stringify(mobileFlow));
   await evaluate("document.querySelector('.dk-side-close').click()");
 
@@ -187,14 +187,21 @@ try{
   const clean=await evaluate("(()=>({search:!!document.querySelector('.dk-tree-find'),sort:!!document.querySelector('.dk-tree-sort'),pinned:!!document.querySelector('.dk-tree .dk-pin'),control:document.querySelector('.dk-tree-panel')?.textContent.includes('Закреплённые')}))()");
   assert.deepEqual(clean,{search:false,sort:false,pinned:false,control:false});
   await pause(240);
-  const spatial=await evaluate("(()=>({layer:document.querySelector('.dk-mini-map-canvas')?.dataset.layer,nodes:Number(document.querySelector('.dk-mini-map-canvas')?.dataset.nodes),links:Number(document.querySelector('.dk-mini-map-canvas')?.dataset.links),height:document.querySelector('.dk-mini-map-frame')?.getBoundingClientRect().height,list:document.querySelectorAll('.dk-graph-row').length,search:!!document.querySelector('.dk-graph-search'),expand:!!document.querySelector('.dk-graph-expand'),path:!!document.querySelector('.dk-graph-trail')}))()");
-  assert.equal(spatial.layer,"graph","Old orbit/cards must be replaced by the real graph");
-  assert.ok(spatial.height>=250&&spatial.nodes>1&&spatial.links>0&&spatial.list>0&&spatial.search&&spatial.expand&&spatial.path,
-    "Graph view must render from actual folder/file data: "+JSON.stringify(spatial));
+  const graphOnly=await evaluate("(()=>{const root=document.querySelector('.dk-side > .dk-graph-only'),stage=root?.querySelector('.dk-graph-stage'),canvas=root?.querySelector('canvas');return {present:!!root,children:root?.children.length,stageChildren:stage?.children.length,visibleText:root?.textContent.trim(),nodes:Number(canvas?.dataset.nodes),links:Number(canvas?.dataset.links),layer:canvas?.dataset.layer,focus:canvas?.dataset.focus,stageHeight:stage?.getBoundingClientRect().height,border:getComputedStyle(stage).borderTopWidth,background:getComputedStyle(stage).backgroundColor,clutter:!!root?.querySelector('.dk-graph-head,.dk-graph-controls,.dk-graph-search,.dk-graph-inspect,.dk-graph-list,.dk-graph-legend,.dk-graph-footer,.dk-graph-count')}})()");
+  assert.ok(graphOnly.present&&graphOnly.children===1&&graphOnly.stageChildren===1,
+    "Only one Canvas stage may exist below folders: "+JSON.stringify(graphOnly));
+  assert.equal(graphOnly.layer,"graph");
+  assert.ok(graphOnly.nodes>1&&graphOnly.links>0&&graphOnly.stageHeight>=280,
+    "Real graph must still render links and nodes: "+JSON.stringify(graphOnly));
+  assert.equal(graphOnly.visibleText,"","Pure graph must have no surrounding text");
+  assert.equal(graphOnly.border,"0px","The Canvas must have no frame");
+  assert.equal(graphOnly.background,"rgba(0, 0, 0, 0)","Graph stage should be transparent");
+  assert.equal(graphOnly.clutter,false,"All static controls, panels and legends must be absent");
   await evaluate("(()=>{const c=document.querySelector('.dk-mini-map-canvas');for(let i=0;i<3;i++)c.dispatchEvent(new WheelEvent('wheel',{bubbles:true,cancelable:true,deltaY:-110}));})()");
   await pause(490);
   const zoomedMap=await evaluate("JSON.parse(localStorage.getItem('tsukimera.disk.minimap.view.v1')||'null')");
-  assert.ok(zoomedMap?.zoom>1.2&&zoomedMap?.zoom<=3.2,"Zoom must persist: "+JSON.stringify(zoomedMap));
+  assert.ok(zoomedMap?.zoom>1.2&&zoomedMap?.zoom<=4,
+    "Direct wheel zoom must persist: "+JSON.stringify(zoomedMap));
   let sqliteView=null;
   for(let i=0;i<28;i++){
     const prefs=(await(await fetch(origin+"/api/preferences")).json()).preferences||{};
@@ -202,42 +209,39 @@ try{
     if(sqliteView?.zoom>1.2)break;
     await pause(120);
   }
-  assert.ok(sqliteView?.zoom>1.2,"Graph viewport must persist to SQLite");
-  await evaluate("document.querySelector('.dk-mini-map-reset').click()");
+  assert.ok(sqliteView?.zoom>1.2,"Pure graph must retain SQLite zoom preferences");
+  await evaluate("document.querySelector('.dk-mini-map-canvas').dispatchEvent(new KeyboardEvent('keydown',{key:'0',bubbles:true,cancelable:true}))");
   await pause(360);
   const centered=await evaluate("JSON.parse(localStorage.getItem('tsukimera.disk.minimap.view.v1')||'null')");
-  assert.equal(centered?.zoom,1,"Reset must restore 100% zoom");
-  const semanticControls=await evaluate("(()=>({button:!!document.querySelector('.dk-graph-analyze'),mode:!!document.querySelector('.dk-graph-mode'),card:!!document.querySelector('.dk-graph-inspect')}))()");
-  assert.ok(semanticControls.button&&semanticControls.mode&&semanticControls.card,
-    "Disk 14 local analysis and explanation controls must exist: "+JSON.stringify(semanticControls));
-  await evaluate("(()=>{const select=document.querySelector('.dk-graph-mode');select.value='versions';select.dispatchEvent(new Event('change',{bubbles:true}));})()");
-  await pause(90);
-  assert.equal(await evaluate("document.querySelector('.dk-graph-mode').value"),"versions");
-  await evaluate("(()=>{const select=document.querySelector('.dk-graph-mode');select.value='all';select.dispatchEvent(new Event('change',{bubbles:true}));})()");
-  await evaluate("document.querySelector('.dk-graph-expand').click()");
+  assert.equal(centered?.zoom,1,"Keyboard zero must reset zoom without visible controls");
+  await evaluate("document.querySelector('.dk-mini-map-canvas').dispatchEvent(new KeyboardEvent('keydown',{key:' ',bubbles:true,cancelable:true}))");
+  await pause(250);
+  const graphExpansion=await evaluate("(()=>({expanded:document.querySelector('.dk-graph-view').classList.contains('dk-graph-expanded'),count:document.querySelectorAll('.dk-graph-view').length,width:document.querySelector('.dk-graph-stage').getBoundingClientRect().width,children:document.querySelector('.dk-graph-view').children.length}))()");
+  assert.ok(graphExpansion.expanded&&graphExpansion.count===1&&graphExpansion.width>850&&graphExpansion.children===1,
+    "One and only one borderless graph should expand via keyboard: "+JSON.stringify(graphExpansion));
+  await evaluate("document.querySelector('.dk-mini-map-canvas').dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}))");
   await pause(240);
-  const graphExpansion=await evaluate("(()=>({isExpanded:document.querySelector('.dk-graph-view').classList.contains('dk-graph-expanded'),count:document.querySelectorAll('.dk-graph-view').length,width:document.querySelector('.dk-graph-stage').getBoundingClientRect().width,close:!!document.querySelector('.dk-graph-close')}))()");
-  assert.ok(graphExpansion.isExpanded&&graphExpansion.count===1&&graphExpansion.width>850&&graphExpansion.close,
-    "A single graph must expand into the main display without cloning: "+JSON.stringify(graphExpansion));
-  await evaluate("document.querySelector('.dk-graph-close').click()");
-  await pause(240);
-  assert.ok(await evaluate("!!document.querySelector('.dk-side > .dk-graph-view')"),
-    "Closing the enlarged graph must restore it below the folder tree");
-    await evaluate("document.querySelector('.dk-tree-all[aria-label=\"Развернуть все папки\"]').click()");
+  assert.ok(await evaluate("!!document.querySelector('.dk-side > .dk-graph-only')"),
+    "Escape must return the same Canvas beneath the folder hierarchy");
+  const contextMenu=await evaluate("(()=>{const c=document.querySelector('.dk-mini-map-canvas'),r=c.getBoundingClientRect();c.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:r.left+40,clientY:r.top+40}));return {menu:!!document.querySelector('.dk-graph-popover'),actions:document.querySelectorAll('.dk-graph-menu-action').length}})()");
+  assert.ok(contextMenu.menu&&contextMenu.actions>=6,
+    "Optional functions must be reachable only on deliberate secondary click");
+  await evaluate("document.querySelectorAll('.dk-graph-menu-action')[1].click()");
+  // The second menu choice restores all factual edges without starting a scan.
+  await pause(500);
+  assert.ok(await evaluate("document.querySelector('.dk-graph-popover')===null"),
+    "Menu must disappear after choosing an action");
+  await evaluate("document.querySelector('.dk-tree-all[aria-label=\"Развернуть все папки\"]').click()");
   assert.ok(await evaluate("!!document.querySelector('.dk-node[data-folder=\"Работа/2026\"]')"),
     "Full folder hierarchy must remain operable");
   await evaluate("document.querySelector('.dk-node[data-folder=\"Работа/2026\"] .dk-node-label').click()");
   await pause(300);
-  const hierarchy=await evaluate("(()=>({selected:document.querySelector('.dk-node.current')?.dataset.folder,ancestors:[...document.querySelectorAll('.dk-node.dk-ancestor')].map(x=>x.dataset.folder),title:document.querySelector('.dk-graph-count')?.textContent,mapFocus:document.querySelector('.dk-mini-map-canvas')?.dataset.focus,trail:document.querySelector('.dk-graph-trail')?.textContent}))()");
+  const hierarchy=await evaluate("(()=>({selected:document.querySelector('.dk-node.current')?.dataset.folder,ancestors:[...document.querySelectorAll('.dk-node.dk-ancestor')].map(x=>x.dataset.folder),mapFocus:document.querySelector('.dk-mini-map-canvas')?.dataset.focus,graphChildren:document.querySelector('.dk-side > .dk-graph-only')?.children.length,links:Number(document.querySelector('.dk-mini-map-canvas')?.dataset.links)}))()");
   assert.equal(hierarchy.selected,"Работа/2026");
   assert.ok(hierarchy.ancestors.includes("Работа")&&hierarchy.ancestors.includes("Работа/2026"));
   assert.equal(hierarchy.mapFocus,"Работа/2026");
-  assert.ok(hierarchy.trail.includes("Работа")&&hierarchy.trail.includes("2026"),
-    "Selected folder must focus the same actual graph: "+JSON.stringify(hierarchy));
-  assert.match(hierarchy.title,/узлов/);
-  const searchLocal=await evaluate("(()=>{const x=document.querySelector('.dk-graph-search');x.value='zzzzz-nonexistent';x.dispatchEvent(new Event('input',{bubbles:true}));return {status:document.querySelector('.dk-graph-status')?.textContent,count:document.querySelector('.dk-graph-canvas')?.dataset.nodes};})()");
-  assert.match(searchLocal.status,/Совпадений нет/,"Search must not invent any graph nodes");
-  await evaluate("(()=>{const x=document.querySelector('.dk-graph-search');x.value='';x.dispatchEvent(new Event('input',{bubbles:true}));})()");
+  assert.ok(hierarchy.graphChildren===1&&hierarchy.links>0,
+    "Navigation must keep a real graph without reappearing panels: "+JSON.stringify(hierarchy));
   await evaluate("document.querySelector('.dk-tree-all[aria-label=\"Свернуть все папки\"]').click()");
   assert.equal(await evaluate("document.querySelector('.dk-node[data-folder=\"Работа/2026\"]')===null"),true,
     "Collapse all should hide descendants without deleting folder data");

@@ -242,24 +242,37 @@ test("Disk 11 spatial scene renders a bounded real folder neighborhood and searc
   assert.deepEqual(slots,mod.spatialSlots(10));
 });
 
-test("Disk 13 graph view has dots, real edges, local search, accessibility and fullscreen",async()=>{
- const s=await readFile(join(root,"disk-src/web/pages/disk-map-mini.ts"),"utf8");
- for(const token of [
-  "dk-graph-view","dk-graph-stage","dk-graph-canvas",
-  "ctx.arc(","ctx.moveTo(","graphForceStep(","graphFromCatalog(",
-  "disk-page","canvas.dataset.layer=\"graph\"",
-  "graph-list","dk-omni-row","query=search.value.trim()",
-  "includeTags:tagsEnabled","includeDuplicates:duplicatesEnabled",
-  "renderAccessibleList()","ResizeObserver","reduced()",
-  "document.body.append(root)","originalParent.insertBefore(root,originalNext)",
-  "actions.openFile(node.fileId)","actions.openFolder(node.folder)",
-  "highlightFileCards(","changeZoom(","setExpanded("
- ])assert.ok(s.includes(token),"Missing genuine Graph View feature: "+token);
- assert.ok(!s.includes("makeItem("));
- assert.ok(!s.includes("dk-omni-node"));
+test("Disk 15 graph is pure Canvas with no permanent widgets or boxed controls",async()=>{
+ const mini=await readFile(join(root,"disk-src/web/pages/disk-map-mini.ts"),"utf8");
+ const css=await readFile(join(root,"web/disk.css"),"utf8");
+ const start=mini.indexOf('const root=el("section"');
+ const end=mini.indexOf("let files:DiskFile[]",start);
+ assert.ok(start>=0&&end>start);
+ const markup=mini.slice(start,end);
+ assert.match(markup,/dk-graph-only/);
+ assert.match(markup,/},frame\)/);
+ for(const unwanted of ['dk-graph-head','dk-graph-title','dk-graph-count',
+   'dk-graph-search','dk-graph-inspect','dk-graph-legend','dk-graph-list',
+   'dk-graph-actions','dk-graph-controls','dk-graph-footer','dk-omni-row',
+   'dk-graph-mode','dk-graph-analyze','dk-graph-crumb']){
+   assert.ok(!markup.includes(unwanted),"Permanent graph clutter: "+unwanted);
+ }
+ assert.match(css,/\.dk-graph-only \.dk-graph-canvas/);
+ assert.match(css,/background:transparent!important/);
+ assert.match(css,/border:0!important/);
+ assert.match(mini,/canvas\.dataset\.layer="graph"/);
+ assert.match(mini,/graphForceStep\(/);
+ assert.match(mini,/ctx\.arc\(/);
+ assert.match(mini,/ctx\.moveTo\(/);
+ assert.match(mini,/document\.body\.append\(root\)/);
+ assert.match(mini,/canvas\.addEventListener\("dblclick"/);
+ assert.match(mini,/canvas\.addEventListener\("contextmenu",openMenu\)/);
+ assert.match(mini,/frame\.addEventListener\("wheel"/);
+ assert.match(mini,/reduced\(\)/);
+ assert.ok(!mini.includes("dk-omni-node"),"Retired orbital card must stay gone");
 });
 
-test("Disk 13 graph coexists with old file operations and one left-side instance",async()=>{
+test("Disk 15 keeps single left-side graph and original file manager links",async()=>{
  const [page,css,mini]=await Promise.all([
    readFile(join(root,"disk-src/web/pages/disk.ts"),"utf8"),
    readFile(join(root,"web/disk.css"),"utf8"),
@@ -271,10 +284,11 @@ test("Disk 13 graph coexists with old file operations and one left-side instance
  assert.match(page,/filesBox\.addEventListener\("pointerover"/);
  assert.match(page,/miniMap\.highlightFile\(card\.dataset\.fileId\|\|null\)/);
  assert.doesNotMatch(page,/openDiskMap/);
- assert.match(css,/\.dk-graph-expanded \.dk-graph-stage/);
+ assert.match(css,/\.dk-graph-only\.dk-graph-expanded \.dk-graph-stage/);
  assert.match(css,/@media\(max-width:620px\)/);
- assert.match(mini,/actions\.openFile\(node\.fileId\)/);
- assert.match(mini,/actions\.openFolder\(node\.folder\)/);
+ assert.match(mini,/actions\.openFile\(n\.fileId\)/);
+ assert.match(mini,/actions\.openFolder\(n\.folder\)/);
+ assert.match(mini,/fileHighlight\(/);
 });
 
 test("Disk 12 real SHA duplicates, changes, age and spatial directions are deterministic",async()=>{
@@ -380,19 +394,25 @@ test("Disk 14 source-backed text analysis extracts evidence without invented tie
  assert.ok(entities.links.length>0&&entities.links.every(l=>l.kind==="entity"));
 });
 
-test("Disk 14 UI restricts text analysis to deliberate local read-only action",async()=>{
+test("Disk 15 preserves optional evidence analysis behind contextual actions, not permanent UI",async()=>{
  const [mini,css]=await Promise.all([
   readFile(join(root,"disk-src/web/pages/disk-map-mini.ts"),"utf8"),
   readFile(join(root,"web/disk.css"),"utf8")
  ]);
- for(const token of ["analyzeDocuments()","api.diskText(file.id)","eligible.entries()",
-  "slice(0,24)","analyzeToken","semanticFromRecords(records)",
-  "renderInspector(","dk-graph-inspect","dk-graph-analyze",
-  "graphMode","dk-graph-mode","edge.evidence","edge.weight",
-  "createRadialGradient","ctx.ellipse(","ctx.setLineDash([3,5])",
-  "appearing=new Map","fading:Array","until:now+360","entrance>.62",
-  "scheduleBreathing()","prefers-reduced-motion"])
-  assert.ok(mini.includes(token)||css.includes(token),"Missing Disk 14 feature "+token);
- assert.match(css,/\.dk-graph-expanded \.dk-graph-inspect/);
- assert.match(css,/\.dk-graph-analyze:disabled/);
+ for(const token of ["async function analyzeDocuments()","api.diskText(f.id)",
+  "slice(0,24)","analysisGeneration","semanticFromRecords(records)",
+  "semantic,viewMode:mode","openMenu(event:MouseEvent)",
+  "canvas.addEventListener(\"contextmenu\",openMenu)",
+  "clickItem(","dismissMenu()","createRadialGradient",
+  "ctx.setLineDash([3.2,5.1])","appearing=new Map",
+  "fading:Array","reduceMotion","prefers-reduced-motion"]){
+   if(token==="reduceMotion")continue;
+   assert.ok(mini.includes(token)||css.includes(token),"Missing retained feature "+token);
+ }
+ assert.ok(!mini.includes("el(\"header\""),"Graph should render no header");
+ assert.ok(!mini.includes("el(\"aside\""),"Graph should render no details card");
+ assert.ok(!mini.includes("el(\"input\""),"Graph should render no search field");
+ assert.ok(!mini.includes("el(\"details\""),"Graph should render no list");
+ assert.match(css,/\.dk-graph-popover/);
+ assert.match(css,/\.dk-graph-only\.dk-graph-expanded/);
 });

@@ -1,614 +1,500 @@
 /**
- * Tsukimera Disk 13.0 — Obsidian-style connected graph, original HTML5 Canvas.
- * Replaces the former card/orbit scene completely. No Obsidian source code,
- * new packages, cloud inference, background process or filesystem mutation.
+ * Tsukimera Disk 15.0 — the graph IS the interface.
+ * A single, borderless HTML5 Canvas with no permanent text, buttons, cards,
+ * lists, legend, inputs or toolbars. File actions use the existing Disk APIs.
+ * A context menu appears only on explicit secondary click, keeping access to
+ * evidence-backed analysis without cluttering the visualization.
  */
 import {el} from "../dom";
+import {api,type DiskFile} from "../api";
 import {human} from "./disk-model";
-import {api} from "../api";
-import {extractDocument,semanticFromRecords,type SemanticIndex,type SemanticRecord} from "./disk-map-semantic";
-import {graphFromCatalog,graphInitial,graphForceStep,type GraphNode,type GraphLink,
-  type GraphScene,type GraphPoint,type LinkKind} from "./disk-map-graph";
+import {extractDocument,semanticFromRecords,type SemanticIndex,type SemanticRecord}
+  from "./disk-map-semantic";
+import {graphFromCatalog,graphInitial,graphForceStep,type GraphNode,type GraphPoint,
+  type GraphScene,type GraphLink} from "./disk-map-graph";
 import {normalizeMiniView,MINI_VIEW_KEY,clampView} from "./disk-map-mini-model";
-import {SPATIAL_DENSITY_KEY,spatialFileType} from "./disk-map-spatial";
+import {SPATIAL_DENSITY_KEY} from "./disk-map-spatial";
 import {writePreference} from "../preferences";
-import type {DiskFile} from "../api";
 
 type Actions={openFolder:(folder:string)=>void;openFile:(id:string)=>void};
 export interface MiniDiskMap{
-  root:HTMLElement;update:(files:DiskFile[],folders:string[],current:string)=>void;
+  root:HTMLElement;
+  update:(files:DiskFile[],folders:string[],current:string)=>void;
   highlightFile:(id:string|null)=>void;
 }
-const rgb={folder:"#dbad62",file:"#bbc6d9",tag:"#af8ce2",duplicate:"#dc9872"};
-const label=(p:string)=>p?p.split("/").pop()||p:"Мой Диск";
-const parentOf=(p:string)=>p.includes("/")?p.slice(0,p.lastIndexOf("/")):"";
-const reduced=()=>window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-const small=(n:number)=>Number.isFinite(n)?Math.round(n):0;
-const button=(content:string,name:string,fn:()=>void,cls="dk-graph-btn")=>{
-  const b=el("button",{type:"button",cls,title:name,attrs:{"aria-label":name},textContent:content});
-  b.addEventListener("click",fn);return b;
+type Mode="all"|"meaning"|"versions"|"entities";
+const shades:Record<string,string>={
+  folder:"#d8aa65",tag:"#b49ae3",topic:"#e4b76c",
+  person:"#dba0c1",organization:"#82c9bb",date:"#adabd9",
+  project:"#a1d3a7",revision:"#a7b1bd",image:"#79bde1",
+  document:"#edd0a2",archive:"#b29adb",video:"#d7a0c7",
+  audio:"#87ccbb",code:"#8aaed8",other:"#bbc5d3"
 };
-
+const relationColors:Record<string,string>={
+  contains:"183,177,160",duplicate:"221,141,91",tag:"172,145,208",
+  entity:"116,199,171",lexical:"113,163,224",reference:"237,185,104",
+  revision:"173,184,190"
+};
+const parentOf=(p:string)=>p.includes("/")?p.slice(0,p.lastIndexOf("/")):"";
+const reduced=()=>window.matchMedia("(prefers-reduced-motion:reduce)").matches;
+const clamp=(x:number,a:number,b:number)=>Math.min(b,Math.max(a,x));
+const clickItem=(label:string,run:()=>void)=>{
+  const item=el("button",{type:"button",cls:"dk-graph-menu-action",textContent:label});
+  item.addEventListener("click",run);return item;
+};
 export function createMiniDiskMap(actions:Actions):MiniDiskMap{
-  const storage=normalizeMiniView((()=>{try{return JSON.parse(localStorage.getItem(MINI_VIEW_KEY)||"null");}catch{return null;}})());
-  let zoomLevel=clampView(storage.zoom,.7,3.2),panX=storage.panX,panY=storage.panY;
+  const stored=normalizeMiniView((()=>{
+    try{return JSON.parse(localStorage.getItem(MINI_VIEW_KEY)||"null");}catch{return null;}
+  })());
+  let zoom=clampView(stored.zoom,.65,4),panX=stored.panX,panY=stored.panY;
   const canvas=el("canvas",{cls:"dk-mini-map-canvas dk-graph-canvas",attrs:{
     tabindex:"0",role:"application",
-    "aria-label":"Граф файлов как Obsidian: точки и реальные связи. Нажмите точку для открытия. Колесо — масштаб; перемещение — сдвиг или закрепление точки. Стрелки — выбор, Enter — открыть, Esc — закрыть расширенный граф."}});
+    "aria-label":"Живая карта связей: точки и линии. Наведите для имени, нажмите для открытия, колесо — масштаб, перетащите — перемещение. Двойной щелчок на фоне — развернуть, Escape — свернуть. Контекстное меню — исследование и фильтры. Стрелки — выбор узла, Enter — открыть, 0 — центр."
+  }});
   const frame=el("div",{cls:"dk-mini-map-frame dk-omni-stage dk-graph-stage"},canvas);
-  const search=el("input",{type:"search",cls:"dk-omni-search dk-graph-search",placeholder:"Поиск узла…",attrs:{"aria-label":"Найти объект на графе"}});
-  const total=el("small",{cls:"dk-mini-map-count dk-graph-count"});
-  const status=el("div",{cls:"dk-mini-map-status dk-omni-status dk-graph-status",textContent:"Связи папок и документов",attrs:{role:"status","aria-live":"polite"}});
-  const breadcrumb=el("nav",{cls:"dk-omni-trail dk-graph-trail",attrs:{"aria-label":"Текущая папка карты"}});
-  const list=el("div",{cls:"dk-omni-list dk-graph-list",attrs:{role:"group","aria-label":"Доступный список узлов"}});
-  const listPanel=el("details",{cls:"dk-graph-list-panel"},el("summary",{textContent:"Список узлов"}),list);
-  const mode=el("select",{cls:"dk-graph-mode",attrs:{"aria-label":"Тип связей"}},
-    el("option",{value:"all",textContent:"Все связи"}),
-    el("option",{value:"meaning",textContent:"Содержание"}),
-    el("option",{value:"versions",textContent:"Дубликаты и редакции"}),
-    el("option",{value:"entities",textContent:"Люди · компании · проекты"}));
-  const analyze=button("Изучить","Прочитать доступные тексты документов для графа",()=>{void analyzeDocuments();},"dk-graph-analyze dk-graph-btn");
-  const inspect=el("aside",{cls:"dk-graph-inspect",attrs:{"aria-label":"Сведения об узле и основания связей","aria-live":"polite"}},
-    el("strong",{textContent:"Выберите точку графа"}),
-    el("small",{textContent:"Здесь появятся свойства и объяснения реальных связей"}));
-  const depthLabel=el("span",{cls:"dk-graph-depth-label",textContent:"2 уровня"});
-  const depthBtn=button("2","Глубина графа: изменить количество уровней",()=>{
-    depth=depth===3?1:depth+1;
-    depthLabel.textContent=depth+" ур.";
-    rebuild();
-  });
-  const tagBtn=button("#","Показать или скрыть связи по меткам",()=>{
-    tagsEnabled=!tagsEnabled;tagBtn.setAttribute("aria-pressed",String(tagsEnabled));rebuild();
-  });
-  tagBtn.setAttribute("aria-pressed","true");
-  const dupBtn=button("≡","Показать или скрыть дубликаты SHA-256",()=>{
-    duplicatesEnabled=!duplicatesEnabled;dupBtn.setAttribute("aria-pressed",String(duplicatesEnabled));rebuild();
-  });
-  dupBtn.setAttribute("aria-pressed","true");
-  const zoomOut=button("−","Уменьшить граф",()=>changeZoom(.84));
-  const zoomIn=button("+","Увеличить граф",()=>changeZoom(1.18));
-  const reset=button("⌖","Центрировать граф",()=>{panX=0;panY=0;zoomLevel=1;saveViewport();draw();},"dk-mini-map-reset dk-graph-btn");
-  const expand=button("⤢","Развернуть граф связей",()=>setExpanded(!expanded),"dk-graph-expand dk-graph-btn");
-  const close=button("×","Закрыть большой граф",()=>setExpanded(false),"dk-graph-close dk-graph-btn");
-  const up=button("↑","На уровень выше",()=>{if(current)actions.openFolder(parentOf(current));});
-  const root=el("section",{cls:"dk-mini-map dk-omni-explorer dk-graph-view",attrs:{"aria-label":"Живая карта связей файлов"}},
-    el("header",{cls:"dk-graph-head"},
-      el("div",{cls:"dk-graph-title"},el("strong",{textContent:"Граф связей"}),total),
-      el("div",{cls:"dk-graph-actions"},up,expand,close)),
-    el("div",{cls:"dk-graph-utility"},
-      breadcrumb,
-      el("div",{cls:"dk-graph-search-wrap"},search)),
-    el("div",{cls:"dk-graph-controls"},mode,analyze,depthBtn,depthLabel,tagBtn,dupBtn,
-      el("span",{cls:"dk-graph-zoom"},zoomOut,zoomIn,reset)),
-    frame,inspect,
-    el("footer",{cls:"dk-graph-footer"},status,
-      el("div",{cls:"dk-graph-legend"},
-        el("span",{textContent:"● Папки",cls:"dk-graph-legend-folder"}),
-        el("span",{textContent:"● Файлы",cls:"dk-graph-legend-file"}),
-        el("span",{textContent:"● Метки",cls:"dk-graph-legend-tag"}))),
-    listPanel);
+  const root=el("section",{cls:"dk-mini-map dk-omni-explorer dk-graph-view dk-graph-only",
+    attrs:{"aria-label":"Граф связей файлов"}},frame);
+
   let files:DiskFile[]=[],folders:string[]=[],current="",depth=2;
-  let tagsEnabled=true,duplicatesEnabled=true;
-  let semantic:SemanticIndex|null=null,analyzeToken=0;
-  let graphMode:"all"|"meaning"|"versions"|"entities"="all";
-  mode.addEventListener("change",()=>{
-    graphMode=mode.value as typeof graphMode;
-    rebuild();
-  });
   let scene:GraphScene=graphFromCatalog([],[],"");
-  let coords=new Map<string,GraphPoint>();
-  let appearing=new Map<string,number>();
-  let fading:Array<{node:GraphNode;point:GraphPoint;until:number}>=[];
-  let frameNumber=0,raf=0,resizeObserver:ResizeObserver|null=null;
-  let hovered:string|null=null,selected:string|null=null,query="";
-  let expanded=false,originalParent:Node|null=null,originalNext:Node|null=null;
-  let saveTimer=0,breathingTimer=0,dragTarget:string|null=null,dragStarted=false,moveTarget=false;
-  let startX=0,startY=0,startPanX=0,startPanY=0;
-  let homePage:HTMLElement|null=null;
-  let lastFocusFolder="";
-  let tooltip=el("div",{cls:"dk-graph-tooltip",hidden:true});
-  frame.append(tooltip);
-  function saveViewport(){
+  let mode:Mode="all",includeTags=true,includeDuplicates=true;
+  let semantic:SemanticIndex|null=null,analysisGeneration=0;
+  let coords=new Map<string,GraphPoint>(),appearing=new Map<string,number>();
+  let fading:Array<{point:GraphPoint;node:GraphNode;until:number}>=[];
+  let hovered:string|null=null,selected:string|null=null;
+  let expanded=false,anchor:Node|null=null,nextSibling:Node|null=null,homePage:HTMLElement|null=null;
+  let pointerDown=false,pointMoved=false,dragId:string|null=null;
+  let lastX=0,lastY=0,originX=0,originY=0,prevMoveX=0,prevMoveY=0;
+  let physicsFrame=0,raf=0,saveTimer=0,idleTimer=0,lastTap=0;
+  let menu:HTMLElement|null=null,visible=false,analysisBusy=false;
+  let repaintQueued=false;
+
+  function persist(){
     clearTimeout(saveTimer);
-    saveTimer=window.setTimeout(()=>writePreference(MINI_VIEW_KEY,JSON.stringify({
-      zoom:zoomLevel,panX,panY,focus:""
-    })),280);
+    saveTimer=window.setTimeout(()=>{
+      writePreference(MINI_VIEW_KEY,JSON.stringify({zoom,panX,panY,focus:""}));
+    },220);
   }
-  // Gentle 2fps breathing only for an expanded, visible, active graph.
-  // The compact map and reduced-motion mode never run an idle animation loop.
-  function scheduleBreathing(){
-    if(breathingTimer)clearTimeout(breathingTimer);
-    if(!expanded||reduced())return;
-    breathingTimer=window.setTimeout(()=>{
-      if(expanded&&document.visibilityState==="visible"&&(selected||hovered))draw();
-      scheduleBreathing();
-    },420);
+  function viewport(){
+    const bounds=frame.getBoundingClientRect();
+    const w=Math.max(1,bounds.width),h=Math.max(1,bounds.height);
+    // Fit dynamic force positions automatically. No crop or card-shaped frame.
+    let extent=180;
+    for(const p of coords.values())extent=Math.max(extent,Math.hypot(p.x,p.y)+28);
+    extent=Math.min(950,extent);
+    const fit=Math.min((w-30)/(extent*2),(h-30)/(extent*2));
+    return {w,h,scale:Math.max(.08,fit)*zoom,cx:w/2+panX,cy:h/2+panY};
   }
-  function setExpanded(value:boolean){
-    if(value===expanded)return;
-    expanded=value;
-    scheduleBreathing();
-    if(value){
-      originalParent=root.parentNode;originalNext=root.nextSibling;
-      homePage=root.closest<HTMLElement>(".disk-page");
-      document.body.append(root);
-      root.classList.add("dk-graph-expanded");
-      expand.textContent="⤡";expand.setAttribute("aria-label","Свернуть граф связей");
-      canvas.focus({preventScroll:true});
-    }else{
-      root.classList.remove("dk-graph-expanded");
-      expand.textContent="⤢";expand.setAttribute("aria-label","Развернуть граф связей");
-      if(originalParent){
-        if(originalNext&&originalNext.parentNode===originalParent)
-          originalParent.insertBefore(root,originalNext);
-        else originalParent.appendChild(root);
+  function pointerHit(clientX:number,clientY:number):GraphNode|null{
+    const bounds=canvas.getBoundingClientRect(),mx=clientX-bounds.left,my=clientY-bounds.top;
+    const {scale,cx,cy}=viewport();
+    let nearest:GraphNode|null=null,dist=Infinity;
+    for(const n of scene.nodes){
+      const p=coords.get(n.id);if(!p)continue;
+      const d=Math.hypot(cx+p.x*scale-mx,cy+p.y*scale-my);
+      if(d<Math.max(12,(n.kind==="folder"?6:3.5)*Math.max(1,scale)+7)&&d<dist){
+        nearest=n;dist=d;
       }
-      canvas.focus({preventScroll:true});
     }
-    requestAnimationFrame(()=>{rebuild();});
+    return nearest;
   }
-  function changeZoom(factor:number){
-    zoomLevel=clampView(zoomLevel*factor,.7,3.2);
-    saveViewport();draw();
+  function tint(n:GraphNode):string{
+    return shades[n.kind==="file"?n.fileType||"other":n.kind]||shades.other;
   }
-  function navigate(node:GraphNode){
-    if(node.kind==="folder")actions.openFolder(node.folder);
-    else if(node.kind==="file"&&node.fileId)actions.openFile(node.fileId);
-    else if(node.kind==="tag"||node.kind==="topic"||node.kind==="person"||
-      node.kind==="organization"||node.kind==="date"||node.kind==="project"){
-      query=node.name.slice(1);search.value=query;updateSearch();
-    }
-  }
-  function moveTo(node:GraphNode){
-    selected=node.id;hovered=node.id;
-    status.textContent=node.name+(node.kind==="file"?" · "+human(node.size):"");
-    highlightFileCards(node);
-    renderInspector(node);
-    draw();
-  }
-  function highlightFileCards(node:GraphNode|null){
+  function fileHighlight(node:GraphNode|null){
     const page=homePage||root.closest<HTMLElement>(".disk-page");
     if(!page)return;
     for(const e of page.querySelectorAll<HTMLElement>(".dk-file.dk-map-linked"))
       e.classList.remove("dk-map-linked");
-    if(node?.fileId)
-      for(const e of page.querySelectorAll<HTMLElement>(".dk-file[data-file-id]"))
-        if(e.dataset.fileId===node.fileId)e.classList.add("dk-map-linked");
+    if(node?.fileId)for(const e of page.querySelectorAll<HTMLElement>(".dk-file[data-file-id]"))
+      if(e.dataset.fileId===node.fileId)e.classList.add("dk-map-linked");
   }
   function highlightFile(id:string|null){
     const node=scene.nodes.find(n=>n.fileId===id);
     if(id&&!node)return;
-    selected=node?.id||null;
-    hovered=selected;highlightFileCards(node||null);renderInspector(node||null);draw();
+    selected=node?.id||null;hovered=selected;
+    fileHighlight(node||null);draw();
+  }
+  function activate(n:GraphNode){
+    if(n.kind==="folder")actions.openFolder(n.folder);
+    else if(n.kind==="file"&&n.fileId)actions.openFile(n.fileId);
+    else if(n.kind==="tag"||n.kind==="topic"||n.kind==="person"||
+      n.kind==="organization"||n.kind==="date"||n.kind==="project"){
+      // Selecting a concept highlights its actual neighbors, never a fake file.
+      selected=n.id;hovered=n.id;draw();
+    }
+  }
+  function focus(n:GraphNode){
+    selected=n.id;hovered=n.id;fileHighlight(n);draw();
+  }
+  function changeZoom(factor:number){
+    zoom=clampView(zoom*factor,.65,4);persist();draw();
+  }
+  function setExpanded(value:boolean){
+    if(value===expanded)return;
+    dismissMenu();expanded=value;
+    if(value){
+      anchor=root.parentNode;nextSibling=root.nextSibling;
+      homePage=root.closest<HTMLElement>(".disk-page");
+      document.body.append(root);
+      root.classList.add("dk-graph-expanded");
+    }else{
+      root.classList.remove("dk-graph-expanded");
+      if(anchor){
+        if(nextSibling?.parentNode===anchor)anchor.insertBefore(root,nextSibling);
+        else anchor.appendChild(root);
+      }
+    }
+    canvas.focus({preventScroll:true});
+    requestAnimationFrame(()=>rebuild());
+  }
+  function dismissMenu(){menu?.remove();menu=null;}
+  // A temporary context menu is the only optional chrome. None exists in
+  // the default DOM: the ordinary view is literally just a Canvas.
+  function openMenu(event:MouseEvent){
+    event.preventDefault();dismissMenu();
+    const context=el("div",{cls:"dk-graph-popover",attrs:{role:"menu","aria-label":"Действия графа"}});
+    const option=(text:string,callback:()=>void)=>{
+      const button=clickItem(text,()=>{dismissMenu();callback();});
+      context.append(button);
+    };
+    option("Изучить тексты документов",()=>{void analyzeDocuments();});
+    option("Все реальные связи",()=>{mode="all";rebuild();});
+    option("Связи по содержанию",()=>{mode="meaning";rebuild();});
+    option("Дубликаты и редакции",()=>{mode="versions";rebuild();});
+    option("Общие сущности",()=>{mode="entities";rebuild();});
+    option("Глубина "+(depth===3?1:depth+1),()=>{depth=depth===3?1:depth+1;rebuild();});
+    option("Развернуть / свернуть",()=>setExpanded(!expanded));
+    const rect=frame.getBoundingClientRect();
+    context.style.left=clamp(event.clientX-rect.left,3,Math.max(3,rect.width-205))+"px";
+    context.style.top=clamp(event.clientY-rect.top,3,Math.max(3,rect.height-240))+"px";
+    frame.append(context);menu=context;
+  }
+  async function analyzeDocuments(){
+    const gen=++analysisGeneration;
+    const eligible=scene.nodes.filter(n=>n.kind==="file"&&n.fileId).slice(0,24);
+    const known=new Map(files.map(f=>[f.id,f]));
+    const names=eligible.map(n=>n.name),records:SemanticRecord[]=[];
+    let unreadable=0,truncated=0;
+    analysisBusy=true;canvas.dataset.analysis="running";draw();
+    for(const node of eligible){
+      if(gen!==analysisGeneration)break;
+      const f=node.fileId&&known.get(node.fileId);
+      if(!f||f.deletedAt)continue;
+      const response=await api.diskText(f.id);
+      if(gen!==analysisGeneration)break;
+      if(!response.ok||!response.value.text?.trim()){unreadable++;continue;}
+      if(response.value.truncated)truncated++;
+      records.push(extractDocument(f,response.value.text,names));
+    }
+    if(gen!==analysisGeneration)return;
+    semantic=semanticFromRecords(records);
+    semantic.unreadable=unreadable;semantic.truncated=truncated;
+    analysisBusy=false;canvas.dataset.analysis="finished";rebuild();
   }
   function rebuild(){
-    const previousNodes=new Map(scene.nodes.map(n=>[n.id,n]));
-    const previousPoints=coords;
-    const limit=expanded?(localStorage.getItem(SPATIAL_DENSITY_KEY)==="detailed"?200:150):
-      (localStorage.getItem(SPATIAL_DENSITY_KEY)==="detailed"?80:54);
-    scene=graphFromCatalog(files,folders,current,{depth,limit,
-      includeTags:tagsEnabled,includeDuplicates:duplicatesEnabled,
-      semantic,viewMode:graphMode});
-    const updated=new Map<string,GraphPoint>();
-    const now=performance.now(),nextIds=new Set(scene.nodes.map(n=>n.id));
-    // Enter/exit visual state is temporary; disappearing files cannot be
-    // clicked or searched and are never kept in the live graph model.
+    const oldNodes=new Map(scene.nodes.map(n=>[n.id,n]));
+    const oldPositions=coords;
+    const detailed=localStorage.getItem(SPATIAL_DENSITY_KEY)==="detailed";
+    scene=graphFromCatalog(files,folders,current,{
+      depth,limit:expanded?(detailed?190:146):(detailed?82:64),
+      includeTags,includeDuplicates,semantic,viewMode:mode
+    });
+    const currentTime=performance.now();
+    const next=new Map<string,GraphPoint>(),entering=new Map<string,number>();
+    const currentIds=new Set(scene.nodes.map(n=>n.id));
     if(!reduced()){
-      for(const [oldId,oldNode] of previousNodes){
-        const point=previousPoints.get(oldId);
-        if(!nextIds.has(oldId)&&point)
-          fading.push({node:oldNode,point:{...point},until:now+360});
+      for(const [id,node] of oldNodes){
+        const point=oldPositions.get(id);
+        if(!currentIds.has(id)&&point)fading.push({node,point:{...point},until:currentTime+340});
       }
-      fading=fading.filter(n=>n.until>now).slice(-50);
+      fading=fading.filter(f=>f.until>currentTime).slice(-40);
     }else fading=[];
-    const fresh=new Map<string,number>();
     for(const n of scene.nodes){
-      updated.set(n.id,previousPoints.get(n.id)||graphInitial(n));
-      if(!reduced()&&!previousNodes.has(n.id))fresh.set(n.id,now);
-      else if(appearing.has(n.id))fresh.set(n.id,appearing.get(n.id)!);
+      next.set(n.id,oldPositions.get(n.id)||graphInitial(n));
+      if(!reduced()&&!oldNodes.has(n.id))entering.set(n.id,currentTime);
+      else if(appearing.has(n.id))entering.set(n.id,appearing.get(n.id)!);
     }
-    coords=updated;appearing=fresh;
-    frameNumber=0;
-    total.textContent=scene.nodes.length+" узлов · "+scene.links.length+" связей"+
-      (scene.hidden?" · +"+scene.hidden:"");
+    coords=next;appearing=entering;physicsFrame=0;
     canvas.dataset.layer="graph";
     canvas.dataset.nodes=String(scene.nodes.length);
     canvas.dataset.links=String(scene.links.length);
     canvas.dataset.focus=current;
-    drawBreadcrumb();
-    renderAccessibleList();
-    renderInspector(scene.nodes.find(n=>n.id===selected)||null);
+    canvas.dataset.mode=mode;
     schedule();
   }
-
-  /** Read a small visible sample only after an explicit click, using the
-   * existing local text endpoint and no persistent cache or cloud LLM.
-   * Stale results are discarded if the user changes folders or the catalog.
-   */
-  async function analyzeDocuments(){
-    const generation=++analyzeToken;
-    const eligible=scene.nodes.filter(n=>n.kind==="file"&&n.fileId)
-      .slice(0,24);
-    const catalog=new Map(files.map(f=>[f.id,f]));
-    const names=eligible.map(n=>n.name);
-    const records:SemanticRecord[]=[];
-    let unreadable=0,truncated=0;
-    analyze.disabled=true;
-    for(const [i,n] of eligible.entries()){
-      if(generation!==analyzeToken)break;
-      const file=n.fileId&&catalog.get(n.fileId);
-      if(!file||file.deletedAt)continue;
-      status.textContent="Анализ текста "+(i+1)+" / "+eligible.length;
-      const answer=await api.diskText(file.id);
-      if(generation!==analyzeToken)break;
-      if(!answer.ok||!answer.value.text?.trim()){
-        unreadable++;continue;
-      }
-      if(answer.value.truncated)truncated++;
-      records.push(extractDocument(file,answer.value.text,names));
-    }
-    if(generation!==analyzeToken){analyze.disabled=false;return;}
-    semantic=semanticFromRecords(records);
-    semantic.unreadable=unreadable;
-    semantic.truncated=truncated;
-    analyze.disabled=false;
-    status.textContent="Изучено "+semantic.processed+" документов · "+
-      semantic.links.length+" текстовых связей"+
-      (unreadable?" · недоступно "+unreadable:"")+
-      (truncated?" · усечено "+truncated:"");
-    rebuild();
-  }
-  function renderInspector(node:GraphNode|null){
-    inspect.replaceChildren();
-    if(!node){
-      inspect.append(el("strong",{textContent:"Выберите точку графа"}),
-        el("small",{textContent:"Покажу основание каждой связи. Для анализа содержимого нажмите «Изучить»."}));
-      return;
-    }
-    const kind=node.kind==="folder"?"Папка":node.kind==="file"?"Документ":
-      node.kind==="revision"?"Текущая редакция":"Связанный объект";
-    inspect.append(el("strong",{textContent:node.name}),
-      el("small",{textContent:kind+(node.kind==="file"?" · "+human(node.size):"")}));
-    const record=node.fileId&&semantic?.records[node.fileId];
-    if(record){
-      if(record.preview)inspect.append(el("p",{cls:"dk-graph-summary",textContent:record.preview}));
-      if(record.keywords.length)inspect.append(el("small",{
-        textContent:"Ключевые слова: "+record.keywords.slice(0,7).join(", ")}));
-    }
-    const links=scene.links.filter(e=>e.source===node.id||e.target===node.id);
-    if(!links.length)inspect.append(el("small",{textContent:"Связи не обнаружены в выбранном режиме"}));
-    for(const edge of links.slice(0,12)){
-      const other=scene.nodes.find(n=>n.id===(edge.source===node.id?edge.target:edge.source));
-      if(!other)continue;
-      const proof=edge.evidence||(edge.kind==="contains"?"Подтверждённая вложенность":
-        edge.kind==="duplicate"?"Совпадает SHA-256":edge.kind==="tag"?"Метка из каталога":
-        edge.kind==="revision"?"Номер редакции из каталога":"Подтверждённая связь");
-      inspect.append(el("div",{cls:"dk-graph-inspect-link"},
-        el("span",{textContent:other.name}),
-        el("small",{textContent:proof})));
-    }
-  }
-  function drawBreadcrumb(){
-    breadcrumb.replaceChildren();
-    breadcrumb.append(button("⌂","Корень Диска",()=>actions.openFolder(""),"dk-graph-crumb"));
-    const parts=current?current.split("/"):[];
-    for(let i=0;i<parts.length;i++){
-      const p=parts.slice(0,i+1).join("/");
-      breadcrumb.append(el("span",{textContent:"/"}));
-      breadcrumb.append(button(parts[i]!,"Перейти к "+p,()=>actions.openFolder(p),"dk-graph-crumb"));
-    }
-  }
-  function renderAccessibleList(){
-    list.replaceChildren();
-    for(const n of scene.nodes){
-      const b=button((n.kind==="folder"?"▸ ":n.kind==="tag"?"# ":"• ")+n.name,
-        "Открыть "+n.name,()=>navigate(n),"dk-omni-row dk-graph-row");
-      b.dataset.nodeId=n.id;
-      b.addEventListener("focus",()=>moveTo(n));
-      b.addEventListener("pointerenter",()=>moveTo(n));
-      list.append(b);
-    }
-  }
-  function updateSearch(){
-    query=search.value.trim().toLocaleLowerCase("ru");
-    const matching=scene.nodes.filter(n=>n.name.toLocaleLowerCase("ru").includes(query));
-    if(query&&matching.length){
-      moveTo(matching[0]!);
-      status.textContent="Найдено "+matching.length+": "+matching[0]!.name;
-    }else if(query)status.textContent="Совпадений нет";
-    else status.textContent=scene.nodes.length+" реальных узлов";
-    draw();
-  }
-  search.addEventListener("input",updateSearch);
-  function projection(){
-    const bounds=frame.getBoundingClientRect(),w=Math.max(1,bounds.width),h=Math.max(1,bounds.height);
-    const fit=Math.min(w/(expanded?1150:650),h/(expanded?850:700));
-    const scale=fit*zoomLevel;
-    return {w,h,scale,cx:w/2+panX,cy:h/2+panY};
-  }
-  function nodeAt(clientX:number,clientY:number):GraphNode|null{
-    const rect=canvas.getBoundingClientRect(),x=clientX-rect.left,y=clientY-rect.top;
-    const {cx,cy,scale}=projection();
-    let best:GraphNode|null=null,bd=Infinity;
-    for(const node of scene.nodes){
-      const p=coords.get(node.id);if(!p)continue;
-      const d=Math.hypot(x-(cx+p.x*scale),y-(cy+p.y*scale));
-      if(d<Math.max(10,(node.kind==="folder"?6:4)*Math.max(1,scale)+5)&&d<bd){best=node;bd=d;}
-    }
-    return best;
-  }
-
-  const typeColors:Record<string,string>={
-    image:"#71bde6",document:"#e8c99e",archive:"#b99be5",
-    video:"#d7a5c4",audio:"#92d8c5",code:"#91b9e1",
-    other:"#bdc3d0"
-  };
-  const edgeColors:Record<string,string>={
-    contains:"177,181,192",duplicate:"225,147,96",tag:"184,147,224",
-    entity:"102,192,167",lexical:"112,172,228",reference:"242,194,114",
-    revision:"201,183,147"
-  };
-  function color(node:GraphNode):string{
-    if(node.kind==="folder")return rgb.folder;
-    if(node.kind==="tag")return rgb.tag;
-    if(node.kind==="topic")return "#e4b66b";
-    if(node.kind==="person")return "#e4a6c3";
-    if(node.kind==="organization")return "#7ec9c3";
-    if(node.kind==="date")return "#bba6d8";
-    if(node.kind==="project")return "#9fd3a0";
-    if(node.kind==="revision")return "#a1adb8";
-    return typeColors[node.fileType||"other"]||rgb.file;
-  }
+  // Rich glow and grouping are painted INSIDE the Canvas: never DOM cards.
   function draw(){
     if(!root.isConnected)return;
-    const {w,h,cx,cy,scale}=projection();
-    const dpr=Math.min(2,window.devicePixelRatio||1);
+    const {w,h,scale,cx,cy}=viewport();
+    const dpr=Math.min(2,devicePixelRatio||1);
     const pw=Math.round(w*dpr),ph=Math.round(h*dpr);
     if(canvas.width!==pw||canvas.height!==ph){canvas.width=pw;canvas.height=ph;}
     const ctx=canvas.getContext("2d");if(!ctx)return;
     ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,w,h);
-    ctx.fillStyle="#08090e";ctx.fillRect(0,0,w,h);
+    const now=performance.now();
+    // A diffuse nebula makes real clusters legible without hard outlines.
+    const groups=new Map<string,GraphPoint[]>();
+    for(const n of scene.nodes){
+      if(n.kind!=="file")continue;
+      const p=coords.get(n.id);if(!p)continue;
+      const a=groups.get(n.folder)||[];a.push(p);groups.set(n.folder,a);
+    }
+    let cloud=0;
+    for(const positions of groups.values()){
+      if(positions.length<3||cloud++>8)continue;
+      const x=cx+positions.reduce((sum,p)=>sum+p.x,0)/positions.length*scale;
+      const y=cy+positions.reduce((sum,p)=>sum+p.y,0)/positions.length*scale;
+      const radius=clamp(positions.reduce((max,p)=>Math.max(max,Math.hypot(
+        cx+p.x*scale-x,cy+p.y*scale-y)),0)+27,32,Math.min(w,h)*.49);
+      const grad=ctx.createRadialGradient(x,y,2,x,y,radius);
+      grad.addColorStop(0,"rgba(219,166,83,.11)");
+      grad.addColorStop(.44,"rgba(154,112,68,.045)");
+      grad.addColorStop(1,"rgba(154,112,68,0)");
+      ctx.fillStyle=grad;ctx.beginPath();ctx.arc(x,y,radius,0,Math.PI*2);ctx.fill();
+    }
     const active=hovered||selected;
-    const neighborhood=new Set<string>(active?[active]:[]);
+    const neighbor=new Set<string>(active?[active]:[]);
     if(active)for(const e of scene.links){
-      if(e.source===active)neighborhood.add(e.target);
-      if(e.target===active)neighborhood.add(e.source);
+      if(e.source===active)neighbor.add(e.target);
+      if(e.target===active)neighbor.add(e.source);
     }
-    const searchMatches=new Set(query?scene.nodes.filter(n=>
-      n.name.toLocaleLowerCase("ru").includes(query)).map(n=>n.id):[]);
-    // A cluster is an actual folder containing >=3 graph files, not a guessed
-    // semantic community. Inset contours avoid covering the whole small panel.
-    if(expanded&&scale>.2){
-      const groups=new Map<string,GraphNode[]>();
-      for(const n of scene.nodes)if(n.kind==="file"){
-        const collection=groups.get(n.folder)||[];collection.push(n);groups.set(n.folder,collection);
-      }
-      let painted=0;
-      for(const [folder,nodes] of groups){
-        if(nodes.length<3||painted>=10)continue;
-        const spots=nodes.map(n=>coords.get(n.id)).filter((v):v is GraphPoint=>!!v)
-          .map(p=>({x:cx+p.x*scale,y:cy+p.y*scale}));
-        if(spots.length<3)continue;
-        const midX=spots.reduce((sum,p)=>sum+p.x,0)/spots.length;
-        const midY=spots.reduce((sum,p)=>sum+p.y,0)/spots.length;
-        const radiusX=Math.min(w*.45,Math.max(42,...spots.map(p=>Math.abs(p.x-midX)+24)));
-        const radiusY=Math.min(h*.4,Math.max(34,...spots.map(p=>Math.abs(p.y-midY)+22)));
-        const gradient=ctx.createRadialGradient(midX,midY,2,midX,midY,Math.max(radiusX,radiusY));
-        gradient.addColorStop(0,"rgba(188,150,93,.09)");
-        gradient.addColorStop(1,"rgba(188,150,93,0)");
-        ctx.beginPath();ctx.ellipse(midX,midY,radiusX,radiusY,0,0,2*Math.PI);
-        ctx.fillStyle=gradient;ctx.fill();
-        ctx.beginPath();ctx.ellipse(midX,midY,radiusX,radiusY,0,0,2*Math.PI);
-        ctx.strokeStyle="rgba(209,169,108,.13)";ctx.lineWidth=.7;
-        ctx.setLineDash([4,7]);ctx.stroke();ctx.setLineDash([]);
-        ctx.font="10px system-ui,sans-serif";ctx.fillStyle="rgba(210,178,123,.48)";
-        ctx.fillText((folder.split("/").pop()||"Корень").slice(0,22),
-          Math.min(w-80,Math.max(12,midX-radiusX+8)),
-          Math.max(13,midY-radiusY+15));
-        painted++;
-      }
-    }
-    // The selected path towards the actual root is determined exclusively by
-    // concrete "contains" edges and is never invented across unrelated files.
-    const highlightedPath=new Set<string>();
+    const rootPath=new Set<string>();
     if(active){
       let child=active;
-      const parentEdges=scene.links.filter(l=>l.kind==="contains");
-      for(let i=0;i<12;i++){
-        const next=parentEdges.find(l=>l.target===child);
-        if(!next)break;
-        highlightedPath.add(next.source+"|"+next.target);child=next.source;
+      for(let i=0;i<14;i++){
+        const up=scene.links.find(e=>e.kind==="contains"&&e.target===child);
+        if(!up)break;
+        rootPath.add(up.source+"|"+up.target);child=up.source;
       }
     }
-    for(const edge of scene.links){
-      const a=coords.get(edge.source),b=coords.get(edge.target);if(!a||!b)continue;
-      const isActive=!!active&&(edge.source===active||edge.target===active);
-      const onPath=highlightedPath.has(edge.source+"|"+edge.target);
-      const dim=!!active&&!isActive&&!onPath||
-        !!query&&!searchMatches.has(edge.source)&&!searchMatches.has(edge.target);
-      ctx.beginPath();ctx.moveTo(cx+a.x*scale,cy+a.y*scale);
-      ctx.lineTo(cx+b.x*scale,cy+b.y*scale);
-      const components=edgeColors[edge.kind]||"177,181,192";
-      const alpha=dim?.055:isActive?.95:onPath?.74:edge.kind==="contains"?.22:.36;
-      ctx.strokeStyle="rgba("+components+","+alpha+")";
-      const strength=Math.max(.4,Math.min(1.8,edge.weight??1));
-      ctx.lineWidth=(isActive?1.5:onPath?1.2:.65)+strength*(isActive?.9:.55);
-      if(edge.kind==="lexical"||edge.kind==="entity")ctx.setLineDash([3,5]);
-      else ctx.setLineDash([]);
-      if(onPath||isActive){
-        ctx.save();ctx.shadowColor="rgba("+components+",.6)";
-        ctx.shadowBlur=expanded?8:3;ctx.stroke();ctx.restore();
-      }else ctx.stroke();
+    // Connections are factual; luminous routes reveal hierarchy/semantic ties.
+    for(const e of scene.links){
+      const p=coords.get(e.source),q=coords.get(e.target);
+      if(!p||!q)continue;
+      const sx=cx+p.x*scale,sy=cy+p.y*scale;
+      const tx=cx+q.x*scale,ty=cy+q.y*scale;
+      if((sx<0&&tx<0)||(sx>w&&tx>w)||(sy<0&&ty<0)||(sy>h&&ty>h))continue;
+      const highlighted=!!active&&(e.source===active||e.target===active);
+      const partOfPath=rootPath.has(e.source+"|"+e.target);
+      const fade=!!active&&!highlighted&&!partOfPath;
+      const rgb=relationColors[e.kind]||relationColors.contains;
+      const opacity=fade?.06:highlighted?.93:partOfPath?.72:
+        e.kind==="contains"?.22:.36;
+      const strength=clamp(e.weight??1,.25,1.6);
+      ctx.save();
+      ctx.beginPath();ctx.moveTo(sx,sy);ctx.lineTo(tx,ty);
+      ctx.strokeStyle="rgba("+rgb+","+opacity+")";
+      ctx.lineWidth=(highlighted?1.35:.5)+strength*(highlighted?1.2:.65);
+      if(e.kind==="lexical"||e.kind==="entity")ctx.setLineDash([3.2,5.1]);
+      if(highlighted||partOfPath){
+        ctx.shadowColor="rgba("+rgb+",.75)";
+        ctx.shadowBlur=expanded?12:6;
+      }
+      ctx.stroke();ctx.restore();
     }
-    ctx.setLineDash([]);
-    const drawLabels=new Set<string>();
-    if(active)for(const id of neighborhood)drawLabels.add(id);
-    else if(expanded){
-      for(const n of scene.nodes)if((n.kind==="folder"&&n.depth<=1)||n.kind==="topic")
-        drawLabels.add(n.id);
-    }else drawLabels.add(scene.focus);
-    if(query)for(const id of searchMatches)drawLabels.add(id);
-    const now=performance.now();
-    fading=fading.filter(n=>n.until>now);
+    fading=fading.filter(x=>x.until>now);
     for(const ghost of fading){
       const x=cx+ghost.point.x*scale,y=cy+ghost.point.y*scale;
       if(x<0||x>w||y<0||y>h)continue;
-      ctx.globalAlpha=Math.max(0,(ghost.until-now)/360)*.36;
-      ctx.beginPath();ctx.arc(x,y,3,0,Math.PI*2);
-      ctx.fillStyle=color(ghost.node);ctx.fill();
+      ctx.globalAlpha=(ghost.until-now)/340*.3;
+      ctx.fillStyle=tint(ghost.node);ctx.beginPath();ctx.arc(x,y,2.6,0,Math.PI*2);ctx.fill();
     }
     ctx.globalAlpha=1;
-    const breathe=expanded&&!reduced()?Math.sin(now/850)*.32:0;
-    for(const node of scene.nodes){
-      const p=coords.get(node.id);if(!p)continue;
+    for(const n of scene.nodes){
+      const p=coords.get(n.id);if(!p)continue;
       const x=cx+p.x*scale,y=cy+p.y*scale;
-      if(x<-32||x>w+32||y<-32||y>h+32)continue;
-      const chosen=node.id===active,match=searchMatches.has(node.id);
-      const faded=active&&!neighborhood.has(node.id)||!!query&&!match;
-      const radiusBase=node.id===scene.focus?6.2:
-        node.kind==="folder"?5.2:node.kind==="file"?
-        2.9+Math.min(2,Math.log10(1+Math.max(0,node.size))/5):4;
-      const radius=Math.max(2.1,Math.min(12,radiusBase*Math.sqrt(Math.max(.55,scale))+
-        (chosen?breathe:0)));
-      const entered=appearing.get(node.id);
-      const entrance=entered===undefined||reduced()?1:Math.min(1,(now-entered)/390);
-      ctx.globalAlpha=(faded?.14:1)*entrance;
-      if(chosen||match){
-        ctx.beginPath();ctx.arc(x,y,radius+6,0,Math.PI*2);
-        ctx.fillStyle="rgba(232,180,103,.10)";ctx.fill();
-        ctx.beginPath();ctx.arc(x,y,radius+3,0,Math.PI*2);
-        ctx.strokeStyle="rgba(249,201,125,.79)";ctx.lineWidth=1;ctx.stroke();
+      if(x<-20||x>w+20||y<-20||y>h+20)continue;
+      const isActive=n.id===active;
+      const dim=!!active&&!neighbor.has(n.id);
+      const entered=appearing.get(n.id);
+      const shown=entered===undefined||reduced()?1:clamp((now-entered)/350,0,1);
+      const importance=n.id===scene.focus?6.3:
+        n.kind==="folder"?5.1:n.kind==="file"?
+        2.8+Math.min(1.6,Math.log10(1+Math.max(0,n.size))*.18):4.3;
+      const radius=clamp(importance*Math.sqrt(Math.max(.46,scale)),2.1,12);
+      if(isActive){
+        const halo=ctx.createRadialGradient(x,y,radius,x,y,radius+22);
+        const hex=tint(n);
+        halo.addColorStop(0,"rgba(235,188,116,.29)");
+        halo.addColorStop(.25,"rgba(230,177,93,.15)");
+        halo.addColorStop(1,"rgba(230,177,93,0)");
+        ctx.fillStyle=halo;ctx.beginPath();ctx.arc(x,y,radius+22,0,Math.PI*2);ctx.fill();
+        ctx.strokeStyle=hex;ctx.globalAlpha=.75;
+        ctx.lineWidth=.8;ctx.beginPath();ctx.arc(x,y,radius+4,0,Math.PI*2);ctx.stroke();
       }
-      ctx.beginPath();ctx.arc(x,y,radius,0,Math.PI*2);
-      ctx.fillStyle=color(node);
-      if(chosen){ctx.shadowColor=color(node);ctx.shadowBlur=expanded?16:8;}
-      ctx.fill();ctx.shadowBlur=0;
-      ctx.globalAlpha=1;
-      if(drawLabels.has(node.id)&&(!faded||chosen)&&entrance>.62){
-        const text=node.name.length>28?node.name.slice(0,27)+"…":node.name;
-        ctx.font=(chosen?"600 ":"400 ")+(expanded?12:10)+"px system-ui,sans-serif";
-        const tw=ctx.measureText(text).width;
-        const tx=Math.min(w-tw-7,Math.max(5,x+radius+5));
-        const ty=Math.max(14,Math.min(h-6,y-5));
-        ctx.fillStyle=chosen?"#f8dbac":"#bfc5d0";ctx.fillText(text,tx,ty);
+      ctx.globalAlpha=(dim?.19:1)*shown;
+      ctx.fillStyle=tint(n);ctx.beginPath();ctx.arc(x,y,radius,0,Math.PI*2);
+      if(isActive||n.id===scene.focus){
+        ctx.shadowBlur=isActive?16:7;ctx.shadowColor=tint(n);
       }
+      ctx.fill();ctx.shadowBlur=0;ctx.globalAlpha=1;
+    }
+    // Names are not permanent UI. Only the actively examined node gets
+    // a legible on-canvas label, with a bounded dark vignette behind it.
+    const chosen=scene.nodes.find(n=>n.id===active);
+    const point=chosen&&coords.get(chosen.id);
+    if(chosen&&point){
+      const x=cx+point.x*scale,y=cy+point.y*scale;
+      const text=chosen.name.length>(expanded?70:31)?
+        chosen.name.slice(0,expanded?69:30)+"…":chosen.name;
+      ctx.font=(expanded?"500 13px":"500 11px")+" system-ui,sans-serif";
+      const tw=ctx.measureText(text).width,pad=7;
+      const px=clamp(x+12,4,Math.max(4,w-tw-pad*2-4));
+      const py=clamp(y-25,5,Math.max(5,h-26));
+      ctx.fillStyle="rgba(8,10,16,.80)";
+      ctx.beginPath();ctx.roundRect(px,py,tw+pad*2,23,7);ctx.fill();
+      ctx.fillStyle="#e9dcc8";ctx.fillText(text,px+pad,py+15);
+    }
+    if(analysisBusy){
+      const x=w-16,y=16;
+      ctx.beginPath();ctx.arc(x,y,5,Math.PI*.15,Math.PI*1.55);
+      ctx.lineWidth=1.6;ctx.strokeStyle="rgba(226,177,100,.8)";ctx.stroke();
     }
     canvas.dataset.selected=selected||"";
     canvas.dataset.paintedNodes=String(scene.nodes.length);
-    tooltip.hidden=!hovered;
-    if(hovered){
-      const n=scene.nodes.find(n=>n.id===hovered);
-      if(n){
-        const rec=n.fileId&&semantic?.records[n.fileId];
-        const related=scene.links.filter(e=>e.source===n.id||e.target===n.id);
-        const evidence=related.find(e=>e.evidence)?.evidence;
-        tooltip.textContent=n.name+" · "+(n.kind==="file"?human(n.size):n.kind)+
-          (evidence?" · "+evidence:"")+
-          (rec?.preview?" · "+rec.preview.slice(0,95):"");
-      }
-    }
   }
   function schedule(){
     if(raf)cancelAnimationFrame(raf);
-    const budget=reduced()?1:Math.min(120,scene.nodes.length>140?50:100);
+    const budget=reduced()?1:scene.nodes.length>140?56:94;
     const step=()=>{
       raf=0;if(!root.isConnected)return;
-      if(frameNumber<budget){
-        const energy=graphForceStep(scene.nodes,scene.links,coords,Math.max(.28,1-frameNumber/budget*.65));
-        frameNumber++;draw();
-        const now=performance.now();
-        const transitioning=!reduced()&&([...appearing.values()].some(t=>now-t<400)||
-          fading.some(f=>f.until>now));
-        if((energy>.035||transitioning)&&frameNumber<budget){
-          raf=requestAnimationFrame(step);return;
-        }
-      }
-      draw();
+      const kinetic=physicsFrame<budget?
+        graphForceStep(scene.nodes,scene.links,coords,Math.max(.27,1-physicsFrame/budget*.65)):0;
+      physicsFrame++;draw();
+      const now=performance.now();
+      const transitions=!reduced()&&([...appearing.values()].some(t=>now-t<360)||
+        fading.some(t=>t.until>now));
+      if(physicsFrame<budget&&(kinetic>.04||transitions))
+        raf=requestAnimationFrame(step);
     };
     raf=requestAnimationFrame(step);
   }
-  // Mouse and touch: drag nodes without dragging files or mutating their position on disk.
-  canvas.addEventListener("pointerdown",event=>{
-    if(event.button!==0)return;
-    const hit=nodeAt(event.clientX,event.clientY);
-    dragTarget=hit?.id||null;dragStarted=true;moveTarget=false;
-    startX=event.clientX;startY=event.clientY;startPanX=panX;startPanY=panY;
+  function repaint(){if(repaintQueued)return;repaintQueued=true;
+    requestAnimationFrame(()=>{repaintQueued=false;draw();});}
+  // UI is exclusively direct-manipulation. Never create permanent controls.
+  canvas.addEventListener("pointerdown",e=>{
+    if(e.button!==0)return;
+    dismissMenu();
+    pointerDown=true;pointMoved=false;
+    const hit=pointerHit(e.clientX,e.clientY);
+    dragId=hit?.id||null;
+    lastX=e.clientX;lastY=e.clientY;
+    prevMoveX=e.clientX;prevMoveY=e.clientY;
+    originX=panX;originY=panY;
     if(raf)cancelAnimationFrame(raf);
-    canvas.setPointerCapture(event.pointerId);
+    canvas.setPointerCapture(e.pointerId);
   });
-  canvas.addEventListener("pointermove",event=>{
-    const hit=nodeAt(event.clientX,event.clientY);
-    if(!dragStarted){
+  canvas.addEventListener("pointermove",e=>{
+    if(!pointerDown){
+      const hit=pointerHit(e.clientX,e.clientY);
       const next=hit?.id||null;
-      if(hovered!==next){hovered=next;status.textContent=hit?.name||"Связи файлов и папок";draw();}
+      if(next!==hovered){hovered=next;canvas.style.cursor=next?"pointer":"grab";repaint();}
       return;
     }
-    const dx=event.clientX-startX,dy=event.clientY-startY;
-    if(Math.hypot(dx,dy)>4)moveTarget=true;
-    if(!moveTarget)return;
-    if(dragTarget){
-      const p=coords.get(dragTarget);
+    const dx=e.clientX-lastX,dy=e.clientY-lastY;
+    if(Math.hypot(dx,dy)>5)pointMoved=true;
+    if(!pointMoved)return;
+    if(dragId){
+      const p=coords.get(dragId);
       if(p){
-        const k=Math.max(.02,projection().scale);
-        p.x+=event.movementX/k;p.y+=event.movementY/k;p.vx=0;p.vy=0;p.pinned=true;
+        const k=Math.max(.02,viewport().scale);
+        p.x=clamp(p.x+(e.clientX-prevMoveX)/k,-920,920);
+        p.y=clamp(p.y+(e.clientY-prevMoveY)/k,-920,920);
+        p.vx=0;p.vy=0;p.pinned=true;
       }
     }else{
-      panX=Math.max(-1800,Math.min(1800,startPanX+dx));
-      panY=Math.max(-1800,Math.min(1800,startPanY+dy));
+      panX=clamp(originX+dx,-1800,1800);
+      panY=clamp(originY+dy,-1800,1800);
     }
-    draw();
+    prevMoveX=e.clientX;prevMoveY=e.clientY;
+    repaint();
   });
-  canvas.addEventListener("pointerup",event=>{
-    if(!dragStarted)return;
-    const target=dragTarget;const moved=moveTarget;
-    dragStarted=false;moveTarget=false;dragTarget=null;
-    if(moved){saveViewport();return;}
-    const node=target?scene.nodes.find(n=>n.id===target):undefined;
-    if(node){moveTo(node);navigate(node);}
-    else {selected=null;hovered=null;draw();}
+  canvas.addEventListener("pointerup",e=>{
+    if(!pointerDown)return;
+    const hit=dragId,wasMoved=pointMoved;
+    pointerDown=false;dragId=null;pointMoved=false;
+    if(wasMoved){persist();return;}
+    if(hit){
+      const n=scene.nodes.find(n=>n.id===hit);
+      if(n){focus(n);activate(n);}
+    }else{
+      selected=null;hovered=null;draw();
+      if(e.pointerType==="touch"){
+        const now=Date.now();
+        if(now-lastTap<370)setExpanded(!expanded);
+        lastTap=now;
+      }
+    }
   });
-  canvas.addEventListener("pointercancel",()=>{dragStarted=false;dragTarget=null;moveTarget=false;});
-  canvas.addEventListener("pointerleave",()=>{if(!dragStarted){hovered=null;draw();}});
-  frame.addEventListener("wheel",e=>{e.preventDefault();changeZoom(e.deltaY>0?.89:1.12);},{passive:false});
+  canvas.addEventListener("pointercancel",()=>{
+    pointerDown=false;dragId=null;pointMoved=false;
+  });
+  canvas.addEventListener("pointerleave",()=>{
+    if(!pointerDown){hovered=null;draw();}
+  });
+  canvas.addEventListener("dblclick",e=>{
+    if(!pointerHit(e.clientX,e.clientY))setExpanded(!expanded);
+  });
+  canvas.addEventListener("contextmenu",openMenu);
+  window.addEventListener("pointerdown",e=>{
+    if(menu&&!menu.contains(e.target as Node)&&e.target!==canvas)dismissMenu();
+  });
+  frame.addEventListener("wheel",e=>{
+    e.preventDefault();changeZoom(e.deltaY>0?.88:1.14);
+  },{passive:false});
   let pinch=0;
   frame.addEventListener("touchmove",e=>{
     if(e.touches.length!==2){pinch=0;return;}
     const a=e.touches[0]!,b=e.touches[1]!;
-    const distance=Math.hypot(a.clientX-b.clientX,a.clientY-b.clientY);
-    if(pinch>0&&distance)changeZoom(distance/pinch);
-    pinch=distance;e.preventDefault();
+    const d=Math.hypot(a.clientX-b.clientX,a.clientY-b.clientY);
+    if(pinch>0&&d)changeZoom(d/pinch);
+    pinch=d;e.preventDefault();
   },{passive:false});
   frame.addEventListener("touchend",()=>{pinch=0;});
-  canvas.addEventListener("keydown",event=>{
-    if(event.key==="Escape"&&expanded){setExpanded(false);event.preventDefault();}
-    else if(event.key==="+"||event.key==="="){changeZoom(1.16);event.preventDefault();}
-    else if(event.key==="-"){changeZoom(.86);event.preventDefault();}
-    else if(event.key==="0"){panX=0;panY=0;zoomLevel=1;draw();event.preventDefault();}
-    else if(event.key==="Backspace"){if(current)actions.openFolder(parentOf(current));event.preventDefault();}
-    else if(event.key==="Enter"&&selected){
-      const n=scene.nodes.find(n=>n.id===selected);if(n)navigate(n);event.preventDefault();
-    }else if(["ArrowRight","ArrowDown","ArrowLeft","ArrowUp"].includes(event.key)){
-      const here=scene.nodes.findIndex(n=>n.id===selected);
-      const next=(here+(event.key==="ArrowRight"||event.key==="ArrowDown"?1:-1)+scene.nodes.length)%Math.max(1,scene.nodes.length);
-      if(scene.nodes[next])moveTo(scene.nodes[next]!);event.preventDefault();
+  canvas.addEventListener("keydown",e=>{
+    if(e.key==="Escape"){
+      if(menu)dismissMenu();else if(expanded)setExpanded(false);
+      e.preventDefault();return;
+    }
+    if(e.key==="+"||e.key==="="){changeZoom(1.16);e.preventDefault();}
+    else if(e.key==="-"){changeZoom(.86);e.preventDefault();}
+    else if(e.key==="0"){zoom=1;panX=0;panY=0;persist();draw();e.preventDefault();}
+    else if(e.key==="Enter"&&selected){
+      const n=scene.nodes.find(n=>n.id===selected);
+      if(n)activate(n);e.preventDefault();
+    }else if(e.key===" "){
+      setExpanded(!expanded);e.preventDefault();
+    }else if(e.key==="Backspace"||e.key==="ArrowUp"&&e.altKey){
+      if(current)actions.openFolder(parentOf(current));e.preventDefault();
+    }else if(e.key.toLowerCase()==="a"){
+      void analyzeDocuments();e.preventDefault();
+    }else if(e.key.toLowerCase()==="m"){
+      mode=mode==="all"?"meaning":mode==="meaning"?"versions":mode==="versions"?"entities":"all";
+      rebuild();e.preventDefault();
+    }else if(["1","2","3"].includes(e.key)){depth=Number(e.key);rebuild();e.preventDefault();}
+    else if(["ArrowRight","ArrowDown","ArrowLeft","ArrowUp"].includes(e.key)){
+      const i=scene.nodes.findIndex(n=>n.id===selected);
+      const shift=e.key==="ArrowRight"||e.key==="ArrowDown"?1:-1;
+      const j=(i+shift+scene.nodes.length)%Math.max(1,scene.nodes.length);
+      if(scene.nodes[j])focus(scene.nodes[j]!);
+      e.preventDefault();
     }
   });
-  document.addEventListener("keydown",event=>{
-    if(event.key==="Escape"&&expanded&&root.isConnected){setExpanded(false);}
+  document.addEventListener("keydown",e=>{
+    if(e.key==="Escape"&&expanded&&root.isConnected)setExpanded(false);
   });
-  // A single ResizeObserver is shared by the compact and expanded form.
   if(typeof ResizeObserver!=="undefined"){
-    resizeObserver=new ResizeObserver(()=>{if(root.isConnected)draw();});
-    resizeObserver.observe(frame);
+    const observer=new ResizeObserver(()=>{if(root.isConnected)repaint();});
+    observer.observe(frame);
   }
   return {root,highlightFile,update(newFiles,newFolders,folder){
-    // Invalidate the in-memory text analysis on any catalogue refresh; no
-    // stale evidence can survive file revisions, renames or deletions.
-    if(files!==newFiles){semantic=null;analyzeToken++;}
+    if(files!==newFiles){
+      analysisGeneration++;semantic=null;analysisBusy=false;
+    }
     files=newFiles;folders=newFolders;
     if(folder!==current){
-      current=folder;hovered=null;selected=null;panX=0;panY=0;
-      lastFocusFolder=folder;
+      current=folder;selected=null;hovered=null;panX=0;panY=0;
     }
     rebuild();
   }};
