@@ -59,10 +59,16 @@ export function graphFromCatalog(
   };
   add({id:focusId,kind:"folder",name:last(folder),folder,size:0,depth:0});
   if(folder)add({id:"folder:"+parent,kind:"folder",name:last(parent),folder:parent,size:0,depth:-1});
+  // Reserve graph capacity for documents, even in a root with hundreds of folders.
+  // Without this, folder nodes consume the whole limit before files appear.
+  let shownFolderCandidates=0;
+  const folderBudget=Math.max(3,Math.floor(limit*.55));
   for(const path of folderCandidates){
+    if(shownFolderCandidates>=folderBudget)break;
     const relative=folder?path.slice(folder.length+1):path;
     const d=relative.split("/").length;
     add({id:"folder:"+path,kind:"folder",name:last(path),folder:path,size:0,depth:d});
+    shownFolderCandidates++;
   }
   const depthOf=(path:string)=>folder?
     (path===folder?0:path.slice(folder.length+1).split("/").length):
