@@ -15,7 +15,7 @@ const commands=()=>{
   opts.push({exe:"python3",prefix:[]},{exe:"python",prefix:[]});
   return workingCommand?[workingCommand,...opts.filter(x=>x.exe!==workingCommand.exe)]:opts;
 };
-const allowed=new Set(["view","sync","path","impact","timeline","diagnose"]);
+const allowed=new Set(["view","sync","path","impact","timeline","diagnose","contradictions"]);
 export async function runPythonGraph({root,dbPath,action="view",params={}}){
   if(!allowed.has(action))return {ok:false,error:"Unsupported graph operation"};
   const script=join(root,"python","tsukimera_graph.py");
