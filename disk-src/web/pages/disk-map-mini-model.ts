@@ -6,7 +6,7 @@
 import type {DiskFile} from "../api";
 import {graphFromFiles,type DiskGraph,type MapNode,type MapEdge} from "./disk-map-layout";
 
-export type MiniCluster=MapNode&{kind:"cluster";hiddenFiles:number;hiddenFolders:number};
+export type MiniCluster=Omit<MapNode,"kind">&{kind:"cluster";hiddenFiles:number;hiddenFolders:number};
 export type MiniNode=MapNode|MiniCluster;
 export type MiniGraph=Omit<DiskGraph,"nodes">&{nodes:MiniNode[];focus:string;detail:boolean};
 export type MiniView={zoom:number;panX:number;panY:number;focus:string};
