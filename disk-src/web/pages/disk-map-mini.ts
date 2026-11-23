@@ -16,6 +16,10 @@ import {normalizeMiniView,MINI_VIEW_KEY,clampView} from "./disk-map-mini-model";
 import {SPATIAL_DENSITY_KEY} from "./disk-map-spatial";
 import {graphRoute,graphNeighbors,graphEdgeAt,graphEdgeExplanation,type GraphRoute}
   from "./disk-map-explore";
+import {graphArtLayout,artCommunityColor,artRgb,artDepth,artImportance,
+  artBundleEdges,artCurve,artCurvePoint,artCurveHit,artClouds,artClusterStep,
+  artEase,artLerp,artInertia,type ArtLayout,type ArtBundle}
+  from "./disk-map-art";
 import {graphScreen,graphBounds,graphCamera,anchoredZoom,graphMotionBudget,graphLerp,
   type GraphBounds,type GraphScreen} from "./disk-map-responsive";
 import {writePreference} from "../preferences";
@@ -67,6 +71,9 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
   let hoverEdge:GraphLink|null=null,hoverX=0,hoverY=0;
   let semantic:SemanticIndex|null=null,analysisGeneration=0;
   let coords=new Map<string,GraphPoint>(),appearing=new Map<string,number>();
+  let art:ArtLayout=graphArtLayout(scene),renderBundles:ArtBundle[]=[];
+  let hoverBundle:ArtBundle|null=null,routePulseUntil=0;
+  let cameraRaf=0,inertiaRaf=0,dragVelocityX=0,dragVelocityY=0;
   let bounds:GraphBounds=graphBounds([]),screen:GraphScreen=graphScreen(320,280);
   let lastScreenKey="",highlightTimer=0,pointerInsideGraph=false;
   let fading:Array<{point:GraphPoint;node:GraphNode;until:number}>=[];
@@ -111,7 +118,9 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
     return nearest;
   }
   function tint(n:GraphNode):string{
-    return shades[n.kind==="file"?n.fileType||"other":n.kind]||shades.other;
+    return n.kind==="file"||n.kind==="folder"||n.kind==="revision"?
+      artCommunityColor(art,n.id):
+      shades[n.kind]||artCommunityColor(art,n.id);
   }
   function fileHighlight(node:GraphNode|null){
     const page=homePage||root.closest<HTMLElement>(".disk-page");
@@ -127,6 +136,28 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
     selected=node?.id||null;hovered=selected;
     fileHighlight(node||null);draw();
   }
+  function cancelCamera(){
+    if(cameraRaf)cancelAnimationFrame(cameraRaf);cameraRaf=0;
+    if(inertiaRaf)cancelAnimationFrame(inertiaRaf);inertiaRaf=0;
+  }
+  function panTo(targetX:number,targetY:number,duration=280){
+    if(cameraRaf)cancelAnimationFrame(cameraRaf);
+    const toX=clamp(targetX,-1800,1800),toY=clamp(targetY,-1800,1800);
+    if(reduced()||!root.isConnected||duration<=0){
+      panX=toX;panY=toY;persist();draw();return;
+    }
+    const start=performance.now(),fromX=panX,fromY=panY;
+    function step(now:number){
+      cameraRaf=0;
+      if(!root.isConnected||pointerDown)return;
+      const t=artEase((now-start)/duration);
+      panX=artLerp(fromX,toX,t);panY=artLerp(fromY,toY,t);
+      draw();
+      if(t<.999)cameraRaf=requestAnimationFrame(step);
+      else {panX=toX;panY=toY;persist();draw();}
+    }
+    cameraRaf=requestAnimationFrame(step);
+  }
   function centerNode(id:string,changeScale=true){
     const p=coords.get(id);if(!p)return;
     if(changeScale&&zoom<1.35){
@@ -136,9 +167,19 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
     }
     const point=coords.get(id);if(!point)return;
     const v=viewport();
-    panX=clamp(panX+v.w/2-(v.cx+point.x*v.scale),-1800,1800);
-    panY=clamp(panY+v.h/2-(v.cy+point.y*v.scale),-1800,1800);
-    persist();draw();
+    // Folder selection magnetises toward its actual community centroid.
+    const n=scene.nodes.find(n=>n.id===id);
+    const community=n?.kind==="folder"?
+      art.communities.find(c=>c.id===art.membership.get(id)):null;
+    const group=community?.members.map(key=>coords.get(key)).filter(
+      (p):p is GraphPoint=>!!p);
+    const target=group?.length?{
+      x:group.reduce((sum,p)=>sum+p.x,0)/group.length,
+      y:group.reduce((sum,p)=>sum+p.y,0)/group.length
+    }:point;
+    const targetX=panX+v.w/2-(v.cx+target.x*v.scale);
+    const targetY=panY+v.h/2-(v.cy+target.y*v.scale);
+    panTo(targetX,targetY);
   }
   function focusOnNode(id:string|null){
     if(id&&!scene.nodes.some(n=>n.id===id))return;
@@ -158,7 +199,10 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
     routeEnd=id;
     route=graphRoute(scene,routeStart,id);
     selected=id;hovered=id;
-    if(route)centerNode(id,false);else draw();
+    if(route){
+      routePulseUntil=reduced()?0:performance.now()+950;
+      centerNode(id,false);schedule();
+    }else draw();
     canvas.dataset.route=route?String(route.links.length):"unavailable";
   }
   function activate(n:GraphNode){
@@ -174,6 +218,7 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
     selected=n.id;hovered=n.id;fileHighlight(n);draw();
   }
   function changeZoom(factor:number,atX?:number,atY?:number){
+    cancelCamera();
     const previous=viewport();
     const next=clampView(zoom*factor,.65,4);
     if(Math.abs(next-zoom)<.00001)return;
@@ -202,6 +247,7 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
   }
   function setExpanded(value:boolean){
     if(value===expanded)return;
+    cancelCamera();
     dismissMenu();expanded=value;
     if(value){
       anchor=root.parentNode;nextSibling=root.nextSibling;
@@ -300,6 +346,7 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
       limit,perFolder:screen.perFolder,detailLevel:detail,
       includeTags,includeDuplicates,semantic,viewMode:mode,global:globalGraph
     });
+    art=graphArtLayout(scene);
     const currentTime=performance.now();
     const next=new Map<string,GraphPoint>(),entering=new Map<string,number>();
     const currentIds=new Set(scene.nodes.map(n=>n.id));
@@ -324,7 +371,7 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
     }else if(routeStart&&!next.has(routeStart)){
       routeStart=null;routeEnd=null;route=null;canvas.dataset.route="";
     }
-    hoverEdge=null;
+    hoverEdge=null;hoverBundle=null;renderBundles=[];
     // Freeze camera extents for each physics burst. Continual re-fitting
     // during every force tick would produce a nauseating zoom wobble.
     bounds=graphBounds(coords.values());
@@ -333,6 +380,7 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
     canvas.dataset.capacity=String(limit);
     canvas.dataset.aspect=screen.ultrawide?"ultrawide":"standard";
     canvas.dataset.layer="graph";
+    canvas.dataset.communities=String(art.communities.length);
     canvas.dataset.nodes=String(scene.nodes.length);
     canvas.dataset.links=String(scene.links.length);
     canvas.dataset.focus=current;
@@ -349,29 +397,56 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
     const ctx=canvas.getContext("2d");if(!ctx)return;
     ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,w,h);
     const now=performance.now();
-    // A diffuse nebula makes real clusters legible without hard outlines.
-    const groups=new Map<string,GraphPoint[]>();
-    const folderCounts=new Map(scene.nodes.filter(n=>n.kind==="folder")
-      .map(n=>[n.folder,n.count||0]));
-    for(const n of scene.nodes){
-      if(n.kind!=="file")continue;
-      const p=coords.get(n.id);if(!p)continue;
-      const a=groups.get(n.folder)||[];a.push(p);groups.set(n.folder,a);
+    // Three passes: deep black space, grounded colour-cloud communities,
+    // then factual curves and high-DPI luminous nodes. No DOM overlays.
+    ctx.fillStyle="#07090e";ctx.fillRect(0,0,w,h);
+    const camera={cx,cy,scale};
+    const clouds=artClouds(art,coords,camera,11);
+    for(const cloud of clouds){
+      if(cloud.x+cloud.rx<0||cloud.x-cloud.rx>w||
+        cloud.y+cloud.ry<0||cloud.y-cloud.ry>h)continue;
+      const rgb=artRgb(cloud.color);
+      ctx.save();ctx.translate(cloud.x,cloud.y);
+      ctx.scale(Math.max(1,cloud.rx),Math.max(1,cloud.ry));
+      const shape=ctx.createRadialGradient(0,0,.025,0,0,1);
+      shape.addColorStop(0,"rgba("+rgb+",.16)");
+      shape.addColorStop(.42,"rgba("+rgb+",.078)");
+      shape.addColorStop(1,"rgba("+rgb+",0)");
+      ctx.fillStyle=shape;ctx.beginPath();
+      ctx.ellipse(0,0,1,.91,cloud.layer*.37,0,Math.PI*2);ctx.fill();
+      // Offset lobe softens the geometry without hard or invented boundaries.
+      ctx.translate(cloud.layer*.16-.16,.12);
+      const outer=ctx.createRadialGradient(0,0,.03,0,0,.72);
+      outer.addColorStop(0,"rgba("+rgb+",.052)");
+      outer.addColorStop(1,"rgba("+rgb+",0)");
+      ctx.fillStyle=outer;ctx.beginPath();
+      ctx.ellipse(0,0,.72,.62,cloud.layer*.27,0,Math.PI*2);ctx.fill();
+      ctx.restore();
     }
-    let cloud=0;
-    for(const positions of groups.values()){
-      if(positions.length<3||cloud++>8)continue;
-      const x=cx+positions.reduce((sum,p)=>sum+p.x,0)/positions.length*scale;
-      const y=cy+positions.reduce((sum,p)=>sum+p.y,0)/positions.length*scale;
-      const descendants=folderCounts.get([...groups.keys()].find(k=>groups.get(k)===positions)||"")||positions.length;
-      const radius=clamp(positions.reduce((max,p)=>Math.max(max,Math.hypot(
-        cx+p.x*scale-x,cy+p.y*scale-y)),0)+
-        16+Math.sqrt(descendants)*2.5,28,Math.min(w,h)*.48);
-      const grad=ctx.createRadialGradient(x,y,2,x,y,radius);
-      grad.addColorStop(0,"rgba(219,166,83,.11)");
-      grad.addColorStop(.44,"rgba(154,112,68,.045)");
-      grad.addColorStop(1,"rgba(154,112,68,0)");
-      ctx.fillStyle=grad;ctx.beginPath();ctx.arc(x,y,radius,0,Math.PI*2);ctx.fill();
+    // Existing folder nesting becomes a second, subtler visual level only
+    // when zoomed in. Names and actual file parentage are never altered.
+    if(zoom>=1.2){
+      const subgroups=new Map<string,GraphPoint[]>();
+      for(const n of scene.nodes){
+        if(n.kind!=="file"||!n.folder.includes("/"))continue;
+        const p=coords.get(n.id);if(!p)continue;
+        const arr=subgroups.get(n.folder)||[];arr.push(p);subgroups.set(n.folder,arr);
+      }
+      let count=0;
+      for(const [folder,points] of subgroups){
+        if(points.length<3||count++>=16)continue;
+        const x=cx+points.reduce((sum,p)=>sum+p.x,0)/points.length*scale;
+        const y=cy+points.reduce((sum,p)=>sum+p.y,0)/points.length*scale;
+        const radius=clamp((27+Math.sqrt(points.length)*9)*scale,18,105);
+        if(x+radius<0||x-radius>w||y+radius<0||y-radius>h)continue;
+        const node=scene.nodes.find(n=>n.kind==="file"&&n.folder===folder);
+        const rgb=artRgb(node?artCommunityColor(art,node.id):"#b9a1e7");
+        const grad=ctx.createRadialGradient(x,y,0,x,y,radius);
+        grad.addColorStop(0,"rgba("+rgb+",.10)");
+        grad.addColorStop(1,"rgba("+rgb+",0)");
+        ctx.fillStyle=grad;ctx.beginPath();
+        ctx.ellipse(x,y,radius,radius*.75,0,0,Math.PI*2);ctx.fill();
+      }
     }
     const active=hovered||selected;
     const routeNodes=route?new Set(route.nodes):null;
@@ -391,38 +466,64 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
         rootPath.add(up.source+"|"+up.target);child=up.source;
       }
     }
-    // Connections are factual; luminous routes reveal hierarchy/semantic ties.
-    for(const e of scene.links){
-      const p=coords.get(e.source),q=coords.get(e.target);
-      if(!p||!q)continue;
-      const sx=cx+p.x*scale,sy=cy+p.y*scale;
-      const tx=cx+q.x*scale,ty=cy+q.y*scale;
-      if((sx<0&&tx<0)||(sx>w&&tx>w)||(sy<0&&ty<0)||(sy>h&&ty>h))continue;
+    // Visual bundles select real representative source-target pairs. Route,
+    // hover and root-path evidence always remain individually visible.
+    const forced=new Set(scene.links.filter(e=>
+      routeEdges?.has(e)||e===hoverEdge||rootPath.has(e.source+"|"+e.target)||
+      !!active&&(e.source===active||e.target===active)));
+    renderBundles=artBundleEdges(scene.links,art,zoom,forced);
+    const nodeColor=new Map(scene.nodes.map(n=>[n.id,tint(n)]));
+    for(const bundle of renderBundles){
+      const e=bundle.edge,curve=artCurve(e,coords,camera,art);
+      if(!curve)continue;
+      const {x1:sx,y1:sy,x2:tx,y2:ty}=curve;
+      const margin=36;
+      if(Math.max(sx,tx,curve.cx)<-margin||Math.min(sx,tx,curve.cx)>w+margin||
+        Math.max(sy,ty,curve.cy)<-margin||Math.min(sy,ty,curve.cy)>h+margin)continue;
       const onRoute=routeEdges?.has(e)||false;
       const onFocus=focusNodes?focusNodes.has(e.source)&&focusNodes.has(e.target):false;
       const highlighted=onRoute||e===hoverEdge||
         !!active&&(e.source===active||e.target===active);
       const partOfPath=rootPath.has(e.source+"|"+e.target);
-      const fade=routeNodes?!onRoute:
-        focusNodes?!onFocus:
+      const fade=routeNodes?!onRoute:focusNodes?!onFocus:
         !!active&&!highlighted&&!partOfPath;
       const rgb=relationColors[e.kind]||relationColors.contains;
-      const activePulse=highlighted&&!reduced()?
-        .08*Math.sin(now/230):0;
-      const opacity=fade?.048:onRoute?.97:highlighted?.82+activePulse:
-        partOfPath?.69:e.kind==="contains"?.18:.31;
+      const pulse=highlighted&&!reduced()?.06*Math.sin(now/230):0;
+      const opacity=fade?.045:onRoute?.94:highlighted?.72+pulse:
+        partOfPath?.66:e.kind==="contains"?.16:.27;
       const strength=clamp(e.weight??1,.25,1.6);
-      ctx.save();
-      ctx.beginPath();ctx.moveTo(sx,sy);ctx.lineTo(tx,ty);
-      ctx.strokeStyle="rgba("+rgb+","+opacity+")";
-      ctx.lineWidth=((onRoute?2.3:highlighted?1.25:.45)+
-        strength*(highlighted?1.1:.5))*lineScale;
-      if(e.kind==="lexical"||e.kind==="entity")ctx.setLineDash([3.2,5.1]);
+      const thickness=clamp(((onRoute?2.25:highlighted?1.25:.38)+
+        strength*(highlighted?.9:.44)+Math.log2(bundle.count)*.28)*lineScale,.45,4.3);
+      const startRgb=artRgb(nodeColor.get(e.source)||"#a0b7d9");
+      const endRgb=artRgb(nodeColor.get(e.target)||"#e1b879");
+      ctx.save();ctx.beginPath();ctx.moveTo(curve.x1,curve.y1);
+      ctx.quadraticCurveTo(curve.cx,curve.cy,curve.x2,curve.y2);
+      const gradient=ctx.createLinearGradient(sx,sy,tx,ty);
+      gradient.addColorStop(0,"rgba("+startRgb+","+opacity+")");
+      gradient.addColorStop(.5,"rgba("+rgb+","+opacity*.85+")");
+      gradient.addColorStop(1,"rgba("+endRgb+","+opacity+")");
+      ctx.strokeStyle=gradient;ctx.lineWidth=thickness;
+      if(e.kind==="lexical"||e.kind==="entity"||e.kind==="co_mention")
+        ctx.setLineDash([3.2,5.2]);
       if(highlighted||partOfPath){
-        ctx.shadowColor="rgba("+rgb+",.75)";
-        ctx.shadowBlur=expanded?12:6;
+        ctx.shadowColor="rgba("+rgb+",.70)";
+        ctx.shadowBlur=expanded?10:5;
       }
       ctx.stroke();ctx.restore();
+      // A single transient light pulse can follow a selected, evidenced
+      // chain. It never runs indefinitely or implies a new relationship.
+      if(onRoute&&route&&now<routePulseUntil&&!reduced()){
+        const idx=route.links.indexOf(e);
+        const overall=(1-(routePulseUntil-now)/950)*route.links.length;
+        const progress=overall-idx;
+        if(progress>=0&&progress<=1){
+          const p=artCurvePoint(curve,progress);
+          ctx.save();ctx.shadowColor="#f4d6a3";ctx.shadowBlur=12;
+          ctx.fillStyle="#ffe7bf";ctx.beginPath();
+          ctx.arc(p.x,p.y,clamp(2.2*markerScale,1.8,4),0,Math.PI*2);
+          ctx.fill();ctx.restore();
+        }
+      }
     }
     fading=fading.filter(x=>x.until>now);
     for(const ghost of fading){
@@ -441,29 +542,43 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
         focusNodes?!focusNodes.has(n.id):
         !!active&&!neighbor.has(n.id);
       const entered=appearing.get(n.id);
-      const shown=entered===undefined||reduced()?1:clamp((now-entered)/350,0,1);
-      const importance=n.id===scene.focus?6.3:
-        n.kind==="folder"?5.1:n.kind==="file"?
-        2.8+Math.min(1.6,Math.log10(1+Math.max(0,n.size))*.18):4.3;
-      const countFactor=n.kind==="folder"?1+Math.min(.75,Math.log2(1+(n.count||0))/10):1;
-      const radius=clamp(importance*Math.sqrt(Math.max(.46,scale))*
-        markerScale*countFactor,2,16);
-      if(isActive){
-        const halo=ctx.createRadialGradient(x,y,radius,x,y,radius+22);
-        const hex=tint(n);
-        halo.addColorStop(0,"rgba(235,188,116,.29)");
-        halo.addColorStop(.25,"rgba(230,177,93,.15)");
-        halo.addColorStop(1,"rgba(230,177,93,0)");
-        ctx.fillStyle=halo;ctx.beginPath();ctx.arc(x,y,radius+22,0,Math.PI*2);ctx.fill();
-        ctx.strokeStyle=hex;ctx.globalAlpha=.75;
-        ctx.lineWidth=.8;ctx.beginPath();ctx.arc(x,y,radius+4,0,Math.PI*2);ctx.stroke();
+      const shown=entered===undefined||reduced()?1:
+        artEase((now-entered)/390);
+      const base=n.id===scene.focus?6.1:
+        n.kind==="folder"?4.8:n.kind==="file"?
+        2.7+Math.min(1.4,Math.log10(1+Math.max(0,n.size))*.17):4.15;
+      const countFactor=n.kind==="folder"?
+        1+Math.min(.55,Math.log2(1+(n.count||0))/11):1;
+      const radius=clamp(base*Math.sqrt(Math.max(.46,scale))*
+        markerScale*countFactor*artImportance(n,art)*artDepth(n.id,art),2,17);
+      const color=tint(n),rgb=artRgb(color);
+      const lum=artImportance(n,art);
+      if(isActive||n.id===scene.focus||lum>1.23){
+        const reach=radius+(isActive?25:lum>1.45?15:8);
+        const halo=ctx.createRadialGradient(x,y,radius*.22,x,y,reach);
+        halo.addColorStop(0,"rgba("+rgb+","+(isActive?.34:.18)+")");
+        halo.addColorStop(.5,"rgba("+rgb+","+(isActive?.14:.065)+")");
+        halo.addColorStop(1,"rgba("+rgb+",0)");
+        ctx.save();ctx.globalAlpha=(dim?.14:1)*shown;
+        ctx.fillStyle=halo;ctx.beginPath();
+        ctx.arc(x,y,reach,0,Math.PI*2);ctx.fill();
+        if(isActive){
+          ctx.strokeStyle="rgba("+rgb+",.63)";ctx.lineWidth=.75;
+          ctx.beginPath();ctx.arc(x,y,radius+4,0,Math.PI*2);ctx.stroke();
+        }
+        ctx.restore();
       }
-      ctx.globalAlpha=(dim?.19:1)*shown;
-      ctx.fillStyle=tint(n);ctx.beginPath();ctx.arc(x,y,radius,0,Math.PI*2);
+      ctx.save();
+      ctx.globalAlpha=(dim?.16:artDepth(n.id,art)===.90?.78:1)*shown;
+      const orb=ctx.createRadialGradient(x-radius*.3,y-radius*.4,.1,x,y,radius);
+      orb.addColorStop(0,"#fff3df");
+      orb.addColorStop(.25,color);
+      orb.addColorStop(1,"rgba("+rgb+",.61)");
+      ctx.fillStyle=orb;ctx.beginPath();ctx.arc(x,y,radius,0,Math.PI*2);
       if(isActive||n.id===scene.focus||routeNodes?.has(n.id)){
-        ctx.shadowBlur=isActive?16:7;ctx.shadowColor=tint(n);
+        ctx.shadowBlur=isActive?15:7;ctx.shadowColor=color;
       }
-      ctx.fill();ctx.shadowBlur=0;ctx.globalAlpha=1;
+      ctx.fill();ctx.restore();
     }
     // Names are not permanent UI. Only the actively examined node gets
     // a legible on-canvas label, with a bounded dark vignette behind it.
@@ -499,7 +614,9 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
     // Evidence appears ONLY while hovering the actual line. The explanation
     // always says what was observed, never infers personal acquaintance.
     if(hoverEdge&&!hovered){
-      const raw=graphEdgeExplanation(hoverEdge,scene.nodes);
+      const raw=graphEdgeExplanation(hoverEdge,scene.nodes)+
+        (hoverBundle&&hoverBundle.count>1?
+          " · "+hoverBundle.count+" реальных линий объединены визуально":"");
       const message=raw.length>170?raw.slice(0,169)+"…":raw;
       const maxWidth=Math.max(110,Math.min(360,w-24));
       ctx.font="500 "+Math.round(Math.max(10,labelSize-1))+"px system-ui,sans-serif";
@@ -539,6 +656,8 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
       raf=0;if(!root.isConnected)return;
       const kinetic=physicsFrame<budget?
         graphForceStep(scene.nodes,scene.links,coords,Math.max(.27,1-physicsFrame/budget*.65)):0;
+      if(physicsFrame<budget&&!reduced())
+        artClusterStep(art,scene.nodes,coords,.14*(1-physicsFrame/budget*.55));
       physicsFrame++;
       // Ease the viewport toward the stable post-physics bounds. This uses
       // real node positions and prevents clipping after the graph grows.
@@ -556,7 +675,8 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
       const now=performance.now();
       const transitions=!reduced()&&([...appearing.values()].some(t=>now-t<360)||
         fading.some(t=>t.until>now));
-      if(physicsFrame<budget&&(kinetic>.04||transitions))
+      if((physicsFrame<budget&&(kinetic>.04||transitions))||
+        (!reduced()&&routePulseUntil>now))
         raf=requestAnimationFrame(step);
     };
     raf=requestAnimationFrame(step);
@@ -578,7 +698,9 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
   canvas.addEventListener("pointerdown",e=>{
     if(e.button!==0)return;
     dismissMenu();
+    cancelCamera();
     pointerDown=true;pointMoved=false;
+    dragVelocityX=0;dragVelocityY=0;
     const hit=pointerHit(e.clientX,e.clientY);
     dragId=hit?.id||null;
     lastX=e.clientX;lastY=e.clientY;
@@ -594,9 +716,14 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
       const rect=canvas.getBoundingClientRect();
       hoverX=e.clientX-rect.left;hoverY=e.clientY-rect.top;
       const camera=viewport();
-      const line=hit?null:graphEdgeAt(scene,coords,camera,hoverX,hoverY,8);
-      if(next!==hovered||line!==hoverEdge){
-        hovered=next;hoverEdge=line;
+      // Hit-test the exact Bézier geometry visible on Canvas (including
+      // factual bundled representative edges); old segment hit is only a
+      // safe fallback before the first render.
+      const bundle=hit?null:artCurveHit(renderBundles,coords,camera,art,hoverX,hoverY,8);
+      const line=hit?null:bundle?.edge||
+        (renderBundles.length?null:graphEdgeAt(scene,coords,camera,hoverX,hoverY,8));
+      if(next!==hovered||line!==hoverEdge||bundle?.count!==hoverBundle?.count){
+        hovered=next;hoverEdge=line;hoverBundle=bundle;
         canvas.style.cursor=next?"pointer":line?"help":"grab";
         repaint();highlightPulse();
       }
@@ -616,6 +743,8 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
     }else{
       panX=clamp(originX+dx,-1800,1800);
       panY=clamp(originY+dy,-1800,1800);
+      dragVelocityX=clamp(e.clientX-prevMoveX,-24,24);
+      dragVelocityY=clamp(e.clientY-prevMoveY,-24,24);
     }
     prevMoveX=e.clientX;prevMoveY=e.clientY;
     repaint();
@@ -624,7 +753,26 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
     if(!pointerDown)return;
     const hit=dragId,wasMoved=pointMoved;
     pointerDown=false;dragId=null;pointMoved=false;
-    if(wasMoved){persist();return;}
+    if(wasMoved){
+      persist();
+      if(!hit&&!reduced()&&Math.hypot(dragVelocityX,dragVelocityY)>1){
+        let vx=dragVelocityX,vy=dragVelocityY,ticks=0;
+        const glide=()=>{
+          inertiaRaf=0;
+          if(pointerDown||!root.isConnected)return;
+          const slowed=artInertia(vx,vy);
+          vx=slowed.vx;vy=slowed.vy;
+          panX=clamp(panX+vx,-1800,1800);
+          panY=clamp(panY+vy,-1800,1800);
+          draw();
+          if(!slowed.done&&++ticks<42)
+            inertiaRaf=requestAnimationFrame(glide);
+          else persist();
+        };
+        inertiaRaf=requestAnimationFrame(glide);
+      }
+      return;
+    }
     if(hit){
       const n=scene.nodes.find(n=>n.id===hit);
       if(n){
@@ -633,7 +781,7 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
         else {focus(n);activate(n);}
       }
     }else{
-      selected=null;hovered=null;hoverEdge=null;draw();
+      selected=null;hovered=null;hoverEdge=null;hoverBundle=null;draw();
       if(e.pointerType==="touch"){
         const now=Date.now();
         if(now-lastTap<370)setExpanded(!expanded);
@@ -646,7 +794,7 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
   });
   canvas.addEventListener("pointerleave",()=>{
     pointerInsideGraph=false;clearTimeout(highlightTimer);
-    if(!pointerDown){hovered=null;hoverEdge=null;draw();}
+    if(!pointerDown){hovered=null;hoverEdge=null;hoverBundle=null;draw();}
   });
   canvas.addEventListener("dblclick",e=>{
     if(!pointerHit(e.clientX,e.clientY))setExpanded(!expanded);
