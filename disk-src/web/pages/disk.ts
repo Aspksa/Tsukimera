@@ -132,6 +132,10 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
   let sort: SortKey = (["new", "old", "name", "size"] as const).find((s) => s === store.get("juunibi.disk.sort")) ?? "new";
   let groupBy: GroupKey = "none", limit = PAGE;
   let query = "", inText = false, contentIds: Set<string> | null = null;
+  type TileInsight={id:string;links:number;state:"ready"|"text-indexed"|"waiting";sha:string};
+  const tileInsights=new Map<string,TileInsight>();
+  let insightBusy=false,insightTimer=0;
+  const insightQueued=new Set<string>();
   let rankedContent=new Map<string,{rank:number;excerpt:string}>();
   let ext = "", minKb: number | null = null, maxKb: number | null = null, after = "";
   const selected = new Set<string>();
@@ -448,6 +452,28 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
     if (madeThumb(f) === "video" && view !== "trash") box.append(el("span", { cls: "dk-play", attrs: { "aria-hidden": "true" } }));
     return box;
   };
+  // A tile receives exact per-file counts from SQLite, not a sampled graph:
+  // visible-node limits can never turn a partial count into a false "zero".
+  const insightBadges=(f:DiskFile):HTMLElement[]=>{
+    if(view==="trash"||(mode!=="tiles"&&mode!=="large"))return [];
+    const insight=tileInsights.get(f.id);
+    const current=insight?.sha===f.sha256?insight:null;
+    const result:HTMLElement[]=[];
+    if(current&&current.links>0)result.push(el("span",{
+      cls:"dk21-link-count",title:current.links+" сохранённых связей с другими документами",
+      textContent:"↗ "+String(current.links),attrs:{"aria-label":
+        current.links+" подтверждённых записей о связях"}}));
+    if(current)result.push(el("span",{
+      cls:"dk21-index-state state-"+current.state,
+      textContent:current.state==="ready"?"●":current.state==="text-indexed"?"◌":"·",
+      title:current.state==="ready"?"Реквизиты обработаны локально":
+        current.state==="text-indexed"?"Текст найден; обработка связей продолжается":
+        "Ожидание текстовой индексации или неподдерживаемый формат",
+      attrs:{"aria-label":current.state==="ready"?"Анализ завершён":
+        current.state==="text-indexed"?"Анализ выполняется":"Анализ ожидает текст"}
+    }));
+    return result;
+  };
   const card = (f: DiskFile) => {
     const c = el("div", { cls: "dk-file", tabIndex: -1, attrs: { "data-id": f.id, "data-file-id": f.id, role: "listitem", "aria-label": f.name } });
     c.style.setProperty("--k", KIND_COLOR[kindOf(f.name)]);
@@ -465,7 +491,8 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
       el("div", { cls: "dk-meta" },
         el("div",{cls:"dk-file-labels"},
           el("span",{cls:"dk-kind-label",textContent:extLabel}),
-          ...(f.revision&&f.revision>1?[el("span",{cls:"dk-revision-label",textContent:"v"+f.revision})]:[])),
+          ...(f.revision&&f.revision>1?[el("span",{cls:"dk-revision-label",textContent:"v"+f.revision})]:[]),
+          ...insightBadges(f)),
         el("strong", { cls: "dk-name", textContent: f.name, title: f.name + (f.tags?.length ? "\nМетки: " + f.tags.join(", ") : "") }),
         el("small", { cls:"dk-file-sub",textContent: meta }),
         ...(inText&&rankedContent.has(f.id)&&mode!=="table"?
@@ -497,6 +524,53 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
     return emptyState("folder", current ? "В папке «" + folderName(current) + "» пусто" : "На Диске пока нет файлов", "Перетащите файлы или целую папку в это окно или нажмите «Загрузить». Можно сразу несколько.",
       el("div", { cls: "dk-empty-actions" }, up, btn("Загрузить папку", chooseFolder, {}), btn("Новая папка", () => void createFolder(uploadFolder()), { icon: "plus" })));
   };
+  const requestTileInsights=(files:DiskFile[])=>{
+    if(view==="trash"||(mode!=="tiles"&&mode!=="large"))return;
+    for(const f of files){
+      if(tileInsights.get(f.id)?.sha!==f.sha256)insightQueued.add(f.id);
+    }
+    if(insightBusy||insightTimer||!insightQueued.size)return;
+    insightTimer=window.setTimeout(()=>{insightTimer=0;void loadTileInsights();},110);
+  };
+  async function loadTileInsights(){
+    if(insightBusy||!page.isConnected||!insightQueued.size)return;
+    const ids=[...insightQueued].slice(0,150);ids.forEach(id=>insightQueued.delete(id));
+    insightBusy=true;
+    try{
+      const result=await api.diskTileInsights(ids);
+      if(result.ok&&page.isConnected){
+        const lookup=new Map(all.map(f=>[f.id,f]));
+        for(const item of result.value.items){
+          const f=lookup.get(item.id);if(!f)continue;
+          tileInsights.set(item.id,{...item,sha:f.sha256});
+        }
+        // Refresh the visible badges without rebuilding the entire file list,
+        // scroll position or selection.
+        for(const node of filesBox.querySelectorAll<HTMLElement>(".dk-file[data-file-id]")){
+          const id=node.dataset.fileId||"",file=lookup.get(id);
+          if(!file)continue;
+          const line=node.querySelector<HTMLElement>(".dk-file-labels");
+          if(!line)continue;
+          line.querySelectorAll(".dk21-link-count,.dk21-index-state").forEach(n=>n.remove());
+          line.append(...insightBadges(file));
+        }
+        if(result.value.items.some(x=>x.state!=="ready")){
+          window.setTimeout(()=>{
+            if(!page.isConnected)return;
+            for(const row of result.value.items)if(row.state!=="ready"){
+              tileInsights.delete(row.id);insightQueued.add(row.id);
+            }
+            if(!insightTimer&&insightQueued.size)
+              insightTimer=window.setTimeout(()=>{insightTimer=0;void loadTileInsights();},150);
+          },8500);
+        }
+      }
+    }finally{
+      insightBusy=false;
+      if(insightQueued.size&&!insightTimer&&page.isConnected)
+        insightTimer=window.setTimeout(()=>{insightTimer=0;void loadTileInsights();},160);
+    }
+  }
   const renderFiles = () => {
     autoMoreObserver?.disconnect();autoMoreObserver=null;
     filesBox.className = "dk-files mode-" + mode+
@@ -555,6 +629,7 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
     }
     filesBox.setAttribute("role", "list");
     filesBox.replaceChildren(...nodes);
+    requestTileInsights(visible);
     // CSS grid spacers are full-span and do not instantiate hidden file cards.
     if(!canWindow&&shown.length>visible.length&&typeof IntersectionObserver==="function"){
       const more=filesBox.querySelector<HTMLElement>(".dk-more-files");
