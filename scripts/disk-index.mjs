@@ -65,6 +65,10 @@ export function saveDiskState(db,state){
       ftsDelete.run(e.id);
       invalidateDiskKnowledge(db,e.id);
       db.prepare("DELETE FROM disk_audit WHERE target=?").run("file:"+e.id);
+    }else if(before.name!==e.name){
+      // The document kind and literal mentions can depend on its filename.
+      // Keep the full-text content cache but rebuild only these extracted facts.
+      invalidateDiskKnowledge(db,e.id);
     }
     changed++;
   }
