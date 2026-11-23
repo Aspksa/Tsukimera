@@ -566,39 +566,66 @@ function tsPost(path,record){
     body:JSON.stringify(record)});
 }
 let cachedCloudModels=[];
-function modelPicker(label,currentField){
-  const box=el("div","set-model-chooser");
+function cloudModelBrowser(primary,fallback){
+  // One model catalogue for both slots: no duplicate search, refresh or API call.
+  const box=el("div","set-model-browser");
+  const heading=el("div","set-model-browser-head");
+  heading.append(el("strong","","Модели Cloud.ru"),el("small","set-note","Поиск по названию или идентификатору"));
   const search=el("input","set-model-search");search.type="search";
-  search.placeholder="Поиск по списку Cloud.ru";search.setAttribute("aria-label",label+": поиск модели");
-  const select=el("select","set-model-list");select.setAttribute("aria-label",label+": выбрать модель");
+  search.placeholder="Поиск модели Cloud.ru";search.setAttribute("aria-label","Поиск модели Cloud.ru");
+  const select=el("select","set-model-list");select.setAttribute("aria-label","Доступные модели Cloud.ru");
   select.disabled=true;
-  const status=el("small","set-note","Получаю список моделей только при наличии ключа.");
-  const update=()=>{
-    const q=search.value.trim().toLowerCase();
-    const models=cachedCloudModels.filter(model=>model.toLowerCase().includes(q));
-    select.replaceChildren();
-    const placeholder=el("option","",models.length?"Выберите модель из "+models.length:"Нет совпадений");
-    placeholder.value="";select.append(placeholder);
-    for(const name of models){const opt=el("option","",name);opt.value=name;select.append(opt);}
-    select.disabled=models.length===0;
-    status.textContent=cachedCloudModels.length+" доступных моделей · "+models.length+" найдено";
-  };
-  search.addEventListener("input",update);
-  select.addEventListener("change",()=>{if(select.value)currentField.input.value=select.value;});
-  const refresh=btn("Обновить список",async()=>{
-    refresh.disabled=true;
+  const status=el("small","set-note","Для списка требуется подключение Cloud.ru.");
+  const toPrimary=btn("Сделать основной",()=>{
+    if(!select.value)return;
+    primary.input.value=select.value;
+    primary.input.dispatchEvent(new Event("input",{bubbles:true}));
+  },"btn");
+  const toFallback=btn("Сделать запасной",()=>{
+    if(!select.value)return;
+    fallback.input.value=select.value;
+    fallback.input.dispatchEvent(new Event("input",{bubbles:true}));
+  },"btn");
+  const refresh=btn("Обновить модели",async()=>{
+    refresh.disabled=true;status.textContent="Загружаю список через GET /v1/models…";
     try{
       const out=await tsApi("/api/cloud/models");
-      cachedCloudModels=out.models||[];update();
-    }catch(error){status.textContent=error.message;}
+      cachedCloudModels=Array.isArray(out.models)?out.models:[];
+      update();
+    }catch(error){status.textContent="Не удалось получить модели: "+error.message;}
     finally{refresh.disabled=false;}
   },"btn");
-  box.append(search,select,refresh,status);
+  const update=()=>{
+    const query=search.value.trim().toLocaleLowerCase();
+    const models=cachedCloudModels.filter(name=>name.toLocaleLowerCase().includes(query));
+    const selected=select.value;
+    select.replaceChildren();
+    const placeholder=el("option","",models.length?"Выберите модель · "+models.length:"Нет моделей");
+    placeholder.value="";select.append(placeholder);
+    for(const name of models){
+      const label=name.split("/").pop()||name;
+      const option=el("option","",label===name?name:label+" · "+name);
+      option.value=name;select.append(option);
+    }
+    if(models.includes(selected))select.value=selected;
+    select.disabled=models.length===0;
+    toPrimary.disabled=!select.value;toFallback.disabled=!select.value;
+    status.textContent=cachedCloudModels.length+" моделей · найдено "+models.length;
+  };
+  search.addEventListener("input",update);
+  select.addEventListener("change",update);
+  const row=el("div","set-model-browser-controls");
+  row.append(search,select,refresh);
+  const actions=el("div","set-controls");actions.append(toPrimary,toFallback);
+  box.append(heading,row,actions,status);
+  const reload=()=>{if(cachedCloudModels.length)update();else void refresh.click();};
+  document.addEventListener("tsukimera:cloud-models",reload,{signal:settingsTabAbort.signal});
   void tsApi("/api/cloud/status").then(info=>{
     if(!box.isConnected)return;
-    if(info.configured)refresh.click();
-    else status.textContent="Добавьте API-ключ в разделе «Подключение».";
-  }).catch(()=>{status.textContent="Сервис Cloud.ru недоступен.";});
+    if(info.configured)void refresh.click();
+    else status.textContent="Добавьте API-ключ Cloud.ru для загрузки моделей.";
+  }).catch(()=>{if(box.isConnected)status.textContent="Локальный Cloud.ru недоступен.";});
+  update();
   return box;
 }
 function cloudConnectionPanel(body){
@@ -617,6 +644,7 @@ function cloudConnectionPanel(body){
       status.textContent="Подключено · Cloud.ru вернул "+result.models.length+
         " моделей · "+new Date(result.checkedAt).toLocaleString("ru-RU");
       status.dataset.state="ok";
+      document.dispatchEvent(new Event("tsukimera:cloud-models"));
     }catch(error){
       status.dataset.state="error";
       status.textContent=error.message+" · модель не вызывалась, расходы на генерацию не создавались.";
@@ -624,6 +652,7 @@ function cloudConnectionPanel(body){
   },"btn primary");
   const disconnect=btn("Отключить",async()=>{
     try{await tsPost("/api/cloud/clear",{});cachedCloudModels=[];
+      document.dispatchEvent(new Event("tsukimera:cloud-models-cleared"));
       status.dataset.state="off";status.textContent="Cloud.ru отключён от этого запуска.";}
     catch(error){status.textContent=error.message;}
   });
@@ -654,8 +683,10 @@ function memoryCenterPanel(body){
   const actions=el("div","set-controls");
   actions.append(btn("Открыть заметки",()=>go("tasks"),"btn primary"),
     btn("Перейти к диагностике",()=>{
+      document.querySelector('[data-settings-group="data"]')?.click();
       const node=document.getElementById("set-data");
-      node?.classList.remove("collapsed");const inner=node?.querySelector(".set-card-body");
+      node?.classList.remove("collapsed");
+      const inner=node?.querySelector(".set-card-body");
       if(inner)inner.hidden=false;
       node?.scrollIntoView({block:"start",behavior:"smooth"});
     }));
@@ -725,14 +756,29 @@ function setupCard(id,body) {
     const fallback=field('Запасная модель',config.model.fallback,'text',120);
     const reasoning=el('input');reasoning.type='checkbox';reasoning.checked=config.model.reasoning;
     reasoning.setAttribute('aria-label','Включить размышления');
-    body.append(primary.wrap,modelPicker("Основная модель",primary),
-      fallback.wrap,modelPicker("Запасная модель",fallback),
-      line('Размышления','Предпочтение для будущего подключения чата.',reasoning));
-    const act=el('div','set-controls');
-    act.append(saveButton(()=>saveSettings({model:{primary:primary.input.value.trim(),
-      fallback:fallback.input.value.trim(),reasoning:reasoning.checked}})));
-    body.append(act);
-    text(body,'Модели пока не вызываются. Изменение полей сохраняет конфигурацию, а не запускает платный запрос.','set-note');
+    body.append(primary.wrap,fallback.wrap,
+      line('Размышления','Предпочтение для будущего подключения чата.',reasoning),
+      cloudModelBrowser(primary,fallback));
+    // Debounced autosave only for syntactically valid model preferences.
+    // This does not trigger inference or paid Cloud.ru model calls.
+    let saveTimer=0,revision=0;
+    const autoSave=()=>{
+      const id=++revision;
+      clearTimeout(saveTimer);
+      saveTimer=setTimeout(async()=>{
+        if(id!==revision)return;
+        const p=primary.input.value.trim(),f=fallback.input.value.trim();
+        if(p&&f&&p===f){
+          setSettingsSaveState('error','Основная и запасная модели должны отличаться');
+          return;
+        }
+        await saveSettings({model:{primary:p,fallback:f,reasoning:reasoning.checked}},{quiet:true});
+      },650);
+    };
+    primary.input.addEventListener('input',autoSave);
+    fallback.input.addEventListener('input',autoSave);
+    reasoning.addEventListener('change',autoSave);
+    text(body,'Модели не вызываются: выбор только сохраняет предпочтения. Cloud.ru используется для чтения списка.','set-note');
   } else if(id==='persona') {
     const about=field('О себе',config.instructions.about,'textarea',1500);
     const style=field('Как отвечать',config.instructions.style,'textarea',1500);
