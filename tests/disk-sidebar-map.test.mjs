@@ -368,6 +368,7 @@ test("Disk 14 source-backed text analysis extracts evidence without invented tie
  assert.ok(mixed.links.some(x=>x.kind==="entity"&&x.evidence.includes("Гелиос")));
  assert.ok(mixed.links.some(x=>x.kind==="contains"));
  assert.ok(mixed.links.some(x=>x.kind==="reference"));
+ assert.ok(mixed.links.some(x=>x.kind==="lexical"&&x.evidence.includes("общая папка")));
  const meaning=model.graphFromCatalog(docs,["Работа"],"Работа",{semantic:index,viewMode:"meaning",limit:120});
  assert.ok(meaning.links.some(x=>x.kind==="lexical"));
  assert.ok(!meaning.links.some(x=>x.kind==="contains"));
@@ -389,6 +390,7 @@ test("Disk 14 UI restricts text analysis to deliberate local read-only action",a
   "renderInspector(","dk-graph-inspect","dk-graph-analyze",
   "graphMode","dk-graph-mode","edge.evidence","edge.weight",
   "createRadialGradient","ctx.ellipse(","ctx.setLineDash([3,5])",
+  "appearing=new Map","fading:Array","until:now+360","entrance>.62",
   "scheduleBreathing()","prefers-reduced-motion"])
   assert.ok(mini.includes(token)||css.includes(token),"Missing Disk 14 feature "+token);
  assert.match(css,/\.dk-graph-expanded \.dk-graph-inspect/);
