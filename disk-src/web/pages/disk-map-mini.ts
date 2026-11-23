@@ -30,6 +30,7 @@ export interface MiniDiskMap{
   root:HTMLElement;
   update:(files:DiskFile[],folders:string[],current:string)=>void;
   highlightFile:(id:string|null)=>void;
+  highlightFolder:(folder:string|null)=>void;
 }
 type Mode="all"|"meaning"|"versions"|"entities";
 const shades:Record<string,string>={
@@ -489,7 +490,7 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
         ctx.ellipse(x,y,radius,radius*.75,0,0,Math.PI*2);ctx.fill();
       }
     }
-    const active=hovered||selected||linkedFolder;
+    const active=linkedFolder||hovered||selected;
     // A sequence only exists if contract->document steps are all backed by
     // literal references to the same contract. Only REAL links are painted.
     const chain=!route&&active?graphDocumentChain(scene,active):null;
@@ -955,8 +956,7 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
       clearTimeout(highlightTimer);
     }
     rebuild();
-    if(!linkedFolder)linkedFolder="folder:"+current;
-    if(!scene.nodes.some(n=>n.id===linkedFolder))linkedFolder=null;
+    if(linkedFolder&&!scene.nodes.some(n=>n.id===linkedFolder))linkedFolder=null;
     scheduleKnowledge();
   }};
 }
