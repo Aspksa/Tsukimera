@@ -70,6 +70,8 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
   let routeStart:string|null=null,routeEnd:string|null=null,route:GraphRoute|null=null;
   let hoverEdge:GraphLink|null=null,hoverX=0,hoverY=0;
   let semantic:SemanticIndex|null=null,analysisGeneration=0;
+  let persistedSemantic:SemanticIndex|null=null,knowledgeSignature="";
+  let knowledgeTimer=0,knowledgeRequest=0;
   let coords=new Map<string,GraphPoint>(),appearing=new Map<string,number>();
   let art:ArtLayout=graphArtLayout(scene),renderBundles:ArtBundle[]=[];
   let hoverBundle:ArtBundle|null=null,routePulseUntil=0;
@@ -333,6 +335,28 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
     semantic.unreadable=unreadable;semantic.truncated=truncated;
     analysisBusy=false;canvas.dataset.analysis="finished";rebuild();
   }
+  // Resumable SQLite knowledge arrives from the existing local API.
+  // It supersedes nothing user-selected and never creates synthetic edges.
+  function scheduleKnowledge(delay=800){
+    clearTimeout(knowledgeTimer);
+    knowledgeTimer=window.setTimeout(()=>{void refreshKnowledge();},delay);
+  }
+  async function refreshKnowledge(){
+    if(!root.isConnected||document.visibilityState!=="visible")return;
+    const generation=++knowledgeRequest;
+    const response=await api.diskKnowledgeGraph();
+    if(!response.ok||generation!==knowledgeRequest||!root.isConnected)return;
+    const candidate=response.value as SemanticIndex;
+    if(!Array.isArray(candidate.nodes)||!Array.isArray(candidate.links))return;
+    const signature=JSON.stringify([candidate.nodes,candidate.links]);
+    if(signature!==knowledgeSignature){
+      knowledgeSignature=signature;persistedSemantic=candidate;
+      if(!semantic)rebuild();
+    }
+    const status=await api.diskKnowledgeStatus();
+    if(status.ok&&status.value.pending>0&&root.isConnected)
+      scheduleKnowledge(6500);
+  }
   function rebuild(){
     const oldNodes=new Map(scene.nodes.map(n=>[n.id,n]));
     const oldPositions=coords;
@@ -344,7 +368,7 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
     scene=graphFromCatalog(files,folders,current,{
       depth:detail==="detail"?3:detail==="overview"?Math.min(depth,2):depth,
       limit,perFolder:screen.perFolder,detailLevel:detail,
-      includeTags,includeDuplicates,semantic,viewMode:mode,global:globalGraph
+      includeTags,includeDuplicates,semantic:semantic||persistedSemantic,viewMode:mode,global:globalGraph
     });
     art=graphArtLayout(scene);
     const currentTime=performance.now();
@@ -381,6 +405,7 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
     canvas.dataset.aspect=screen.ultrawide?"ultrawide":"standard";
     canvas.dataset.layer="graph";
     canvas.dataset.communities=String(art.communities.length);
+    canvas.dataset.knowledge=persistedSemantic?"indexed":"pending";
     canvas.dataset.nodes=String(scene.nodes.length);
     canvas.dataset.links=String(scene.links.length);
     canvas.dataset.focus=current;
@@ -878,6 +903,8 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
   return {root,highlightFile,update(newFiles,newFolders,folder){
     if(files!==newFiles){
       analysisGeneration++;semantic=null;analysisBusy=false;
+      persistedSemantic=null;knowledgeSignature="";
+      knowledgeRequest++;
     }
     files=newFiles;folders=newFolders;
     if(folder!==current){
@@ -887,5 +914,6 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
       clearTimeout(highlightTimer);
     }
     rebuild();
+    scheduleKnowledge();
   }};
 }
