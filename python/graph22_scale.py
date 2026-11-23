@@ -189,7 +189,7 @@ def graph_view(conn, *, focus="", folder="", limit=120, level="medium", offset=0
         "WHEN n.folder='' THEN 'root' ELSE 'folder:'||n.folder END AS id, "
         "count(*) AS count FROM graph22_nodes n "
         "WHERE n.kind IN ('folder','file') AND " + clause +
-        " GROUP BY id ORDER BY count DESC,id LIMIT 80", args)]
+        " GROUP BY 1 ORDER BY count DESC,1 LIMIT 80", args)]
     visual = [{"source": e["source"], "target": e["target"],
                "kind": e["kind"], "weight": e["confidence"],
                "confidence": e["confidence"], "evidence": e["evidence"],
