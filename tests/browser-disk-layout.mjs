@@ -427,8 +427,14 @@ try{
     }
   }
   assert.ok(autosaved,"Normal model preferences should autosave to SQLite without Save button");
-  assert.match(await evaluate("document.querySelector('.set-save-state')?.textContent"),/Сохранено/,
-    "Visual save state must show persisted settings");
+  let saveStateReady=false;
+  for(let i=0;i<24;i++){
+    saveStateReady=await evaluate("document.querySelector('.set-save-state')?.dataset.state==='saved'");
+    if(saveStateReady)break;
+    await pause(100);
+  }
+  assert.ok(saveStateReady,
+    "Visual save state must confirm completion after the server persisted the settings");
   await evaluate("document.querySelector('[data-settings-group=\"general\"]').click()");
   await evaluate("document.querySelector('[data-settings-group=\"cloud\"]').click()");
   assert.equal(await evaluate("document.querySelector('#set-model .beh-field input')?.value"),
