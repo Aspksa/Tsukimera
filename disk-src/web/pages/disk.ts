@@ -1074,9 +1074,12 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
     }
   });
   const treePanel=el("div",{cls:"dk-tree-panel"},treeCommands,tree);
-  const side = el("aside", { cls: "dk-side", attrs: { "aria-label": "Иерархия папок и Живая карта Диска" } },
+  // Keep one synchronized Canvas map, but give it the complete workspace
+  // width. The file manager remains directly below it, not inside a modal
+  // or the narrow folder rail.
+  const side = el("aside", { cls: "dk-side", attrs: { "aria-label": "Иерархия папок Диска" } },
     el("div", { cls: "dk-side-head" }, el("strong", { textContent: "Папки" }), treeCount, iconButton("x", "Закрыть", () => setDrawer(false), "icon-btn sm dk-side-close")),
-    treePanel,miniMap.root);
+    treePanel);
   const scrim = el("div", { cls: "dk-scrim" });
   const setDrawer = (open: boolean) => { page.classList.toggle("drawer-open", open); if (open) side.querySelector<HTMLElement>(".dk-node.current .dk-node-label, .dk-side-close")?.focus({ preventScroll: true }); };
   drawerBtn.addEventListener("click", () => setDrawer(true));
@@ -1840,9 +1843,12 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
   const layout = el("div", { cls: "dk-layout" + (treeHidden ? " no-tree" : "") });
   const panes=createDiskSplitters(layout);
   layout.append(side,panes.left,main,panes.right,life.root,info);
-  page.classList.add("dk-experience-v8");
+  const filesHeading=el("div",{cls:"dk-files-section-head"},
+    el("h2",{textContent:"Диск · файлы и папки"}),
+    el("small",{textContent:"Управление документами"}));
+  page.classList.add("dk-experience-v8","dk-map-first");
   page.append(el("h1", { cls: "sr-only", textContent: "Диск" }),
-    bar,layout,moveHint,scrim,uploader.root,picker,folderPicker,restorePicker,chatDrop);
+    bar,miniMap.root,filesHeading,layout,moveHint,scrim,uploader.root,picker,folderPicker,restorePicker,chatDrop);
   const scrollHost=document.querySelector<HTMLElement>(".content");
   scrollHost?.addEventListener("scroll",()=>{
     if(!page.isConnected){autoMoreObserver?.disconnect();return;}
