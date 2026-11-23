@@ -2143,3 +2143,73 @@ button.dk-crumb:hover{background:var(--hover);color:var(--fg)}
 @media(prefers-reduced-motion:reduce){
   .dk-graph-view *{transition:none!important;animation:none!important}
 }
+
+
+/* Disk 14 — evidence-led semantic map (same graph, no second framework). */
+.dk-graph-mode{
+  max-width:100%;min-width:94px;height:30px;padding:3px 7px;
+  border:1px solid color-mix(in srgb,var(--brand) 18%,var(--line));
+  border-radius:8px;background:#13141b;color:#ded6c8;
+  font:inherit;font-size:.72rem;cursor:pointer;
+}
+.dk-graph-mode:focus-visible,.dk-graph-analyze:focus-visible{
+  outline:2px solid var(--brand);outline-offset:2px;
+}
+.dk-graph-mode option{background:#11131a;color:#e1e3e7}
+.dk-graph-analyze{
+  white-space:nowrap;color:#f1d4a1;font-size:.72rem;
+  background:linear-gradient(110deg,rgba(212,154,70,.20),rgba(109,87,49,.06));
+  border-color:rgba(220,176,100,.45);
+}
+.dk-graph-analyze:disabled{opacity:.48;cursor:wait}
+.dk-graph-inspect{
+  display:flex;flex-direction:column;gap:5px;min-width:0;max-height:160px;
+  border:1px solid rgba(202,167,107,.17);border-radius:9px;
+  padding:8px 9px;background:rgba(13,16,22,.82);
+  overflow-y:auto;scrollbar-width:thin;
+}
+.dk-graph-inspect>strong{
+  color:#e8cfaa;font-size:.76rem;white-space:nowrap;
+  text-overflow:ellipsis;overflow:hidden
+}
+.dk-graph-inspect>small{font-size:.66rem;color:#b6b1ad;line-height:1.45}
+.dk-graph-summary{
+  margin:1px 0 3px;font-size:.7rem;line-height:1.5;
+  color:#b9c2cf;overflow-wrap:anywhere;
+  display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;
+}
+.dk-graph-inspect-link{
+  display:grid;grid-template-columns:minmax(0,1fr);
+  gap:2px;padding:5px 0;border-top:1px solid rgba(210,178,122,.09);
+}
+.dk-graph-inspect-link>span{
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  font-size:.68rem;color:#e4d9c7;
+}
+.dk-graph-inspect-link>small{
+  font-size:.64rem;color:#a9b3bf;line-height:1.35;
+}
+.dk-graph-expanded .dk-graph-inspect{
+  flex:0 0 auto;max-height:170px;min-height:65px;
+  padding:9px 13px;display:grid;
+  grid-template-columns:minmax(130px,1fr) minmax(0,2fr);
+  column-gap:14px;align-content:start
+}
+.dk-graph-expanded .dk-graph-inspect>strong{grid-column:1}
+.dk-graph-expanded .dk-graph-inspect>.dk-graph-summary{
+  grid-column:1/-1;max-width:950px;
+}
+.dk-graph-expanded .dk-graph-inspect-link{grid-column:2}
+.dk-graph-expanded .dk-graph-controls{gap:8px}
+.dk-graph-view .dk-graph-tooltip{line-height:1.35;white-space:normal;max-height:58px;overflow:hidden}
+.disk-page.dk-map-left .dk-side .dk-graph-mode{flex:1 1 85px}
+.disk-page.dk-map-left .dk-side .dk-graph-controls{gap:4px}
+.disk-page.dk-map-left .dk-side .dk-graph-analyze{flex:1 1 70px}
+@media(max-width:620px){
+ .dk-graph-expanded .dk-graph-inspect{display:flex;max-height:118px;min-height:0}
+ .dk-graph-expanded .dk-graph-inspect-link{grid-column:auto}
+ .dk-graph-expanded .dk-graph-controls{flex-wrap:wrap}
+}
+@media(prefers-reduced-motion:reduce){
+ .dk-graph-analyze,.dk-graph-inspect{animation:none!important;transition:none!important}
+}
