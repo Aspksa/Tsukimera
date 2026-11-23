@@ -100,7 +100,7 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
   let frameNumber=0,raf=0,resizeObserver:ResizeObserver|null=null;
   let hovered:string|null=null,selected:string|null=null,query="";
   let expanded=false,originalParent:Node|null=null,originalNext:Node|null=null;
-  let saveTimer=0,dragTarget:string|null=null,dragStarted=false,moveTarget=false;
+  let saveTimer=0,breathingTimer=0,dragTarget:string|null=null,dragStarted=false,moveTarget=false;
   let startX=0,startY=0,startPanX=0,startPanY=0;
   let homePage:HTMLElement|null=null;
   let lastFocusFolder="";
@@ -112,9 +112,20 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
       zoom:zoomLevel,panX,panY,focus:""
     })),280);
   }
+  // Gentle 2fps breathing only for an expanded, visible, active graph.
+  // The compact map and reduced-motion mode never run an idle animation loop.
+  function scheduleBreathing(){
+    if(breathingTimer)clearTimeout(breathingTimer);
+    if(!expanded||reduced())return;
+    breathingTimer=window.setTimeout(()=>{
+      if(expanded&&document.visibilityState==="visible"&&(selected||hovered))draw();
+      scheduleBreathing();
+    },420);
+  }
   function setExpanded(value:boolean){
     if(value===expanded)return;
     expanded=value;
+    scheduleBreathing();
     if(value){
       originalParent=root.parentNode;originalNext=root.nextSibling;
       homePage=root.closest<HTMLElement>(".disk-page");
