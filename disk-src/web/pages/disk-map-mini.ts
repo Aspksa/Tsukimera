@@ -714,6 +714,8 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
       ctx.lineWidth=1.6;ctx.strokeStyle="rgba(226,177,100,.8)";ctx.stroke();
     }
     canvas.dataset.selected=selected||"";
+    canvas.dataset.linkedFolder=linkedFolder||"";
+    canvas.dataset.chain=chain?String(chain.links.length):"";
     canvas.dataset.paintedNodes=String(scene.nodes.length);
   }
   function schedule(){
