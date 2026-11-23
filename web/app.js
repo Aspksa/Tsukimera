@@ -62,13 +62,22 @@ const DISK_PREF_KEYS = [
   'tsukimera.disk.layout.left.v1','tsukimera.disk.layout.right.v1',
   'tsukimera.disk.tiles.v1','tsukimera.disk.view','tsukimera.disk.sort',
   'tsukimera.disk.open','tsukimera.disk.tree','tsukimera.disk.life.group',
-  'tsukimera.disk.mdRaw','juunibi.disk.view','juunibi.disk.sort',
+  'tsukimera.disk.mdRaw','tsukimera.disk.sections.v1',
+  'tsukimera.disk.minimap.view.v1','juunibi.disk.view','juunibi.disk.sort',
   'juunibi.disk.open','juunibi.disk.tree','juunibi.disk.mdRaw',
   'juunibi.disk.life.group'
 ];
 const SQLITE_PREF_KEYS=[KEY_NAV,KEY_UI,KEY_SETTINGS,...DISK_PREF_KEYS];
 let prefsReady=false;
 let preferenceQueue=Promise.resolve();
+let settingsTabAbort=new AbortController();
+let currentSettingsCategory="general";
+let settingsSaveInfo={state:"saved",message:"Состояние настроек: сохранено"};
+function setSettingsSaveState(state,message){
+  settingsSaveInfo={state,message};
+  const status=document.querySelector(".settings-page .set-save-state");
+  if(status){status.dataset.state=state;status.textContent=message;}
+}
 function savePrefChanges(changes){
   preferenceQueue=preferenceQueue.catch(()=>{}).then(async()=>{
     const response=await fetch('/api/preferences',{method:'PUT',
@@ -127,8 +136,12 @@ function writeLocal(key, value) {
   try { localStorage.setItem(key,raw); }
   catch { toast('Браузер запретил локальное сохранение'); }
   if(prefsReady&&SQLITE_PREF_KEYS.includes(key)){
-    void savePrefChanges({[key]:raw}).catch(error=>
-      toast('Настройки не сохранены в SQLite: '+error.message));
+    setSettingsSaveState('saving','Сохраняется в SQLite…');
+    void savePrefChanges({[key]:raw}).then(()=>
+      setSettingsSaveState('saved','Сохранено в SQLite')).catch(error=>{
+      setSettingsSaveState('error','Не сохранено в SQLite: '+error.message);
+      toast('Настройки не сохранены в SQLite: '+error.message);
+    });
   }
 }
 function cleanMenu(raw) {
@@ -508,7 +521,8 @@ async function loadConfig() {
     config=data.settings;serverAvailable=true;
   }catch(err){console.warn('Tsukimera settings:',err.message);serverAvailable=false;}
 }
-async function saveSettings(patch) {
+async function saveSettings(patch,{quiet=false}={}) {
+  setSettingsSaveState('saving','Сохраняется в SQLite…');
   try {
     const response=await fetch('/api/settings',{method:'PUT',
       headers:{'Content-Type':'application/json','X-Tsukimera-Request':'1'},
@@ -516,10 +530,15 @@ async function saveSettings(patch) {
     const json=await response.json();
     if(!response.ok)throw Error(json.error||'Ошибка сохранения');
     config=json.settings;serverAvailable=true;
-    toast('Настройки сохранены локально');
+    setSettingsSaveState('saved','Сохранено в SQLite');
+    if(!quiet)toast('Настройки сохранены локально');
     // Do not destroy unsaved edits elsewhere in the settings form.
     renderMenu();return true;
-  }catch(err){toast('Не сохранено: '+err.message);return false;}
+  }catch(err){
+    setSettingsSaveState('error','Не сохранено: '+err.message);
+    if(!quiet)toast('Не сохранено: '+err.message);
+    return false;
+  }
 }
 function field(label,value,type='text',max=200) {
   const wrap=el('label','beh-field');
@@ -566,39 +585,70 @@ function tsPost(path,record){
     body:JSON.stringify(record)});
 }
 let cachedCloudModels=[];
-function modelPicker(label,currentField){
-  const box=el("div","set-model-chooser");
+function cloudModelBrowser(primary,fallback){
+  // One model catalogue for both slots: no duplicate search, refresh or API call.
+  const box=el("div","set-model-browser");
+  const heading=el("div","set-model-browser-head");
+  heading.append(el("strong","","Модели Cloud.ru"),el("small","set-note","Поиск по названию или идентификатору"));
   const search=el("input","set-model-search");search.type="search";
-  search.placeholder="Поиск по списку Cloud.ru";search.setAttribute("aria-label",label+": поиск модели");
-  const select=el("select","set-model-list");select.setAttribute("aria-label",label+": выбрать модель");
+  search.placeholder="Поиск модели Cloud.ru";search.setAttribute("aria-label","Поиск модели Cloud.ru");
+  const select=el("select","set-model-list");select.setAttribute("aria-label","Доступные модели Cloud.ru");
   select.disabled=true;
-  const status=el("small","set-note","Получаю список моделей только при наличии ключа.");
-  const update=()=>{
-    const q=search.value.trim().toLowerCase();
-    const models=cachedCloudModels.filter(model=>model.toLowerCase().includes(q));
-    select.replaceChildren();
-    const placeholder=el("option","",models.length?"Выберите модель из "+models.length:"Нет совпадений");
-    placeholder.value="";select.append(placeholder);
-    for(const name of models){const opt=el("option","",name);opt.value=name;select.append(opt);}
-    select.disabled=models.length===0;
-    status.textContent=cachedCloudModels.length+" доступных моделей · "+models.length+" найдено";
-  };
-  search.addEventListener("input",update);
-  select.addEventListener("change",()=>{if(select.value)currentField.input.value=select.value;});
-  const refresh=btn("Обновить список",async()=>{
-    refresh.disabled=true;
+  const status=el("small","set-note","Для списка требуется подключение Cloud.ru.");
+  const toPrimary=btn("Сделать основной",()=>{
+    if(!select.value)return;
+    primary.input.value=select.value;
+    primary.input.dispatchEvent(new Event("input",{bubbles:true}));
+  },"btn");
+  const toFallback=btn("Сделать запасной",()=>{
+    if(!select.value)return;
+    fallback.input.value=select.value;
+    fallback.input.dispatchEvent(new Event("input",{bubbles:true}));
+  },"btn");
+  const refresh=btn("Обновить модели",async()=>{
+    refresh.disabled=true;status.textContent="Загружаю список через GET /v1/models…";
     try{
       const out=await tsApi("/api/cloud/models");
-      cachedCloudModels=out.models||[];update();
-    }catch(error){status.textContent=error.message;}
+      cachedCloudModels=Array.isArray(out.models)?out.models:[];
+      update();
+    }catch(error){status.textContent="Не удалось получить модели: "+error.message;}
     finally{refresh.disabled=false;}
   },"btn");
-  box.append(search,select,refresh,status);
+  const update=()=>{
+    const query=search.value.trim().toLocaleLowerCase();
+    const models=cachedCloudModels.filter(name=>name.toLocaleLowerCase().includes(query));
+    const selected=select.value;
+    select.replaceChildren();
+    const placeholder=el("option","",models.length?"Выберите модель · "+models.length:"Нет моделей");
+    placeholder.value="";select.append(placeholder);
+    for(const name of models){
+      const label=name.split("/").pop()||name;
+      const option=el("option","",label===name?name:label+" · "+name);
+      option.value=name;select.append(option);
+    }
+    if(models.includes(selected))select.value=selected;
+    select.disabled=models.length===0;
+    toPrimary.disabled=!select.value;toFallback.disabled=!select.value;
+    status.textContent=cachedCloudModels.length+" моделей · найдено "+models.length;
+  };
+  search.addEventListener("input",update);
+  select.addEventListener("change",update);
+  const row=el("div","set-model-browser-controls");
+  row.append(search,select,refresh);
+  const actions=el("div","set-controls");actions.append(toPrimary,toFallback);
+  box.append(heading,row,actions,status);
+  const reload=()=>{if(cachedCloudModels.length)update();else void refresh.click();};
+  document.addEventListener("tsukimera:cloud-models",reload,{signal:settingsTabAbort.signal});
+  document.addEventListener("tsukimera:cloud-models-cleared",()=>{
+    cachedCloudModels=[];update();
+    status.textContent="Cloud.ru отключён, список очищен.";
+  },{signal:settingsTabAbort.signal});
   void tsApi("/api/cloud/status").then(info=>{
     if(!box.isConnected)return;
-    if(info.configured)refresh.click();
-    else status.textContent="Добавьте API-ключ в разделе «Подключение».";
-  }).catch(()=>{status.textContent="Сервис Cloud.ru недоступен.";});
+    if(info.configured)void refresh.click();
+    else status.textContent="Добавьте API-ключ Cloud.ru для загрузки моделей.";
+  }).catch(()=>{if(box.isConnected)status.textContent="Локальный Cloud.ru недоступен.";});
+  update();
   return box;
 }
 function cloudConnectionPanel(body){
@@ -617,6 +667,7 @@ function cloudConnectionPanel(body){
       status.textContent="Подключено · Cloud.ru вернул "+result.models.length+
         " моделей · "+new Date(result.checkedAt).toLocaleString("ru-RU");
       status.dataset.state="ok";
+      document.dispatchEvent(new Event("tsukimera:cloud-models"));
     }catch(error){
       status.dataset.state="error";
       status.textContent=error.message+" · модель не вызывалась, расходы на генерацию не создавались.";
@@ -624,6 +675,7 @@ function cloudConnectionPanel(body){
   },"btn primary");
   const disconnect=btn("Отключить",async()=>{
     try{await tsPost("/api/cloud/clear",{});cachedCloudModels=[];
+      document.dispatchEvent(new Event("tsukimera:cloud-models-cleared"));
       status.dataset.state="off";status.textContent="Cloud.ru отключён от этого запуска.";}
     catch(error){status.textContent=error.message;}
   });
@@ -654,8 +706,10 @@ function memoryCenterPanel(body){
   const actions=el("div","set-controls");
   actions.append(btn("Открыть заметки",()=>go("tasks"),"btn primary"),
     btn("Перейти к диагностике",()=>{
+      document.querySelector('[data-settings-group="data"]')?.click();
       const node=document.getElementById("set-data");
-      node?.classList.remove("collapsed");const inner=node?.querySelector(".set-card-body");
+      node?.classList.remove("collapsed");
+      const inner=node?.querySelector(".set-card-body");
       if(inner)inner.hidden=false;
       node?.scrollIntoView({block:"start",behavior:"smooth"});
     }));
@@ -725,14 +779,29 @@ function setupCard(id,body) {
     const fallback=field('Запасная модель',config.model.fallback,'text',120);
     const reasoning=el('input');reasoning.type='checkbox';reasoning.checked=config.model.reasoning;
     reasoning.setAttribute('aria-label','Включить размышления');
-    body.append(primary.wrap,modelPicker("Основная модель",primary),
-      fallback.wrap,modelPicker("Запасная модель",fallback),
-      line('Размышления','Предпочтение для будущего подключения чата.',reasoning));
-    const act=el('div','set-controls');
-    act.append(saveButton(()=>saveSettings({model:{primary:primary.input.value.trim(),
-      fallback:fallback.input.value.trim(),reasoning:reasoning.checked}})));
-    body.append(act);
-    text(body,'Модели пока не вызываются. Изменение полей сохраняет конфигурацию, а не запускает платный запрос.','set-note');
+    body.append(primary.wrap,fallback.wrap,
+      line('Размышления','Предпочтение для будущего подключения чата.',reasoning),
+      cloudModelBrowser(primary,fallback));
+    // Debounced autosave only for syntactically valid model preferences.
+    // This does not trigger inference or paid Cloud.ru model calls.
+    let saveTimer=0,revision=0;
+    const autoSave=()=>{
+      const id=++revision;
+      clearTimeout(saveTimer);
+      saveTimer=setTimeout(async()=>{
+        if(id!==revision)return;
+        const p=primary.input.value.trim(),f=fallback.input.value.trim();
+        if(p&&f&&p===f){
+          setSettingsSaveState('error','Основная и запасная модели должны отличаться');
+          return;
+        }
+        await saveSettings({model:{primary:p,fallback:f,reasoning:reasoning.checked}},{quiet:true});
+      },650);
+    };
+    primary.input.addEventListener('input',autoSave);
+    fallback.input.addEventListener('input',autoSave);
+    reasoning.addEventListener('change',autoSave);
+    text(body,'Модели не вызываются: выбор только сохраняет предпочтения. Cloud.ru используется для чтения списка.','set-note');
   } else if(id==='persona') {
     const about=field('О себе',config.instructions.about,'textarea',1500);
     const style=field('Как отвечать',config.instructions.style,'textarea',1500);
@@ -791,7 +860,30 @@ function setupCard(id,body) {
         ' · заметок: '+data.counts.notes+' · версий: '+data.counts.versions+
         (data.backupCreated?' · исходная копия: '+data.backupCreated:'');
     }).catch(()=>{if(storage.isConnected)storage.textContent='Не удалось проверить SQLite';});
-    text(body,'Экспорт включает настройки, заметки, их ссылки по ID и параметры просмотра Диска — без ключей API. Содержимое файлов и версии нужно сохранить отдельно в разделе «Диск».','set-note');
+    text(body,'Экспорт включает настройки и заметки без ключей API. Сами документы и версии экспортируются отдельно в «Диске».','set-note');
+    const health=el('div','set-40-sqlite-health');
+    health.setAttribute('aria-label','Состояние SQLite');
+    health.append(el('small','muted','Проверяю базу, объём и индексы…'));
+    body.append(health);
+    void Promise.all([tsApi('/api/storage/diagnostics'),tsApi('/api/settings/backups')]).then(([info,backups])=>{
+      if(!health.isConnected)return;
+      const badge=(kind,label)=>el('span','set-state '+kind,label);
+      const backupNote=backups.lastBackup?
+        'Последняя копия: '+new Date(backups.lastBackup.at).toLocaleString('ru-RU'):
+        'Первая копия создаётся после запуска сервера';
+      health.replaceChildren(
+        line('База SQLite',Math.round(info.sizeBytes/1024).toLocaleString('ru-RU')+' КБ',
+          badge(info.integrity==='ok'?'ready':'error',info.integrity==='ok'?'Исправна':'Проверить')),
+        line('Схема / таблицы',info.schema+' / '+info.tables),
+        line('Записи',info.counts.files+' файлов · '+info.counts.notes+' заметок · '+
+          info.counts.versions+' версий · '+info.counts.preferences+' настроек'),
+        line('Автокопирование','Каждые '+backups.frequencyHours+' ч во время работы программы · '+
+          backups.stored+' копий',badge(backups.lastError?'error':'ready',backups.lastError?'Ошибка':'Включено')),
+        line('Хранилище копий',Math.round(backups.sizeBytes/1024).toLocaleString('ru-RU')+
+          ' КБ / '+Math.round(backups.maxTotalBytes/1048576)+' МБ · максимум '+backups.retain+' копий'),
+        el('p','set-note',backupNote+' · '+(backups.lastError||backups.lastOutcome))
+      );
+    }).catch(error=>{if(health.isConnected)health.textContent='Состояние хранилища недоступно: '+error.message;});
     const diagnostic=el('div','set-diagnostics');
     const inspect=btn('Проверить целостность SQLite',async()=>{
       inspect.disabled=true;
@@ -812,6 +904,7 @@ function setupCard(id,body) {
       finally{inspect.disabled=false;}
     },'btn');
     body.append(inspect,diagnostic);
+    text(body,'Автоматические копии сохраняют SQLite, но не содержимое data/disk/objects. Создаются локально при работающей Tsukimera, с проверкой свободного места и удалением только старых автоматических копий.','set-note');
     const actions=el('div','section-actions');
     actions.append(btn('Скачать резервную копию',()=>void downloadBackup(),'btn primary'));
     const input=el('input');input.type='file';input.accept='application/json,.json';input.setAttribute('aria-label','Импорт файла резервной копии');
@@ -837,85 +930,112 @@ function setupCard(id,body) {
   }
 }
 function renderSettings() {
-  const page=el('div','page settings-page');
-  const head=heading('Настройки','Локальные настройки Tsukimera · SQLite · реальные возможности помечены по состоянию.','settings');
+  settingsTabAbort.abort();
+  settingsTabAbort=new AbortController();
+  const groups=[
+    {id:"general",label:"Общие",icon:"palette",hint:"Оформление и чат",sections:["look","chat"]},
+    {id:"cloud",label:"Cloud.ru",icon:"cloud",hint:"Подключение и модели",sections:["conn","model"]},
+    {id:"persona",label:"Личность и память",icon:"brain",hint:"Инструкции и заметки",sections:["persona","memory"]},
+    {id:"actions",label:"Инструменты",icon:"puzzle",hint:"Разрешения и команды",sections:["tools","quick"]},
+    {id:"data",label:"Данные и SQLite",icon:"archive",hint:"База и резервные копии",sections:["data"]},
+    {id:"about",label:"О проекте",icon:"help",hint:"Версия и справка",sections:["about"]},
+  ];
+  if(!groups.some(g=>g.id===currentSettingsCategory))currentSettingsCategory="general";
+  const page=el("div","page settings-page settings-40");
+  const head=heading("Настройки","Компактный центр управления Tsukimera · локальное хранение · без скрытых платных действий.","settings");
   page.append(head);
-  const search=el('div','set-search');
-  search.append(icon('search'));
-  const searchInput=el('input');searchInput.type='search';searchInput.placeholder='Поиск по настройкам';
-  searchInput.setAttribute('aria-label','Поиск по настройкам');
-  const results=el('small','set-search-results','Поиск по разделам и отдельным параметрам');
-  results.setAttribute('role','status');
-  search.append(searchInput,el('kbd','kbd','Ctrl+,'));
-  page.append(search,results);
-  const layout=el('div','set-layout');
-  const left=el('aside','set-side'),toc=el('nav','set-toc');
-  toc.setAttribute('aria-label','Разделы настроек');
+  const search=el("div","set-search");
+  search.append(icon("search"));
+  const searchInput=el("input");searchInput.type="search";
+  searchInput.placeholder="Найти параметр в настройках";
+  searchInput.setAttribute("aria-label","Поиск по настройкам");
+  search.append(searchInput,el("kbd","kbd","Ctrl+,"));
+  const statusRow=el("div","set-40-status");
+  const results=el("small","set-search-results","6 категорий · 10 подразделов");
+  results.setAttribute("role","status");
+  const saved=el("small","set-save-state",settingsSaveInfo.message);
+  saved.setAttribute("role","status");saved.setAttribute("aria-live","polite");
+  saved.dataset.state=settingsSaveInfo.state;
+  statusRow.append(results,saved);
+  page.append(search,statusRow);
+  const layout=el("div","set-layout");
+  const left=el("aside","set-side"),toc=el("nav","set-toc");
+  toc.setAttribute("aria-label","Категории настроек");
   left.append(toc);
-  const main=el('div','set-main');
+  const main=el("div","set-main");
+  const categoryHead=el("header","set-40-category-head");
+  const title=el("h2","","");
+  const hint=el("p","muted","");
+  categoryHead.append(title,hint);
+  main.append(categoryHead);
   const cards=new Map(),links=new Map();
-  for(const sec of SECTIONS) {
-    const link=btn('',null,'set-toc-link');
-    link.append(icon(sec.icon,17),el('span','grow',sec.label));
-    const readiness={conn:'partial',model:'partial',persona:'pending',memory:'partial',
-      tools:'pending',quick:'partial',look:'ready',chat:'pending',data:'ready',about:'ready'};
-    link.dataset.readiness=readiness[sec.id];
-    link.title=readiness[sec.id]==='ready'?'Работает':
-      readiness[sec.id]==='partial'?'Часть возможностей работает':'Функционал пока не подключён';
-    link.addEventListener('click',()=>{
-      searchInput.value='';filter('');
-      document.getElementById('set-'+sec.id)?.scrollIntoView({behavior:'smooth',block:'start'});
-      for(const [id,l] of links)l.classList.toggle('active',id===sec.id);
+  for(const group of groups){
+    const link=btn("",null,"set-toc-link");
+    link.dataset.settingsGroup=group.id;
+    link.append(icon(group.icon,18),el("span","grow",group.label));
+    link.setAttribute("aria-label",group.label);
+    const amount=el("small","set-40-count",String(group.sections.length));
+    link.append(amount);
+    link.addEventListener("click",()=>{
+      currentSettingsCategory=group.id;
+      searchInput.value="";
+      filter("");
+      const first=main.querySelector(".set-card:not([hidden])");
+      first?.querySelector("button,input,textarea")?.focus({preventScroll:true});
     });
-    toc.append(link);links.set(sec.id,link);
-    const {section,body}=sectionCard(sec);setupCard(sec.id,body);
+    toc.append(link);links.set(group.id,link);
+  }
+  // All original ten sections are instantiated once so switching categories
+  // never destroys unsaved text or drops in-flight Cloud/SQLite operations.
+  for(const sec of SECTIONS){
+    const group=groups.find(g=>g.sections.includes(sec.id));
+    const {section,body}=sectionCard(sec);
+    section.dataset.category=group?.id||"general";
+    setupCard(sec.id,body);
     main.append(section);cards.set(sec.id,section);
   }
-  function filter(query) {
-    const norm=value=>String(value||'').toLowerCase().replaceAll('ё','е');
+  function filter(query){
+    const norm=v=>String(v||"").toLocaleLowerCase("ru").replaceAll("ё","е");
     const terms=norm(query.trim()).split(/\s+/).filter(Boolean);
-    let matches=0,sections=0;
+    const searchMode=terms.length>0;
+    const group=groups.find(g=>g.id===currentSettingsCategory)||groups[0];
+    let visible=0;
     for(const sec of SECTIONS){
-      const card=cards.get(sec.id),link=links.get(sec.id);
-      const heading=norm(sec.label+' '+sec.hint),whole=norm(card.textContent);
-      const full=terms.every(t=>heading.includes(t));
-      const rowNodes=[...card.querySelector('.set-card-body').children];
-      const hits=rowNodes.filter(node=>terms.every(t=>norm(node.textContent).includes(t)));
-      const match=!terms.length||full||hits.length>0||terms.every(t=>whole.includes(t));
-      card.hidden=!match;link.hidden=!match;
-      if(match)sections++;
-      if(terms.length&&match){
-        card.classList.remove('collapsed');
-        card.querySelector('.set-card-body').hidden=false;
-        for(const node of rowNodes){
-          // A section match keeps all fields; otherwise highlight the exact
-          // matching controls while retaining context and surrounding hints.
-          node.classList.toggle('set-search-hit',hits.includes(node));
-        }
-        matches+=full?rowNodes.length:hits.length||1;
-      }else rowNodes.forEach(node=>node.classList.remove('set-search-hit'));
+      const card=cards.get(sec.id);
+      const matches=terms.every(word=>norm(sec.label+" "+sec.hint+" "+card.textContent).includes(word));
+      const selected=card.dataset.category===currentSettingsCategory;
+      card.hidden=!(searchMode?matches:selected);
+      if(!card.hidden)visible++;
+      const collapsed=Array.isArray(sectionPrefs.collapsed)&&sectionPrefs.collapsed.includes(sec.id);
+      card.classList.toggle("collapsed",searchMode&&matches?false:collapsed);
+      const body=card.querySelector(".set-card-body");
+      if(body)body.hidden=!(searchMode&&matches)&&collapsed;
+      const toggle=card.querySelector(".set-collapse");
+      toggle?.setAttribute("aria-expanded",String(!card.classList.contains("collapsed")));
     }
-    results.textContent=terms.length?sections+' разделов · '+matches+' совпадений':
-      '10 разделов · работает / частично / не подключено';
-    search.dataset.empty=String(terms.length>0&&sections===0);
+    for(const category of groups){
+      const link=links.get(category.id);
+      const has=category.sections.some(id=>!cards.get(id).hidden);
+      link.hidden=searchMode&&!has;
+      link.classList.toggle("active",!searchMode&&category.id===currentSettingsCategory);
+      link.setAttribute("aria-current",!searchMode&&category.id===currentSettingsCategory?"page":"false");
+    }
+    categoryHead.hidden=searchMode;
+    title.textContent=group.label;
+    hint.textContent=group.hint;
+    results.textContent=searchMode?visible+" совпадений по подразделам":
+      "Категория "+group.label+" · "+visible+" подраздела";
+    search.dataset.empty=String(searchMode&&visible===0);
   }
-  searchInput.addEventListener('input',()=>filter(searchInput.value));
-  searchInput.addEventListener('keydown',event=>{
-    if(event.key==='Enter'){
-      event.preventDefault();
-      const first=[...cards.values()].find(card=>!card.hidden);
-      first?.scrollIntoView({block:'start',behavior:'smooth'});
-      first?.querySelector('input,button,textarea')?.focus({preventScroll:true});
-    }
+  searchInput.addEventListener("input",()=>filter(searchInput.value));
+  searchInput.addEventListener("keydown",event=>{
+    if(event.key!=="Enter")return;
+    event.preventDefault();
+    const first=main.querySelector(".set-card:not([hidden])");
+    first?.scrollIntoView({block:"nearest",behavior:"smooth"});
+    first?.querySelector("button,input,textarea")?.focus({preventScroll:true});
   });
-  filter('');
-  const controls=el('div','set-controls');
-  controls.append(btn('Свернуть все',()=>{
-    sectionPrefs.collapsed=SECTIONS.map(s=>s.id);writeLocal(KEY_SETTINGS,sectionPrefs);renderMain();
-  }),btn('Развернуть все',()=>{
-    sectionPrefs.collapsed=[];writeLocal(KEY_SETTINGS,sectionPrefs);renderMain();
-  }));
-  left.append(controls);
+  filter("");
   layout.append(left,main);page.append(layout);mainNode.append(page);
 }
 async function downloadBackup(){

@@ -384,10 +384,36 @@ try{
     await pause(140);
   }
   assert.ok(settingsReady,"New settings were not rendered in the browser");
-  const home=await evaluate("(()=>({cards:document.querySelectorAll('.set-card').length, model:!!document.querySelector('#set-model .set-model-chooser'), cloud:!!document.querySelector('#set-conn .set-cloud-key'), ready:document.querySelectorAll('.set-cap-state').length, labels:[...document.querySelectorAll('.set-toc-link')].map(x=>x.title)}))()");
+  const home=await evaluate("(()=>({cards:document.querySelectorAll('.set-card').length, model:!!document.querySelector('#set-model .set-model-browser'), cloud:!!document.querySelector('#set-conn .set-cloud-key'), ready:document.querySelectorAll('.set-cap-state').length, categories:document.querySelectorAll('.set-toc-link').length, visible:document.querySelectorAll('.set-card:not([hidden])').length}))()");
   assert.equal(home.cards,10,"All 10 settings sections must remain");
   assert.equal(home.ready,10,"All settings must disclose their capability status");
   assert.ok(home.cloud&&home.model,"Cloud.ru key and real model selector must render");
+
+  assert.equal(home.categories,6,"Settings 4.0 must show six clear navigation categories");
+  assert.equal(home.visible,2,"Only one selected category should be visible at a time");
+  await evaluate("document.querySelector('[data-settings-group=\"cloud\"]').click()");
+  const cloudPanel=await evaluate("(()=>({category:document.querySelector('.set-toc-link.active')?.dataset.settingsGroup,visible:[...document.querySelectorAll('.set-card:not([hidden])')].map(x=>x.id),browsers:document.querySelectorAll('.set-model-browser').length,search:document.querySelectorAll('.set-model-search').length}))()");
+  assert.equal(cloudPanel.category,"cloud");
+  assert.deepEqual(cloudPanel.visible,["set-conn","set-model"]);
+  assert.equal(cloudPanel.browsers,1,"Primary and fallback must share one real Cloud model browser");
+  assert.equal(cloudPanel.search,1,"Duplicate Cloud model search fields must be removed");
+  await evaluate("(()=>{const f=document.querySelector('#set-model .beh-field input');f.value='browser/autosave';f.dispatchEvent(new Event('input',{bubbles:true}));})()");
+  let autosaved=false;
+  for(let n=0;n<35;n++){
+    await pause(110);
+    const response=await fetch(origin+"/api/settings");
+    if(response.ok&&(await response.json()).settings.model.primary==="browser/autosave"){
+      autosaved=true;break;
+    }
+  }
+  assert.ok(autosaved,"Normal model preferences should autosave to SQLite without Save button");
+  assert.match(await evaluate("document.querySelector('.set-save-state')?.textContent"),/Сохранено/,
+    "Visual save state must show persisted settings");
+  await evaluate("document.querySelector('[data-settings-group=\"general\"]').click()");
+  await evaluate("document.querySelector('[data-settings-group=\"cloud\"]').click()");
+  assert.equal(await evaluate("document.querySelector('#set-model .beh-field input')?.value"),
+    "browser/autosave","Switching settings category must not reset model input");
+
   await evaluate("(()=>{const q=document.querySelector('.set-search input'); q.value='SQLite';q.dispatchEvent(new Event('input',{bubbles:true}));})()");
   const found=await evaluate("(()=>({count:document.querySelectorAll('.set-card:not([hidden])').length, result:document.querySelector('.set-search-results').textContent}))()");
   assert.ok(found.count>0&&found.count<10&&found.result.includes("совпадений"),
@@ -402,6 +428,11 @@ try{
     await pause(120);
   }
   assert.ok(diagnosed,"Real SQLite integrity diagnosis failed in Chrome");
+
+  const backupHealth=await evaluate("document.querySelector('#set-data .set-40-sqlite-health')?.textContent||''");
+  assert.match(backupHealth,/Автокопирование/,"SQLite center must show actual backup scheduling status");
+  assert.match(backupHealth,/Хранилище копий/,"SQLite center must show backup storage budget");
+
   // Saving Persona must not erase a draft in the unrelated Model form.
   await evaluate("(()=>{document.querySelector('#set-model .beh-field input').value='draft-do-not-erase'; document.querySelector('#set-persona .beh-field textarea').value='Сохраняемый текст'; document.querySelector('#set-persona button.btn.primary').click();})()");
   let persisted=false;
