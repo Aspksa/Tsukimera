@@ -1217,7 +1217,7 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
       const on = s.id === "favorites" || s.id === "trash" ? view === s.id : view === "all" && virtual === s.id;
       const b = el("button", { type: "button", cls: "dk-section dk-section-"+s.id+(on ? " current" : ""),
         attrs: { role: "listitem", "aria-current": on ? "page" : "false","aria-label":s.label+" · "+String(counts[s.id]??0)} },
-        el("span", { cls: "dk-node-ic" }, dIcon(s.icon, 17)), el("span", { cls: "dk-node-name", textContent: s.label }), el("small", { cls: "dk-node-n", textContent: String(counts[s.id] ?? 0) }));
+        el("span", { cls: "dk-node-ic" }, dIcon(s.icon, 17)), el("span", { cls: "dk-node-name", textContent: s.label, title:s.label }), el("small", { cls: "dk-node-n", textContent: String(counts[s.id] ?? 0) }));
       b.addEventListener("click", () => { go(s.id === "favorites" || s.id === "trash" ? { view: s.id } : { virtual: s.id }); setDrawer(false); });
       // Dragging *section buttons* reorders navigation only. Dragging files to
       // the Trash remains a separate, unchanged operation.
@@ -1251,7 +1251,7 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
       const n=all.filter(f=>matchesSmartRule(f,rule)).length;
       const button=el("button",{type:"button",cls:"dk-section dkx-smart"+(smartCurrent===rule.id?" current":"")},
         el("span",{cls:"dk-node-ic"},dIcon("folder",17)),
-        el("span",{cls:"dk-node-name",textContent:rule.name}),
+        el("span",{cls:"dk-node-name",textContent:rule.name,title:rule.name}),
         el("small",{cls:"dk-node-n",textContent:String(n)}));
       button.addEventListener("click",()=>{
         smartCurrent=rule.id;view="all";virtual="none";everywhere=true;
@@ -1854,9 +1854,10 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
   const layout = el("div", { cls: "dk-layout" + (treeHidden ? " no-tree" : "") });
   const panes=createDiskSplitters(layout);
   layout.append(side,panes.left,main,panes.right,life.root,info);
+  // One concise workspace title; the breadcrumb and file count already live in .dk-head.
+  // Do not repeat a decorative subtitle between the toolbar and file list.
   const filesHeading=el("div",{cls:"dk-files-section-head"},
-    el("h2",{textContent:"Диск · файлы и папки"}),
-    el("small",{textContent:"Управление документами"}));
+    el("h2",{textContent:"Файлы и папки"}));
   page.classList.add("dk-experience-v8","dk-map-left");
   page.append(el("h1", { cls: "sr-only", textContent: "Диск" }),
     bar,filesHeading,layout,moveHint,scrim,uploader.root,picker,folderPicker,restorePicker,chatDrop);
