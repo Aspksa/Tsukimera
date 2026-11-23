@@ -57,6 +57,19 @@ export const api={
   diskLife:()=>attemptAsync(()=>call<DiskLife>("/api/disk/life")),
   // Disk 20: read-only local evidence; never a write/move/delete operation.
   diskKnowledgeGraph:()=>attemptAsync(()=>call<any>("/api/disk/knowledge/graph")),
+  // Python Graph Engine 22: backwards-compatible, read-only visibility API.
+  diskGraph22View:(params:{folder?:string;focus?:string;limit?:number;level?:string}={})=>
+    attemptAsync(()=>call<any>("/api/disk/graph22/view?"+new URLSearchParams({
+      folder:params.folder||"",focus:params.focus||"",
+      limit:String(params.limit??240),level:params.level||"medium"}).toString())),
+  diskGraph22Path:(source:string,target:string)=>attemptAsync(()=>
+    call<any>("/api/disk/graph22/path?"+new URLSearchParams({source,target}).toString())),
+  diskGraph22Diagnosis:()=>attemptAsync(()=>
+    call<any>("/api/disk/graph22/diagnose")),
+  diskGraph22Timeline:()=>attemptAsync(()=>
+    call<any>("/api/disk/graph22/timeline")),
+  diskGraph22Conflicts:()=>attemptAsync(()=>
+    call<any>("/api/disk/graph22/contradictions")),
   diskKnowledgeStatus:()=>attemptAsync(()=>call<any>("/api/disk/knowledge/status")),
   diskTileInsights:(ids:readonly string[])=>attemptAsync(()=>call<{
     items:{id:string;links:number;state:"ready"|"text-indexed"|"waiting"}[];

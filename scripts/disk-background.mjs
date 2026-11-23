@@ -19,11 +19,11 @@ async function verifyObject(path,expectedSize,expectedSha){
 }
 export function createDiskAutomation({
   database,diskRoot,readText,initialDelayMs=4000,workDelayMs=1400,
-  idleDelayMs=15000,maintenanceHours=6,logger=console,
+  idleDelayMs=15000,maintenanceHours=6,logger=console,syncPythonGraph=null,
 }){
   let stopped=false,running=false,timer=null;
-  let lastMaintenance=Date.now(),active=null;
-  const stats={indexed:0,knowledgeIndexed:0,audited:0,failures:0,retries:0,lastError:null,lastRun:null,
+  let lastMaintenance=Date.now(),lastGraphSync=0,active=null;
+  const stats={indexed:0,knowledgeIndexed:0,graphIndexed:0,audited:0,failures:0,retries:0,lastError:null,lastRun:null,
     lastOptimized:null,optimization:null};
   const stop=()=>{
     stopped=true;
@@ -76,6 +76,17 @@ export function createDiskAutomation({
         sha:row.sha256,body:body??""});
       if(out.indexed)stats.knowledgeIndexed++;
       return true;
+    }
+    if(syncPythonGraph&&Date.now()-lastGraphSync>24000){
+      active={type:"python-graph-sync"};
+      lastGraphSync=Date.now();
+      // Optional during the migration. Missing Python does not block the
+      // established text index, file operations or integrity-audit queue.
+      const result=await syncPythonGraph();
+      if(result.ok){
+        stats.graphIndexed+=result.data.processed||0;
+        if(result.data.pending>0||result.data.processed>0)return true;
+      }
     }
     const target=database.auditNext();
     if(target){

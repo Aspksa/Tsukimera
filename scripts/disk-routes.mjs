@@ -1,4 +1,5 @@
 import { createReadStream } from "node:fs";
+import {runPythonGraph} from "./python-graph.mjs";
 import { readFile, stat } from "node:fs/promises";
 import { createHash, randomUUID } from "node:crypto";
 import { Readable } from "node:stream";
@@ -8,7 +9,7 @@ import { createResumableUploads } from "./resumable-uploads.mjs";
  * The source disk's LocalDisk methods enforce name, folder, size and data-integrity limits.
  * Only loopback calls are accepted by the parent server.
  */
-export function createDiskRouter({disk,zipStream,zipLength,collectLife,uploadDir,automation=null,database=null}) {
+export function createDiskRouter({disk,zipStream,zipLength,collectLife,uploadDir,automation=null,database=null,graphRoot=null,graphDbPath=null}) {
   const uploads=createResumableUploads({disk,dir:uploadDir});
   const zipTokens=new Map();
   const verified=new Map();
@@ -119,6 +120,18 @@ export function createDiskRouter({disk,zipStream,zipLength,collectLife,uploadDir
         return send(res,200,automation?.status()??{running:false});
       if(method==="GET"&&p==="/api/disk/knowledge/status")
         return send(res,200,database?.knowledgeStats()??{analyzed:0,pending:0});
+      // Stage 1 of the Python API migration: only NEW read-only graph
+      // routes use Python; all existing disk operations keep their contract.
+      if(method==="GET"&&p.startsWith("/api/disk/graph22/")){
+        const action=p.slice("/api/disk/graph22/".length);
+        if(!["view","path","impact","timeline","diagnose","contradictions"].includes(action))
+          return send(res,404,{error:"Неизвестная операция графа"});
+        if(!graphRoot||!graphDbPath)return send(res,503,{error:"Python Graph API не настроен"});
+        const params=Object.fromEntries(url.searchParams);
+        const result=await runPythonGraph({root:graphRoot,dbPath:graphDbPath,action,params});
+        return send(res,result.ok?200:503,result.ok?result.data:
+          {error:result.error,available:false,mode:"legacy-fallback"});
+      }
       if(method==="GET"&&p==="/api/disk/knowledge/graph")
         return send(res,200,database?.knowledgeGraph(240)??{nodes:[],links:[]});
       if(method==="GET"&&p==="/api/disk/knowledge/tiles"){

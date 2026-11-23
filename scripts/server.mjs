@@ -6,6 +6,7 @@ import { prepareDisk } from "./build-disk.mjs";
 import { createDiskRouter } from "./disk-routes.mjs";
 import { initializeDatabase } from "./tsukimera-db.mjs";
 import { createDiskAutomation } from "./disk-background.mjs";
+import {runPythonGraph} from "./python-graph.mjs";
 import { createCloudConnection } from "./cloudru.mjs";
 import { createSettingsBackupService } from "./settings-backups.mjs";
 
@@ -136,9 +137,12 @@ export function createAppServer({root,dataDir=join(root,"data"),cloudRequest,clo
     automation=createDiskAutomation({
       database,diskRoot:join(dataDir,"disk"),
       readText:(id,limit)=>diskStore.readText(id,limit),
+      syncPythonGraph:()=>runPythonGraph({root,
+        dbPath:join(dataDir,"tsukimera.db"),action:"sync",params:{batch:24}}),
     });
     diskRouter=createDiskRouter({disk:diskStore,zipStream,zipLength,collectLife,
-      uploadDir:join(dataDir,"uploads"),automation,database});
+      uploadDir:join(dataDir,"uploads"),automation,database,graphRoot:root,
+      graphDbPath:join(dataDir,"tsukimera.db")});
     await diskRouter.initUploads();
     automation.start();
     settingsBackups.start();
