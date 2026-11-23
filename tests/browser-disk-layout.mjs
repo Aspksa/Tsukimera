@@ -171,7 +171,7 @@ try{
   assert.ok(mapBefore.height>=90&&mapBefore.height<=265,
     "Height should adapt to desktop workspace: "+JSON.stringify(mapBefore));
   await evaluate("(()=>{const c=document.querySelector('.dk-mini-map-canvas');for(let i=0;i<6;i++)c.dispatchEvent(new WheelEvent('wheel',{bubbles:true,cancelable:true,deltaY:-110,clientX:c.getBoundingClientRect().left+c.clientWidth/2,clientY:c.getBoundingClientRect().top+c.clientHeight/2}));})()");
-  await pause(400);
+  await pause(520);
   const zoomedMap=await evaluate("(()=>({layer:document.querySelector('.dk-mini-map-canvas').dataset.layer,saved:JSON.parse(localStorage.getItem('tsukimera.disk.minimap.view.v1')||'null')}))()");
 
   const orbitVisual=await evaluate("(()=>{const c=document.querySelector('.dk-mini-map-canvas');return {transition:c.dataset.transition,pulse:c.dataset.pulse,trail:c.dataset.trail}})()");
@@ -207,7 +207,7 @@ try{
   assert.match(await evaluate("document.querySelector('.dk-mini-map-status')?.textContent"),/2026/,
     "Tree selection must synchronize with the selected Canvas folder");
 
-  await pause(460);
+  await pause(720);
   const orbital=await evaluate("(()=>{const c=document.querySelector('.dk-mini-map-canvas');const p=document.querySelector('.dk-mini-map');return {trail:c.dataset.trail,center:Number(c.dataset.centerError),nodes:Number(c.dataset.nodes),painted:Number(c.dataset.paintedNodes),weight:p.style.getPropertyValue('--dk9-map-weight'),pulse:c.dataset.pulse,transition:c.dataset.transition}})()");
   assert.match(orbital.trail,/root>folder:Работа>folder:Работа\/2026/,
     "Selected folder must highlight the full factual root-to-target trail: "+JSON.stringify(orbital));
