@@ -146,6 +146,7 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
     linkedFolder=folder===null?null:"folder:"+folder;
     if(linkedFolder&&!scene.nodes.some(n=>n.id===linkedFolder))
       linkedFolder=null;
+    canvas.dataset.linkedFolder=linkedFolder||"";
     draw();
   }
   function cancelCamera(){
