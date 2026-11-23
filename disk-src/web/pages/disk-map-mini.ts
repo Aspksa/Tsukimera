@@ -13,7 +13,7 @@ import {normalizeMiniView,MINI_VIEW_KEY,clampView} from "./disk-map-mini-model";
 import {writePreference} from "../preferences";
 import type {DiskFile} from "../api";
 
-type MapActions={openFull:()=>void;openFolder:(folder:string)=>void;openFile:(id:string)=>void};
+type MapActions={openFolder:(folder:string)=>void;openFile:(id:string)=>void};
 export interface MiniDiskMap{
   root:HTMLElement;
   update:(files:DiskFile[],folders:string[],current:string)=>void;
@@ -70,6 +70,7 @@ export function createMiniDiskMap(actions:MapActions):MiniDiskMap{
   let history:string[]=[];
   let selected=-1;
   let pendingNav:string|null=null;
+  let renderLimit=0;
   let mounted=false,queued=false,raf=0,saveTimer=0;
   let dragging=false,startX=0,startY=0,startPanX=0,startPanY=0,moved=false;
   const parentOf=(p:string)=>p.includes("/")?p.slice(0,p.lastIndexOf("/")):"";
@@ -77,14 +78,16 @@ export function createMiniDiskMap(actions:MapActions):MiniDiskMap{
     clearTimeout(saveTimer);
     saveTimer=window.setTimeout(()=>writePreference(MINI_VIEW_KEY,JSON.stringify(view)),260);
   };
-  function navigate(folder:string){
+  function navigate(folder:string,record=true){
     if(folder===current)return;
+    if(record)history.push(current);
+    history=history.slice(-32);
     pendingNav=folder;
     actions.openFolder(folder);
   }
   function stepBack(){
     const dest=history.pop();
-    if(dest!==undefined)navigate(dest);
+    if(dest!==undefined)navigate(dest,false);
   }
   function changePage(d:number){
     page=Math.max(0,Math.min(scene.pages-1,page+d));
@@ -147,6 +150,7 @@ export function createMiniDiskMap(actions:MapActions):MiniDiskMap{
   }
   function render(){
     const limit=frame.clientWidth<480?6:frame.clientWidth<760?8:12;
+    renderLimit=limit;
     scene=spatialScene(files,folders,current,page,limit,filter);
     page=scene.page;
     selected=-1;
@@ -290,6 +294,7 @@ export function createMiniDiskMap(actions:MapActions):MiniDiskMap{
     const observer=new ResizeObserver(()=>{
       if(root.isConnected){
         if(!mounted){mounted=true;render();}
+        else if((frame.clientWidth<480?6:frame.clientWidth<760?8:12)!==renderLimit)render();
         else schedulePaint();
         everMounted=true;
       }else if(everMounted){observer.disconnect();if(raf)cancelAnimationFrame(raf);}
