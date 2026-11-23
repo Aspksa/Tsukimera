@@ -69,6 +69,14 @@ const DISK_PREF_KEYS = [
 const SQLITE_PREF_KEYS=[KEY_NAV,KEY_UI,KEY_SETTINGS,...DISK_PREF_KEYS];
 let prefsReady=false;
 let preferenceQueue=Promise.resolve();
+let settingsTabAbort=new AbortController();
+let currentSettingsCategory="general";
+let settingsSaveInfo={state:"saved",message:"Состояние настроек: сохранено"};
+function setSettingsSaveState(state,message){
+  settingsSaveInfo={state,message};
+  const status=document.querySelector(".settings-page .set-save-state");
+  if(status){status.dataset.state=state;status.textContent=message;}
+}
 function savePrefChanges(changes){
   preferenceQueue=preferenceQueue.catch(()=>{}).then(async()=>{
     const response=await fetch('/api/preferences',{method:'PUT',
@@ -127,8 +135,12 @@ function writeLocal(key, value) {
   try { localStorage.setItem(key,raw); }
   catch { toast('Браузер запретил локальное сохранение'); }
   if(prefsReady&&SQLITE_PREF_KEYS.includes(key)){
-    void savePrefChanges({[key]:raw}).catch(error=>
-      toast('Настройки не сохранены в SQLite: '+error.message));
+    setSettingsSaveState('saving','Сохраняется в SQLite…');
+    void savePrefChanges({[key]:raw}).then(()=>
+      setSettingsSaveState('saved','Сохранено в SQLite')).catch(error=>{
+      setSettingsSaveState('error','Не сохранено в SQLite: '+error.message);
+      toast('Настройки не сохранены в SQLite: '+error.message);
+    });
   }
 }
 function cleanMenu(raw) {
@@ -508,7 +520,8 @@ async function loadConfig() {
     config=data.settings;serverAvailable=true;
   }catch(err){console.warn('Tsukimera settings:',err.message);serverAvailable=false;}
 }
-async function saveSettings(patch) {
+async function saveSettings(patch,{quiet=false}={}) {
+  setSettingsSaveState('saving','Сохраняется в SQLite…');
   try {
     const response=await fetch('/api/settings',{method:'PUT',
       headers:{'Content-Type':'application/json','X-Tsukimera-Request':'1'},
@@ -516,10 +529,15 @@ async function saveSettings(patch) {
     const json=await response.json();
     if(!response.ok)throw Error(json.error||'Ошибка сохранения');
     config=json.settings;serverAvailable=true;
-    toast('Настройки сохранены локально');
+    setSettingsSaveState('saved','Сохранено в SQLite');
+    if(!quiet)toast('Настройки сохранены локально');
     // Do not destroy unsaved edits elsewhere in the settings form.
     renderMenu();return true;
-  }catch(err){toast('Не сохранено: '+err.message);return false;}
+  }catch(err){
+    setSettingsSaveState('error','Не сохранено: '+err.message);
+    if(!quiet)toast('Не сохранено: '+err.message);
+    return false;
+  }
 }
 function field(label,value,type='text',max=200) {
   const wrap=el('label','beh-field');
@@ -618,8 +636,12 @@ function cloudModelBrowser(primary,fallback){
   row.append(search,select,refresh);
   const actions=el("div","set-controls");actions.append(toPrimary,toFallback);
   box.append(heading,row,actions,status);
-  const reload=()=>{if(cachedCloudModels.length)update();else void refresh.click();};
+  const reload=()=>{void refresh.click();};
   document.addEventListener("tsukimera:cloud-models",reload,{signal:settingsTabAbort.signal});
+  document.addEventListener("tsukimera:cloud-models-cleared",()=>{
+    cachedCloudModels=[];update();
+    status.textContent="Cloud.ru отключён, список очищен.";
+  },{signal:settingsTabAbort.signal});
   void tsApi("/api/cloud/status").then(info=>{
     if(!box.isConnected)return;
     if(info.configured)void refresh.click();
