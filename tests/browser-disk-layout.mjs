@@ -197,6 +197,33 @@ try{
   assert.equal(graphOnly.border,"0px","The Canvas must have no frame");
   assert.equal(graphOnly.background,"rgba(0, 0, 0, 0)","Graph stage should be transparent");
   assert.equal(graphOnly.clutter,false,"All static controls, panels and legends must be absent");
+
+  // Disk 16: real layout tests across laptop, 4K and 21:9 workspaces.
+  // CDP changes monitor resolution; graph adapts without remounting itself.
+  await device(1366,768);
+  const laptopGraph=await evaluate("(()=>{const stage=document.querySelector('.dk-graph-stage'),c=stage?.querySelector('canvas'),r=stage?.getBoundingClientRect();return {width:r?.width,height:r?.height,capacity:Number(c?.dataset.capacity),detail:c?.dataset.detail,layer:c?.dataset.layer}})()");
+  assert.ok(laptopGraph.width>180&&laptopGraph.height>=200&&laptopGraph.height<=295,
+    "Laptop graph should not consume the entire viewport: "+JSON.stringify(laptopGraph));
+  assert.equal(laptopGraph.detail,"standard");
+  await device(3840,2160);
+  const fourK=await evaluate("(()=>{const stage=document.querySelector('.dk-graph-stage'),c=stage?.querySelector('canvas'),r=stage?.getBoundingClientRect();return {width:r?.width,height:r?.height,capacity:Number(c?.dataset.capacity),nodes:Number(c?.dataset.nodes),pixelWidth:c?.width,pixelHeight:c?.height}})()");
+  assert.ok(fourK.height>=420&&fourK.capacity>=laptopGraph.capacity,
+    "4K layout must show a larger responsive scene: "+JSON.stringify(fourK));
+  assert.ok(fourK.pixelWidth*fourK.pixelHeight<=10100000,
+    "4K Canvas allocation must remain bounded: "+JSON.stringify(fourK));
+  await device(3440,1440);
+  await evaluate("document.querySelector('.dk-mini-map-canvas').dispatchEvent(new KeyboardEvent('keydown',{key:' ',bubbles:true,cancelable:true}))");
+  await pause(350);
+  const ultrawideGraph=await evaluate("(()=>{const root=document.querySelector('.dk-graph-only'),stage=root?.querySelector('.dk-graph-stage'),c=stage?.querySelector('canvas'),r=stage?.getBoundingClientRect();return {expanded:root?.classList.contains('dk-graph-expanded'),aspect:c?.dataset.aspect,width:r?.width,height:r?.height,canvasCount:document.querySelectorAll('.dk-graph-only canvas').length,pixels:c?.width*c?.height,detail:c?.dataset.detail}})()");
+  assert.ok(ultrawideGraph.expanded&&ultrawideGraph.aspect==="ultrawide"&&
+    ultrawideGraph.width>=3200&&ultrawideGraph.height>=1350&&
+    ultrawideGraph.canvasCount===1&&ultrawideGraph.pixels<=10100000,
+    "Ultrawide graph must use all available width without allocating unlimited pixels: "+JSON.stringify(ultrawideGraph));
+  await evaluate("document.querySelector('.dk-mini-map-canvas').dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}))");
+  await device(1920,1080);
+  assert.ok(await evaluate("!!document.querySelector('.dk-side > .dk-graph-only')"),
+    "Resizing must restore the same graph under the folder hierarchy");
+
   await evaluate("(()=>{const c=document.querySelector('.dk-mini-map-canvas');for(let i=0;i<3;i++)c.dispatchEvent(new WheelEvent('wheel',{bubbles:true,cancelable:true,deltaY:-110}));})()");
   await pause(490);
   const zoomedMap=await evaluate("JSON.parse(localStorage.getItem('tsukimera.disk.minimap.view.v1')||'null')");
