@@ -147,7 +147,7 @@ class Graph22(unittest.TestCase):
         # File pagination retains a stable folder scaffold and excludes a
         # previously visible document from later pages.
         first=graph(self.conn,limit=4,offset=0)
-        second=graph(self.conn,limit=4,offset=1)
+        second=graph(self.conn,limit=4,offset=3)
         first_files={n["id"] for n in first["nodes"] if n["kind"]=="file"}
         second_files={n["id"] for n in second["nodes"] if n["kind"]=="file"}
         self.assertFalse(first_files & second_files)
