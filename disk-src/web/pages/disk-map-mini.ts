@@ -16,6 +16,10 @@ import {normalizeMiniView,MINI_VIEW_KEY,clampView} from "./disk-map-mini-model";
 import {SPATIAL_DENSITY_KEY} from "./disk-map-spatial";
 import {graphRoute,graphNeighbors,graphEdgeAt,graphEdgeExplanation,type GraphRoute}
   from "./disk-map-explore";
+import {graphArtLayout,artCommunityColor,artRgb,artDepth,artImportance,
+  artBundleEdges,artCurve,artCurvePoint,artCurveHit,artClouds,artClusterStep,
+  artEase,artLerp,artInertia,type ArtLayout,type ArtBundle}
+  from "./disk-map-art";
 import {graphScreen,graphBounds,graphCamera,anchoredZoom,graphMotionBudget,graphLerp,
   type GraphBounds,type GraphScreen} from "./disk-map-responsive";
 import {writePreference} from "../preferences";
@@ -67,6 +71,9 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
   let hoverEdge:GraphLink|null=null,hoverX=0,hoverY=0;
   let semantic:SemanticIndex|null=null,analysisGeneration=0;
   let coords=new Map<string,GraphPoint>(),appearing=new Map<string,number>();
+  let art:ArtLayout=graphArtLayout(scene),renderBundles:ArtBundle[]=[];
+  let hoverBundle:ArtBundle|null=null,routePulseUntil=0;
+  let cameraRaf=0,inertiaRaf=0,dragVelocityX=0,dragVelocityY=0;
   let bounds:GraphBounds=graphBounds([]),screen:GraphScreen=graphScreen(320,280);
   let lastScreenKey="",highlightTimer=0,pointerInsideGraph=false;
   let fading:Array<{point:GraphPoint;node:GraphNode;until:number}>=[];
@@ -111,7 +118,9 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
     return nearest;
   }
   function tint(n:GraphNode):string{
-    return shades[n.kind==="file"?n.fileType||"other":n.kind]||shades.other;
+    return n.kind==="file"||n.kind==="folder"||n.kind==="revision"?
+      artCommunityColor(art,n.id):
+      shades[n.kind]||artCommunityColor(art,n.id);
   }
   function fileHighlight(node:GraphNode|null){
     const page=homePage||root.closest<HTMLElement>(".disk-page");
@@ -127,6 +136,28 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
     selected=node?.id||null;hovered=selected;
     fileHighlight(node||null);draw();
   }
+  function cancelCamera(){
+    if(cameraRaf)cancelAnimationFrame(cameraRaf);cameraRaf=0;
+    if(inertiaRaf)cancelAnimationFrame(inertiaRaf);inertiaRaf=0;
+  }
+  function panTo(targetX:number,targetY:number,duration=280){
+    if(cameraRaf)cancelAnimationFrame(cameraRaf);
+    const toX=clamp(targetX,-1800,1800),toY=clamp(targetY,-1800,1800);
+    if(reduced()||!root.isConnected||duration<=0){
+      panX=toX;panY=toY;persist();draw();return;
+    }
+    const start=performance.now(),fromX=panX,fromY=panY;
+    function step(now:number){
+      cameraRaf=0;
+      if(!root.isConnected||pointerDown)return;
+      const t=artEase((now-start)/duration);
+      panX=artLerp(fromX,toX,t);panY=artLerp(fromY,toY,t);
+      draw();
+      if(t<.999)cameraRaf=requestAnimationFrame(step);
+      else {panX=toX;panY=toY;persist();draw();}
+    }
+    cameraRaf=requestAnimationFrame(step);
+  }
   function centerNode(id:string,changeScale=true){
     const p=coords.get(id);if(!p)return;
     if(changeScale&&zoom<1.35){
@@ -136,9 +167,19 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
     }
     const point=coords.get(id);if(!point)return;
     const v=viewport();
-    panX=clamp(panX+v.w/2-(v.cx+point.x*v.scale),-1800,1800);
-    panY=clamp(panY+v.h/2-(v.cy+point.y*v.scale),-1800,1800);
-    persist();draw();
+    // Folder selection magnetises toward its actual community centroid.
+    const n=scene.nodes.find(n=>n.id===id);
+    const community=n?.kind==="folder"?
+      art.communities.find(c=>c.id===art.membership.get(id)):null;
+    const group=community?.members.map(key=>coords.get(key)).filter(
+      (p):p is GraphPoint=>!!p);
+    const target=group?.length?{
+      x:group.reduce((sum,p)=>sum+p.x,0)/group.length,
+      y:group.reduce((sum,p)=>sum+p.y,0)/group.length
+    }:point;
+    const targetX=panX+v.w/2-(v.cx+target.x*v.scale);
+    const targetY=panY+v.h/2-(v.cy+target.y*v.scale);
+    panTo(targetX,targetY);
   }
   function focusOnNode(id:string|null){
     if(id&&!scene.nodes.some(n=>n.id===id))return;
@@ -158,7 +199,10 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
     routeEnd=id;
     route=graphRoute(scene,routeStart,id);
     selected=id;hovered=id;
-    if(route)centerNode(id,false);else draw();
+    if(route){
+      routePulseUntil=reduced()?0:performance.now()+950;
+      centerNode(id,false);schedule();
+    }else draw();
     canvas.dataset.route=route?String(route.links.length):"unavailable";
   }
   function activate(n:GraphNode){
@@ -174,6 +218,7 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
     selected=n.id;hovered=n.id;fileHighlight(n);draw();
   }
   function changeZoom(factor:number,atX?:number,atY?:number){
+    cancelCamera();
     const previous=viewport();
     const next=clampView(zoom*factor,.65,4);
     if(Math.abs(next-zoom)<.00001)return;
@@ -202,6 +247,7 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
   }
   function setExpanded(value:boolean){
     if(value===expanded)return;
+    cancelCamera();
     dismissMenu();expanded=value;
     if(value){
       anchor=root.parentNode;nextSibling=root.nextSibling;
@@ -300,6 +346,7 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
       limit,perFolder:screen.perFolder,detailLevel:detail,
       includeTags,includeDuplicates,semantic,viewMode:mode,global:globalGraph
     });
+    art=graphArtLayout(scene);
     const currentTime=performance.now();
     const next=new Map<string,GraphPoint>(),entering=new Map<string,number>();
     const currentIds=new Set(scene.nodes.map(n=>n.id));
@@ -324,7 +371,7 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
     }else if(routeStart&&!next.has(routeStart)){
       routeStart=null;routeEnd=null;route=null;canvas.dataset.route="";
     }
-    hoverEdge=null;
+    hoverEdge=null;hoverBundle=null;renderBundles=[];
     // Freeze camera extents for each physics burst. Continual re-fitting
     // during every force tick would produce a nauseating zoom wobble.
     bounds=graphBounds(coords.values());
@@ -333,6 +380,7 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
     canvas.dataset.capacity=String(limit);
     canvas.dataset.aspect=screen.ultrawide?"ultrawide":"standard";
     canvas.dataset.layer="graph";
+    canvas.dataset.communities=String(art.communities.length);
     canvas.dataset.nodes=String(scene.nodes.length);
     canvas.dataset.links=String(scene.links.length);
     canvas.dataset.focus=current;
