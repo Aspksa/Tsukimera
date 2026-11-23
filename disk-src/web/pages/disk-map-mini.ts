@@ -97,6 +97,8 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
   });
   let scene:GraphScene=graphFromCatalog([],[],"");
   let coords=new Map<string,GraphPoint>();
+  let appearing=new Map<string,number>();
+  let fading:Array<{node:GraphNode;point:GraphPoint;until:number}>=[];
   let frameNumber=0,raf=0,resizeObserver:ResizeObserver|null=null;
   let hovered:string|null=null,selected:string|null=null,query="";
   let expanded=false,originalParent:Node|null=null,originalNext:Node|null=null;
@@ -180,14 +182,32 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
     hovered=selected;highlightFileCards(node||null);renderInspector(node||null);draw();
   }
   function rebuild(){
+    const previousNodes=new Map(scene.nodes.map(n=>[n.id,n]));
+    const previousPoints=coords;
     const limit=expanded?(localStorage.getItem(SPATIAL_DENSITY_KEY)==="detailed"?200:150):
       (localStorage.getItem(SPATIAL_DENSITY_KEY)==="detailed"?80:54);
     scene=graphFromCatalog(files,folders,current,{depth,limit,
       includeTags:tagsEnabled,includeDuplicates:duplicatesEnabled,
       semantic,viewMode:graphMode});
     const updated=new Map<string,GraphPoint>();
-    for(const n of scene.nodes)updated.set(n.id,coords.get(n.id)||graphInitial(n));
-    coords=updated;
+    const now=performance.now(),nextIds=new Set(scene.nodes.map(n=>n.id));
+    // Enter/exit visual state is temporary; disappearing files cannot be
+    // clicked or searched and are never kept in the live graph model.
+    if(!reduced()){
+      for(const [oldId,oldNode] of previousNodes){
+        const point=previousPoints.get(oldId);
+        if(!nextIds.has(oldId)&&point)
+          fading.push({node:oldNode,point:{...point},until:now+360});
+      }
+      fading=fading.filter(n=>n.until>now).slice(-50);
+    }else fading=[];
+    const fresh=new Map<string,number>();
+    for(const n of scene.nodes){
+      updated.set(n.id,previousPoints.get(n.id)||graphInitial(n));
+      if(!reduced()&&!previousNodes.has(n.id))fresh.set(n.id,now);
+      else if(appearing.has(n.id))fresh.set(n.id,appearing.get(n.id)!);
+    }
+    coords=updated;appearing=fresh;
     frameNumber=0;
     total.textContent=scene.nodes.length+" узлов · "+scene.links.length+" связей"+
       (scene.hidden?" · +"+scene.hidden:"");
@@ -428,7 +448,17 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
         drawLabels.add(n.id);
     }else drawLabels.add(scene.focus);
     if(query)for(const id of searchMatches)drawLabels.add(id);
-    const breathe=expanded&&!reduced()?Math.sin(performance.now()/850)*.32:0;
+    const now=performance.now();
+    fading=fading.filter(n=>n.until>now);
+    for(const ghost of fading){
+      const x=cx+ghost.point.x*scale,y=cy+ghost.point.y*scale;
+      if(x<0||x>w||y<0||y>h)continue;
+      ctx.globalAlpha=Math.max(0,(ghost.until-now)/360)*.36;
+      ctx.beginPath();ctx.arc(x,y,3,0,Math.PI*2);
+      ctx.fillStyle=color(ghost.node);ctx.fill();
+    }
+    ctx.globalAlpha=1;
+    const breathe=expanded&&!reduced()?Math.sin(now/850)*.32:0;
     for(const node of scene.nodes){
       const p=coords.get(node.id);if(!p)continue;
       const x=cx+p.x*scale,y=cy+p.y*scale;
@@ -440,7 +470,9 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
         2.9+Math.min(2,Math.log10(1+Math.max(0,node.size))/5):4;
       const radius=Math.max(2.1,Math.min(12,radiusBase*Math.sqrt(Math.max(.55,scale))+
         (chosen?breathe:0)));
-      ctx.globalAlpha=faded?.14:1;
+      const entered=appearing.get(node.id);
+      const entrance=entered===undefined||reduced()?1:Math.min(1,(now-entered)/390);
+      ctx.globalAlpha=(faded?.14:1)*entrance;
       if(chosen||match){
         ctx.beginPath();ctx.arc(x,y,radius+6,0,Math.PI*2);
         ctx.fillStyle="rgba(232,180,103,.10)";ctx.fill();
@@ -452,7 +484,7 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
       if(chosen){ctx.shadowColor=color(node);ctx.shadowBlur=expanded?16:8;}
       ctx.fill();ctx.shadowBlur=0;
       ctx.globalAlpha=1;
-      if(drawLabels.has(node.id)&&(!faded||chosen)){
+      if(drawLabels.has(node.id)&&(!faded||chosen)&&entrance>.62){
         const text=node.name.length>28?node.name.slice(0,27)+"…":node.name;
         ctx.font=(chosen?"600 ":"400 ")+(expanded?12:10)+"px system-ui,sans-serif";
         const tw=ctx.measureText(text).width;
@@ -484,7 +516,12 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
       if(frameNumber<budget){
         const energy=graphForceStep(scene.nodes,scene.links,coords,Math.max(.28,1-frameNumber/budget*.65));
         frameNumber++;draw();
-        if(energy>.035&&frameNumber<budget){raf=requestAnimationFrame(step);return;}
+        const now=performance.now();
+        const transitioning=!reduced()&&([...appearing.values()].some(t=>now-t<400)||
+          fading.some(f=>f.until>now));
+        if((energy>.035||transitioning)&&frameNumber<budget){
+          raf=requestAnimationFrame(step);return;
+        }
       }
       draw();
     };
