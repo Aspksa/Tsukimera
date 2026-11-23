@@ -132,6 +132,10 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
   let sort: SortKey = (["new", "old", "name", "size"] as const).find((s) => s === store.get("juunibi.disk.sort")) ?? "new";
   let groupBy: GroupKey = "none", limit = PAGE;
   let query = "", inText = false, contentIds: Set<string> | null = null;
+  type TileInsight={id:string;links:number;state:"ready"|"text-indexed"|"waiting";sha:string};
+  const tileInsights=new Map<string,TileInsight>();
+  let insightBusy=false,insightTimer=0;
+  const insightQueued=new Set<string>();
   let rankedContent=new Map<string,{rank:number;excerpt:string}>();
   let ext = "", minKb: number | null = null, maxKb: number | null = null, after = "";
   const selected = new Set<string>();
@@ -448,6 +452,28 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
     if (madeThumb(f) === "video" && view !== "trash") box.append(el("span", { cls: "dk-play", attrs: { "aria-hidden": "true" } }));
     return box;
   };
+  // A tile receives exact per-file counts from SQLite, not a sampled graph:
+  // visible-node limits can never turn a partial count into a false "zero".
+  const insightBadges=(f:DiskFile):HTMLElement[]=>{
+    if(view==="trash"||(mode!=="tiles"&&mode!=="large"))return [];
+    const insight=tileInsights.get(f.id);
+    const current=insight?.sha===f.sha256?insight:null;
+    const result:HTMLElement[]=[];
+    if(current&&current.links>0)result.push(el("span",{
+      cls:"dk21-link-count",title:current.links+" сохранённых связей с другими документами",
+      textContent:"↗ "+String(current.links),attrs:{"aria-label":
+        current.links+" сохранённых связей по реквизитам"}}));
+    if(current)result.push(el("span",{
+      cls:"dk21-index-state state-"+current.state,
+      textContent:current.state==="ready"?"●":current.state==="text-indexed"?"◌":"·",
+      title:current.state==="ready"?"Реквизиты обработаны локально":
+        current.state==="text-indexed"?"Текст найден; обработка связей продолжается":
+        "Ожидание текстовой индексации или неподдерживаемый формат",
+      attrs:{"aria-label":current.state==="ready"?"Анализ завершён":
+        current.state==="text-indexed"?"Анализ выполняется":"Анализ ожидает текст"}
+    }));
+    return result;
+  };
   const card = (f: DiskFile) => {
     const c = el("div", { cls: "dk-file", tabIndex: -1, attrs: { "data-id": f.id, "data-file-id": f.id, role: "listitem", "aria-label": f.name } });
     c.style.setProperty("--k", KIND_COLOR[kindOf(f.name)]);
@@ -465,7 +491,8 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
       el("div", { cls: "dk-meta" },
         el("div",{cls:"dk-file-labels"},
           el("span",{cls:"dk-kind-label",textContent:extLabel}),
-          ...(f.revision&&f.revision>1?[el("span",{cls:"dk-revision-label",textContent:"v"+f.revision})]:[])),
+          ...(f.revision&&f.revision>1?[el("span",{cls:"dk-revision-label",textContent:"v"+f.revision})]:[]),
+          ...insightBadges(f)),
         el("strong", { cls: "dk-name", textContent: f.name, title: f.name + (f.tags?.length ? "\nМетки: " + f.tags.join(", ") : "") }),
         el("small", { cls:"dk-file-sub",textContent: meta }),
         ...(inText&&rankedContent.has(f.id)&&mode!=="table"?
@@ -497,6 +524,53 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
     return emptyState("folder", current ? "В папке «" + folderName(current) + "» пусто" : "На Диске пока нет файлов", "Перетащите файлы или целую папку в это окно или нажмите «Загрузить». Можно сразу несколько.",
       el("div", { cls: "dk-empty-actions" }, up, btn("Загрузить папку", chooseFolder, {}), btn("Новая папка", () => void createFolder(uploadFolder()), { icon: "plus" })));
   };
+  const requestTileInsights=(files:DiskFile[])=>{
+    if(view==="trash"||(mode!=="tiles"&&mode!=="large"))return;
+    for(const f of files){
+      if(tileInsights.get(f.id)?.sha!==f.sha256)insightQueued.add(f.id);
+    }
+    if(insightBusy||insightTimer||!insightQueued.size)return;
+    insightTimer=window.setTimeout(()=>{insightTimer=0;void loadTileInsights();},110);
+  };
+  async function loadTileInsights(){
+    if(insightBusy||!page.isConnected||!insightQueued.size)return;
+    const ids=[...insightQueued].slice(0,150);ids.forEach(id=>insightQueued.delete(id));
+    insightBusy=true;
+    try{
+      const result=await api.diskTileInsights(ids);
+      if(result.ok&&page.isConnected){
+        const lookup=new Map(all.map(f=>[f.id,f]));
+        for(const item of result.value.items){
+          const f=lookup.get(item.id);if(!f)continue;
+          tileInsights.set(item.id,{...item,sha:f.sha256});
+        }
+        // Refresh the visible badges without rebuilding the entire file list,
+        // scroll position or selection.
+        for(const node of filesBox.querySelectorAll<HTMLElement>(".dk-file[data-file-id]")){
+          const id=node.dataset.fileId||"",file=lookup.get(id);
+          if(!file)continue;
+          const line=node.querySelector<HTMLElement>(".dk-file-labels");
+          if(!line)continue;
+          line.querySelectorAll(".dk21-link-count,.dk21-index-state").forEach(n=>n.remove());
+          line.append(...insightBadges(file));
+        }
+        if(result.value.items.some(x=>x.state!=="ready")){
+          window.setTimeout(()=>{
+            if(!page.isConnected)return;
+            for(const row of result.value.items)if(row.state!=="ready"){
+              tileInsights.delete(row.id);insightQueued.add(row.id);
+            }
+            if(!insightTimer&&insightQueued.size)
+              insightTimer=window.setTimeout(()=>{insightTimer=0;void loadTileInsights();},150);
+          },8500);
+        }
+      }
+    }finally{
+      insightBusy=false;
+      if(insightQueued.size&&!insightTimer&&page.isConnected)
+        insightTimer=window.setTimeout(()=>{insightTimer=0;void loadTileInsights();},160);
+    }
+  }
   const renderFiles = () => {
     autoMoreObserver?.disconnect();autoMoreObserver=null;
     filesBox.className = "dk-files mode-" + mode+
@@ -555,6 +629,7 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
     }
     filesBox.setAttribute("role", "list");
     filesBox.replaceChildren(...nodes);
+    requestTileInsights(visible);
     // CSS grid spacers are full-span and do not instantiate hidden file cards.
     if(!canWindow&&shown.length>visible.length&&typeof IntersectionObserver==="function"){
       const more=filesBox.querySelector<HTMLElement>(".dk-more-files");
@@ -1001,8 +1076,10 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
   const collapseAll=iconButton("minimize","Свернуть все папки",()=>{
     expanded.clear();saveOpen();renderTree();
   },"icon-btn sm dk-tree-all");
+  // «Папки» already labels the rail: no duplicate «Иерархия» heading.
+  // Expansion commands remain available with descriptive aria-labels.
   const treeCommands=el("div",{cls:"dk-tree-commands",attrs:{"aria-label":"Управление иерархией"}},
-    el("span",{cls:"dk-tree-commands-title",textContent:"Иерархия"}),expandAll,collapseAll);
+    expandAll,collapseAll);
   const sections = el("div", { cls: "dk-sections", attrs: { role: "list", "aria-label": "Разделы" } });
   const sectionsRegion=el("div",{cls:"dk-sections-region"},sections);
   sectionsRegion.hidden=sidebarPrefs.collapsed;
@@ -1074,7 +1151,8 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
     const content=el("div",{cls:"dk-sections-dialog"},
       el("p",{cls:"muted",textContent:"Категории и умные папки доступны здесь. Скрытие раздела не удаляет документы."}),
       sectionsRegion,
-      btn("Настроить разделы",()=>configureSections(),{small:true,icon:"settings"}));
+      btn("Настроить разделы",()=>configureSections(),{small:true,icon:"settings"}),
+      btn("Изменить умные папки",()=>editSmartFolders(),{small:true,icon:"folder"}));
     openSheet({title:"Разделы и умные папки",icon:"drawer",content,
       onClose:()=>{sectionsRegion.hidden=sidebarPrefs.collapsed;}});
   };
@@ -1153,6 +1231,7 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
       } else void moveFiles(JSON.parse(ids!) as string[], folder);
     });
   };
+  let justOpenedFolder:string|null=null;
   const renderTree = () => {
     const totals = folderTotals(all);
     const kids = folderChildren(folders);
@@ -1173,13 +1252,21 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
       const toggle = el("button", { type: "button", cls: "dk-node-toggle", tabIndex: -1, attrs: { "aria-label": open ? "Свернуть" : "Развернуть" } }, children.length && folder ? dIcon("chevronRight", 14) : null);
       if (open) toggle.classList.add("open");
       toggle.disabled = !children.length || !folder;
-      toggle.addEventListener("click", () => { if (expanded.has(folder)) expanded.delete(folder); else expanded.add(folder); saveOpen(); renderTree(); });
+      toggle.addEventListener("click", () => {
+        if(expanded.has(folder)){expanded.delete(folder);justOpenedFolder=null;}
+        else{expanded.add(folder);justOpenedFolder=folder;}
+        saveOpen();renderTree();
+      });
       const label = el("button", { type: "button", cls: "dk-node-label disk-tree-select", attrs: { "aria-current": isCur ? "page" : "false", title: folder || "Корень Диска" } },
         st?.cover && all.some((f) => f.id === st.cover) ? el("img", { cls: "dk-cover", alt: "", loading: "lazy", src: diskRawUrl(all.find((f) => f.id === st.cover)!) })
           : el("span", { cls: "dk-node-ic" }, folder ? dIcon(isCur ? "folderOpen" : "folder", 17) : dIcon("disk", 17)),
         el("span", { cls: "dk-node-name", textContent: folder ? folderName(folder) : "Диск" }),
         el("small", { cls: "dk-node-n", textContent: t ? t.count + " · " + human(t.bytes) : "пусто" }));
       if (st?.color && st.color !== "#b89cff") label.style.setProperty("--fc", st.color);
+      label.addEventListener("pointerenter",()=>miniMap.highlightFolder(folder));
+      label.addEventListener("pointerleave",()=>miniMap.highlightFolder(null));
+      label.addEventListener("focus",()=>miniMap.highlightFolder(folder));
+      label.addEventListener("blur",()=>miniMap.highlightFolder(null));
       label.addEventListener("click", () => { go({ folder }); setDrawer(false); });
       label.addEventListener("keydown", (e) => {
         const all2 = [...tree.querySelectorAll<HTMLButtonElement>(".dk-node-label")];
@@ -1210,7 +1297,7 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
       const wrap = el("div", { cls: "dk-branch" }, row);
       wrap.style.setProperty("--branch-line",(20+depth*14)+"px");
       if (open && children.length) {
-        const sub = el("div", { cls: "dk-branch-kids", attrs: { role: "group" } });
+        const sub = el("div", { cls: "dk-branch-kids"+(folder===justOpenedFolder?" dk21-folder-enter":""), attrs: { role: "group" } });
         for (const c of children) { const n = node(c, depth + 1); if (n) sub.append(n); }
         wrap.append(sub);
       }
@@ -1218,6 +1305,7 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
     };
     treeCount.textContent = plural(folders.length, "папка", "папки", "папок");
     tree.replaceChildren(node("", 0) ?? el("span"));
+    justOpenedFolder=null;
     const counts: Record<string, number> = {
       favorites: all.filter((f) => f.favorite).length, trash: trash.length,
       recent: all.filter((f) => matchesVirtual(f, "recent")).length, images: all.filter((f) => matchesVirtual(f, "images")).length,
@@ -1255,9 +1343,10 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
       return b;
     }));
     const rules=readSmartRules();
-    const smartHeader=el("button",{type:"button",cls:"dkx-smart-head"},
-      el("span",{textContent:"Умные папки"}),el("span",{textContent:"+ · изменить"}));
-    smartHeader.addEventListener("click",editSmartFolders);
+    // Edit smart folders from the existing «Ещё > Умные папки» action.
+    // Avoid a second identical edit button inside the categories dialog.
+    const smartHeader=el("div",{cls:"dkx-smart-head"},
+      el("span",{textContent:"Умные папки"}));
     sections.append(smartHeader);
     for(const rule of rules){
       const n=all.filter(f=>matchesSmartRule(f,rule)).length;

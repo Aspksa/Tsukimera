@@ -252,3 +252,35 @@ export function rankedDiskSearch(db,query){
   ).all(expression).map(x=>({id:x.file_id,excerpt:x.excerpt.slice(0,320),
     rank:Number(x.rank)}));
 }
+
+
+/** One bounded SQLite query returns exact counts (no visible-graph sampling).
+ * States: ready, text-indexed (knowledge pending), or waiting for text index.
+ * A missing row is intentionally "unknown", never treated as zero links.
+ * Pure read; no new table, cache, network call or mutation.
+ */
+export function diskTileInsights(db,ids){
+  const valid=[...new Set((Array.isArray(ids)?ids:[]).filter(id=>
+    typeof id==="string"&&/^[a-f0-9-]{36}$/i.test(id)))].slice(0,150);
+  if(!valid.length)return {items:[],coverage:"requested-files"};
+  const params=valid.map(()=>"?").join(",");
+  const rows=db.prepare(
+    "SELECT f.id,f.sha256,k.file_id AS knowledge, t.file_id AS indexed "+
+    "FROM disk_files f LEFT JOIN disk_knowledge_docs k ON "+
+    "k.file_id=f.id AND k.sha=f.sha256 LEFT JOIN disk_fts t "+
+    "ON t.file_id=f.id AND t.sha=f.sha256 WHERE "+
+    "f.deleted_at IS NULL AND f.id IN ("+params+")"
+  ).all(...valid);
+  const counts=db.prepare(
+    "SELECT id,count(DISTINCT other) AS n FROM ("+
+    "SELECT l.left_id AS id,l.right_id AS other FROM disk_knowledge_links l "+
+    "UNION ALL SELECT l.right_id AS id,l.left_id AS other "+
+    "FROM disk_knowledge_links l) "+
+    "WHERE id IN ("+params+") GROUP BY id"
+  ).all(...valid);
+  const byId=new Map(counts.map(x=>[x.id,x.n]));
+  return {items:rows.map(row=>({
+    id:row.id,links:Math.max(0,Number(byId.get(row.id)||0)),
+    state:row.knowledge?"ready":row.indexed?"text-indexed":"waiting"
+  })),coverage:"requested-files"};
+}

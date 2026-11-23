@@ -58,6 +58,9 @@ export const api={
   // Disk 20: read-only local evidence; never a write/move/delete operation.
   diskKnowledgeGraph:()=>attemptAsync(()=>call<any>("/api/disk/knowledge/graph")),
   diskKnowledgeStatus:()=>attemptAsync(()=>call<any>("/api/disk/knowledge/status")),
+  diskTileInsights:(ids:readonly string[])=>attemptAsync(()=>call<{
+    items:{id:string;links:number;state:"ready"|"text-indexed"|"waiting"}[];
+    coverage:string}>("/api/disk/knowledge/tiles?ids="+encodeURIComponent(ids.slice(0,150).join(",")))),
   diskKnowledge:(id:string)=>attemptAsync(()=>call<any>(
     "/api/disk/knowledge?fileId="+encodeURIComponent(id))),
   diskAudit:()=>attemptAsync(()=>call<any>("/api/disk/audit")),
