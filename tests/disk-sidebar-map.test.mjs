@@ -79,3 +79,27 @@ test("left rail and map maintain real document data, focus, accessible controls 
     "openSelected.addEventListener","openFolder(node.folder)","openFile(node.id.slice(5))"])
     assert.ok(mapSource.includes(wanted),"Missing link to the real file on the map "+wanted);
 });
+
+
+test("Disk rail swaps Sections for an interactive, bounded source-backed mini Canvas",async()=>{
+  const [page,mini,styles]=await Promise.all([
+    readFile(join(root,"disk-src/web/pages/disk.ts"),"utf8"),
+    readFile(join(root,"disk-src/web/pages/disk-map-mini.ts"),"utf8"),
+    readFile(join(root,"web/disk.css"),"utf8"),
+  ]);
+  assert.match(page,/treePanel,miniMap\.root\)/);
+  assert.match(page,/label: "Разделы и умные папки"/);
+  assert.match(page,/const openSections=\(\)=>/);
+  assert.match(page,/sectionsRegion\.hidden=false/);
+  assert.match(page,/miniMap\.update\(all,folders,current\)/);
+  assert.match(page,/title:"Разделы и умные папки"/);
+  for(const wanted of ["graphFromFiles(files,folders,70,40)",
+    "mapNodeRadius(node,graph.bytes)","canvas.addEventListener(\"click\"",
+    "canvas.addEventListener(\"dblclick\"","canvas.addEventListener(\"keydown\"",
+    "actions.openFull()","actions.openFile(node.id.slice(5))",
+    "actions.openFolder(node.folder)"])
+    assert.ok(mini.includes(wanted),"Mini map must keep real data and navigable nodes: "+wanted);
+  assert.match(styles,/\.dk-mini-map-frame\{/);
+  assert.match(styles,/\.dk-sections-dialog \.dk-sections\{/);
+  assert.match(styles,/\.dk-mini-map-canvas:focus-visible/);
+});
