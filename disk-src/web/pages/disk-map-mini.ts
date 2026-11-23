@@ -105,7 +105,7 @@ export function createMiniDiskMap(actions:MiniMapActions):MiniDiskMap{
   };
   const getBaseScale=()=>{
     const reach=Math.max(160,...graph.nodes.map(n=>Math.max(Math.abs(n.x),Math.abs(n.y))+38));
-    return clampView(Math.min(width*.46,height*.46)/reach,.07,1.1);
+    return clampView(Math.min(width*.46,height*.46)/reach,.025,1.1);
   };
   const project=(n:MiniNode,scale:number):Point=>({
     node:n,x:width/2+view.panX+n.x*scale,y:height/2+view.panY+n.y*scale,
@@ -297,7 +297,7 @@ export function createMiniDiskMap(actions:MiniMapActions):MiniDiskMap{
     view.panX=clampView(x-width/2-(x-width/2-view.panX)*r,-3000,3000);
     view.panY=clampView(y-height/2-(y-height/2-view.panY)*r,-3000,3000);
     view.zoom=next;
-    modeKey="";rebuild();invalidate();save();
+    rebuild();invalidate();save();
   };
   canvas.addEventListener("wheel",event=>{
     event.preventDefault();
