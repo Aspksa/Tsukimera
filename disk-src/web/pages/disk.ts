@@ -1303,6 +1303,7 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
       replace(r.value); renderFiles(); showToast("Сведения сохранены");
     }, { small: true, primary: true });
     const versions = el("div", { cls: "dk-versions" }, el("small", { cls: "muted", textContent: "Загрузка версий…" }));
+    const knowledge=el("section",{cls:"dk-info-block dk-knowledge",hidden:true});
     const newVersion = el("input", { type: "file", hidden: true });
     newVersion.addEventListener("change", async () => {
       const file = newVersion.files?.[0]; newVersion.value = "";
@@ -1387,8 +1388,57 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
       ...(!f.deletedAt ? [
         el("section", { cls: "dk-info-block" }, el("h4", { textContent: "Метки и цвет" }), tags, sw, note, saveMeta),
         el("section", { cls: "dk-info-block" }, el("h4", { textContent: "Версии" }), versions),
-        linked,
+        knowledge,linked,
       ] : []));
+    // Disk 20: display reviewable evidence beside real file metadata, never
+    // as an invented relationship or an automatic file operation.
+    if(!f.deletedAt)void api.diskKnowledge(f.id).then(result=>{
+      if(infoId!==f.id||!knowledge.isConnected)return;
+      knowledge.hidden=false;
+      knowledge.replaceChildren(el("h4",{textContent:"Реквизиты и связи"}));
+      if(!result.ok){
+        knowledge.append(el("small",{cls:"muted",textContent:
+          "Локальный индекс недоступен: "+result.error.message}));return;
+      }
+      const data=result.value;
+      if(!data.ready){
+        knowledge.append(el("small",{cls:"muted",textContent:
+          "Документ ожидает автоматического анализа или формат не поддерживается"}));
+        return;
+      }
+      const factNames:Record<string,string>={
+        contract:"Номер договора",appendix:"Приложение",
+        organization:"Организация",date:"Дата",amount:"Сумма",account:"Номер акта/счёта"};
+      for(const fact of (data.facts||[]).slice(0,18)){
+        knowledge.append(el("div",{cls:"dk-knowledge-item"},
+          el("small",{cls:"muted",textContent:factNames[fact.kind]||fact.kind}),
+          el("span",{textContent:fact.value,title:fact.evidence})));
+      }
+      for(const relation of (data.links||[]).slice(0,12)){
+        const open=btn(relation.name,()=>{
+          go({folder:relation.folder});reveal(relation.fileId);
+        },{small:true,icon:"link"});
+        open.title=relation.evidence+" · точность "+Math.round(relation.confidence*100)+"%";
+        knowledge.append(el("div",{cls:"dk-knowledge-item"},
+          el("small",{cls:"muted",textContent:
+            relation.kind==="contract"?"Совпадающий номер договора":"Упоминание организации"}),
+          open));
+      }
+      for(const warning of (data.alerts||[]).slice(0,5)){
+        knowledge.append(el("div",{cls:"dk-knowledge-warning"},
+          el("strong",{textContent:warning.label}),
+          el("small",{textContent:warning.reason})));
+      }
+      for(const suggestion of (data.suggestions||[]).slice(0,8)){
+        knowledge.append(el("div",{cls:"dk-knowledge-item"},
+          el("small",{cls:"muted",textContent:"Предложение · без автоматических действий"}),
+          el("span",{textContent:suggestion.label,title:suggestion.reason})));
+      }
+      if(!(data.facts?.length||data.links?.length||data.alerts?.length||data.suggestions?.length)){
+        knowledge.append(el("small",{cls:"muted",textContent:
+          "Подтверждённых реквизитов и совпадающих связей пока нет"}));
+      }
+    });
     info.hidden = false;
     layout.classList.add("with-info");
     if (focusTags) requestAnimationFrame(() => tags.focus());
