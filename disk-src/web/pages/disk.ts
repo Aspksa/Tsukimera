@@ -29,6 +29,7 @@ import {
 } from "./disk-extras";
 import {createDiskSplitters,tileSize,TILE_KEY} from "./disk-layout";
 import {fileWindow} from "./disk-window";
+import {createMiniDiskMap} from "./disk-map-mini";
 import {readSidebarPrefs,writeSidebarPrefs,reorderSections,folderAncestors,safeFolderDrop,
   type SectionId,type SidebarPrefs} from "./disk-sidebar";
 import {writePreference} from "../preferences";
@@ -236,6 +237,7 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
     { icon: "folderUp", label: "Загрузить папку…", run: chooseFolder },
     { icon: "zipDown", label: current && view === "all" && virtual === "none" ? "Скачать папку ZIP-архивом" : "Скачать весь Диск ZIP-архивом", run: () => void downloadZip({ folder: view === "all" && virtual === "none" ? current : "" }) },
     { icon: "chronicle", label: "Жизнь документов", run: () => life.reveal() },
+    { icon: "drawer", label: "Разделы и умные папки", run: () => openSections() },
     { icon: "search", label: "Палитра команд · Ctrl+K", run: () => showCommands() },
     { icon: "folder", label: "Живая карта файлов и связей", run: () => openDiskMap(all,folders,folder=>go({folder}),id=>{
       const file=byId(id);if(!file)return;
@@ -1056,11 +1058,34 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
     const sheet=openSheet({title:"Настройка разделов",icon:"settings",content});
   };
   sectionSettings.addEventListener("click",configureSections);
+  // Sections remain available from "Ещё" but no longer take up space in the
+  // left rail. We reuse the existing buttons, counters, saved order and rules.
+  const openSections=()=>{
+    renderTree();
+    sectionsRegion.hidden=false;
+    const content=el("div",{cls:"dk-sections-dialog"},
+      el("p",{cls:"muted",textContent:"Категории и умные папки доступны здесь. Скрытие раздела не удаляет документы."}),
+      sectionsRegion,
+      btn("Настроить разделы",()=>configureSections(),{small:true,icon:"settings"}));
+    openSheet({title:"Разделы и умные папки",icon:"drawer",content,
+      onClose:()=>{sectionsRegion.hidden=sidebarPrefs.collapsed;}});
+  };
+  const miniMap=createMiniDiskMap({
+    openFull:()=>openDiskMap(all,folders,folder=>go({folder}),id=>{
+      const file=byId(id);if(!file)return;
+      go({folder:file.folder});reveal(id);openInfo(id);
+    }),
+    openFolder:folder=>{go({folder});setDrawer(false);},
+    openFile:id=>{
+      const file=byId(id);if(!file)return;
+      go({folder:file.folder});reveal(id);openInfo(id);setDrawer(false);
+    }
+  });
   const treePanel=el("div",{cls:"dk-tree-panel"},
     el("div",{cls:"dk-side-tools"},treeFind,treeSortSel),treeCommands,tree);
-  const side = el("aside", { cls: "dk-side", attrs: { "aria-label": "Папки и разделы" } },
+  const side = el("aside", { cls: "dk-side", attrs: { "aria-label": "Иерархия папок и Живая карта Диска" } },
     el("div", { cls: "dk-side-head" }, el("strong", { textContent: "Папки" }), treeCount, iconButton("x", "Закрыть", () => setDrawer(false), "icon-btn sm dk-side-close")),
-    treePanel,sectionHead,sectionsRegion);
+    treePanel,miniMap.root);
   const scrim = el("div", { cls: "dk-scrim" });
   const setDrawer = (open: boolean) => { page.classList.toggle("drawer-open", open); if (open) side.querySelector<HTMLElement>(".dk-node.current .dk-node-label, .dk-side-close")?.focus({ preventScroll: true }); };
   drawerBtn.addEventListener("click", () => setDrawer(true));
@@ -1689,6 +1714,7 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
   function redraw() {
     renderCrumbs();
     renderTree();
+    miniMap.update(all,folders,current);
     renderTrashBar();
     renderFiles();
     life.refresh();
