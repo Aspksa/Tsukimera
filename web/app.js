@@ -905,85 +905,112 @@ function setupCard(id,body) {
   }
 }
 function renderSettings() {
-  const page=el('div','page settings-page');
-  const head=heading('Настройки','Локальные настройки Tsukimera · SQLite · реальные возможности помечены по состоянию.','settings');
+  settingsTabAbort.abort();
+  settingsTabAbort=new AbortController();
+  const groups=[
+    {id:"general",label:"Общие",icon:"palette",hint:"Оформление и чат",sections:["look","chat"]},
+    {id:"cloud",label:"Cloud.ru",icon:"cloud",hint:"Подключение и модели",sections:["conn","model"]},
+    {id:"persona",label:"Личность и память",icon:"brain",hint:"Инструкции и заметки",sections:["persona","memory"]},
+    {id:"actions",label:"Инструменты",icon:"puzzle",hint:"Разрешения и команды",sections:["tools","quick"]},
+    {id:"data",label:"Данные и SQLite",icon:"archive",hint:"База и резервные копии",sections:["data"]},
+    {id:"about",label:"О проекте",icon:"help",hint:"Версия и справка",sections:["about"]},
+  ];
+  if(!groups.some(g=>g.id===currentSettingsCategory))currentSettingsCategory="general";
+  const page=el("div","page settings-page settings-40");
+  const head=heading("Настройки","Компактный центр управления Tsukimera · локальное хранение · без скрытых платных действий.","settings");
   page.append(head);
-  const search=el('div','set-search');
-  search.append(icon('search'));
-  const searchInput=el('input');searchInput.type='search';searchInput.placeholder='Поиск по настройкам';
-  searchInput.setAttribute('aria-label','Поиск по настройкам');
-  const results=el('small','set-search-results','Поиск по разделам и отдельным параметрам');
-  results.setAttribute('role','status');
-  search.append(searchInput,el('kbd','kbd','Ctrl+,'));
-  page.append(search,results);
-  const layout=el('div','set-layout');
-  const left=el('aside','set-side'),toc=el('nav','set-toc');
-  toc.setAttribute('aria-label','Разделы настроек');
+  const search=el("div","set-search");
+  search.append(icon("search"));
+  const searchInput=el("input");searchInput.type="search";
+  searchInput.placeholder="Найти параметр в настройках";
+  searchInput.setAttribute("aria-label","Поиск по настройкам");
+  search.append(searchInput,el("kbd","kbd","Ctrl+,"));
+  const statusRow=el("div","set-40-status");
+  const results=el("small","set-search-results","6 категорий · 10 подразделов");
+  results.setAttribute("role","status");
+  const saved=el("small","set-save-state",settingsSaveInfo.message);
+  saved.setAttribute("role","status");saved.setAttribute("aria-live","polite");
+  saved.dataset.state=settingsSaveInfo.state;
+  statusRow.append(results,saved);
+  page.append(search,statusRow);
+  const layout=el("div","set-layout");
+  const left=el("aside","set-side"),toc=el("nav","set-toc");
+  toc.setAttribute("aria-label","Категории настроек");
   left.append(toc);
-  const main=el('div','set-main');
+  const main=el("div","set-main");
+  const categoryHead=el("header","set-40-category-head");
+  const title=el("h2","","");
+  const hint=el("p","muted","");
+  categoryHead.append(title,hint);
+  main.append(categoryHead);
   const cards=new Map(),links=new Map();
-  for(const sec of SECTIONS) {
-    const link=btn('',null,'set-toc-link');
-    link.append(icon(sec.icon,17),el('span','grow',sec.label));
-    const readiness={conn:'partial',model:'partial',persona:'pending',memory:'partial',
-      tools:'pending',quick:'partial',look:'ready',chat:'pending',data:'ready',about:'ready'};
-    link.dataset.readiness=readiness[sec.id];
-    link.title=readiness[sec.id]==='ready'?'Работает':
-      readiness[sec.id]==='partial'?'Часть возможностей работает':'Функционал пока не подключён';
-    link.addEventListener('click',()=>{
-      searchInput.value='';filter('');
-      document.getElementById('set-'+sec.id)?.scrollIntoView({behavior:'smooth',block:'start'});
-      for(const [id,l] of links)l.classList.toggle('active',id===sec.id);
+  for(const group of groups){
+    const link=btn("",null,"set-toc-link");
+    link.dataset.settingsGroup=group.id;
+    link.append(icon(group.icon,18),el("span","grow",group.label));
+    link.setAttribute("aria-label",group.label);
+    const amount=el("small","set-40-count",String(group.sections.length));
+    link.append(amount);
+    link.addEventListener("click",()=>{
+      currentSettingsCategory=group.id;
+      searchInput.value="";
+      filter("");
+      const first=main.querySelector(".set-card:not([hidden])");
+      first?.querySelector("button,input,textarea")?.focus({preventScroll:true});
     });
-    toc.append(link);links.set(sec.id,link);
-    const {section,body}=sectionCard(sec);setupCard(sec.id,body);
+    toc.append(link);links.set(group.id,link);
+  }
+  // All original ten sections are instantiated once so switching categories
+  // never destroys unsaved text or drops in-flight Cloud/SQLite operations.
+  for(const sec of SECTIONS){
+    const group=groups.find(g=>g.sections.includes(sec.id));
+    const {section,body}=sectionCard(sec);
+    section.dataset.category=group?.id||"general";
+    setupCard(sec.id,body);
     main.append(section);cards.set(sec.id,section);
   }
-  function filter(query) {
-    const norm=value=>String(value||'').toLowerCase().replaceAll('ё','е');
+  function filter(query){
+    const norm=v=>String(v||"").toLocaleLowerCase("ru").replaceAll("ё","е");
     const terms=norm(query.trim()).split(/\s+/).filter(Boolean);
-    let matches=0,sections=0;
+    const searchMode=terms.length>0;
+    const group=groups.find(g=>g.id===currentSettingsCategory)||groups[0];
+    let visible=0;
     for(const sec of SECTIONS){
-      const card=cards.get(sec.id),link=links.get(sec.id);
-      const heading=norm(sec.label+' '+sec.hint),whole=norm(card.textContent);
-      const full=terms.every(t=>heading.includes(t));
-      const rowNodes=[...card.querySelector('.set-card-body').children];
-      const hits=rowNodes.filter(node=>terms.every(t=>norm(node.textContent).includes(t)));
-      const match=!terms.length||full||hits.length>0||terms.every(t=>whole.includes(t));
-      card.hidden=!match;link.hidden=!match;
-      if(match)sections++;
-      if(terms.length&&match){
-        card.classList.remove('collapsed');
-        card.querySelector('.set-card-body').hidden=false;
-        for(const node of rowNodes){
-          // A section match keeps all fields; otherwise highlight the exact
-          // matching controls while retaining context and surrounding hints.
-          node.classList.toggle('set-search-hit',hits.includes(node));
-        }
-        matches+=full?rowNodes.length:hits.length||1;
-      }else rowNodes.forEach(node=>node.classList.remove('set-search-hit'));
+      const card=cards.get(sec.id);
+      const matches=terms.every(word=>norm(sec.label+" "+sec.hint+" "+card.textContent).includes(word));
+      const selected=card.dataset.category===currentSettingsCategory;
+      card.hidden=!(searchMode?matches:selected);
+      if(!card.hidden)visible++;
+      const collapsed=Array.isArray(sectionPrefs.collapsed)&&sectionPrefs.collapsed.includes(sec.id);
+      card.classList.toggle("collapsed",searchMode&&matches?false:collapsed);
+      const body=card.querySelector(".set-card-body");
+      if(body)body.hidden=!(searchMode&&matches)&&collapsed;
+      const toggle=card.querySelector(".set-collapse");
+      toggle?.setAttribute("aria-expanded",String(!card.classList.contains("collapsed")));
     }
-    results.textContent=terms.length?sections+' разделов · '+matches+' совпадений':
-      '10 разделов · работает / частично / не подключено';
-    search.dataset.empty=String(terms.length>0&&sections===0);
+    for(const category of groups){
+      const link=links.get(category.id);
+      const has=category.sections.some(id=>!cards.get(id).hidden);
+      link.hidden=searchMode&&!has;
+      link.classList.toggle("active",!searchMode&&category.id===currentSettingsCategory);
+      link.setAttribute("aria-current",!searchMode&&category.id===currentSettingsCategory?"page":"false");
+    }
+    categoryHead.hidden=searchMode;
+    title.textContent=group.label;
+    hint.textContent=group.hint;
+    results.textContent=searchMode?visible+" совпадений по подразделам":
+      "Категория "+group.label+" · "+visible+" подраздела";
+    search.dataset.empty=String(searchMode&&visible===0);
   }
-  searchInput.addEventListener('input',()=>filter(searchInput.value));
-  searchInput.addEventListener('keydown',event=>{
-    if(event.key==='Enter'){
-      event.preventDefault();
-      const first=[...cards.values()].find(card=>!card.hidden);
-      first?.scrollIntoView({block:'start',behavior:'smooth'});
-      first?.querySelector('input,button,textarea')?.focus({preventScroll:true});
-    }
+  searchInput.addEventListener("input",()=>filter(searchInput.value));
+  searchInput.addEventListener("keydown",event=>{
+    if(event.key!=="Enter")return;
+    event.preventDefault();
+    const first=main.querySelector(".set-card:not([hidden])");
+    first?.scrollIntoView({block:"nearest",behavior:"smooth"});
+    first?.querySelector("button,input,textarea")?.focus({preventScroll:true});
   });
-  filter('');
-  const controls=el('div','set-controls');
-  controls.append(btn('Свернуть все',()=>{
-    sectionPrefs.collapsed=SECTIONS.map(s=>s.id);writeLocal(KEY_SETTINGS,sectionPrefs);renderMain();
-  }),btn('Развернуть все',()=>{
-    sectionPrefs.collapsed=[];writeLocal(KEY_SETTINGS,sectionPrefs);renderMain();
-  }));
-  left.append(controls);
+  filter("");
   layout.append(left,main);page.append(layout);mainNode.append(page);
 }
 async function downloadBackup(){
