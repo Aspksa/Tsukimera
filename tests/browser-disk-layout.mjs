@@ -230,11 +230,14 @@ try{
   assert.ok(opened,"The existing Disk menu did not expose the new live map");
   await pause(350);
   const canvas=await evaluate("(()=>{const c=document.querySelector('.dkx-map-canvas');const f=document.querySelector('.dkx-map-frame');return {ready:!!c,width:c?.width,height:c?.height,context:!!c?.getContext('2d'),controls:document.querySelectorAll('.dkx-map-controls button').length,legend:document.querySelectorAll('.dkx-map-legend span').length,frame:f?.getBoundingClientRect().width};})()");
-  assert.ok(canvas.ready&&canvas.context&&canvas.width>500&&canvas.height>250&&canvas.controls===3&&canvas.legend===5,
+  assert.ok(canvas.ready&&canvas.context&&canvas.width>500&&canvas.height>250&&canvas.controls===4&&canvas.legend===5,
     "Live Canvas graph did not render with real files: "+JSON.stringify(canvas));
   await evaluate("document.querySelector('.dkx-map-controls button[aria-label=\"Увеличить карту\"]').click()");
   const mapSearch=await evaluate("(()=>{const x=document.querySelector('.dkx-map-search');x.value='Тест';x.dispatchEvent(new Event('input',{bubbles:true}));return document.querySelector('.dkx-map-selected').textContent;})()");
-  assert.match(mapSearch,/Найдено на карте/);
+  assert.match(mapSearch,/Найдено:/);
+  const mapActive=await evaluate("(()=>({enabled:!document.querySelector('.dkx-map-open').disabled,selection:document.querySelector('.dkx-map-selected').textContent}))()");
+  assert.ok(mapActive.enabled&&mapActive.selection.includes('выбран'),
+    "Searching the Canvas map must select an existing node and enable opening it");
   await evaluate("document.querySelector('.mod-sheet button[aria-label=\"Закрыть\"]').click()");
   let savedSettings;
   for(let i=0;i<25;i++){
