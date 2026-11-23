@@ -60,7 +60,7 @@ test("UX8 Life preserves original 150-metric computations and supports all-at-on
   const source=await readFile(join(root,"disk-src/server/disk-life.ts"),"utf8");
   assert.match(life,/showAll&&expanded\?searchLifeMetrics\(d.metrics/);
   assert.match(life,/textContent:"Открыть аналитику · все 150 показателей"/);
-  assert.match(life,/class:"dkl-all-toggle"/);
+  assert.match(life,/cls:"dkl-all-toggle"/);
   assert.match(life,/allBtn\.setAttribute\("aria-pressed",String\(showAll\)\)/);
   assert.match(source,/150/);
 });
