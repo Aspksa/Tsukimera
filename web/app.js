@@ -62,7 +62,8 @@ const DISK_PREF_KEYS = [
   'tsukimera.disk.layout.left.v1','tsukimera.disk.layout.right.v1',
   'tsukimera.disk.tiles.v1','tsukimera.disk.view','tsukimera.disk.sort',
   'tsukimera.disk.open','tsukimera.disk.tree','tsukimera.disk.life.group',
-  'tsukimera.disk.mdRaw','juunibi.disk.view','juunibi.disk.sort',
+  'tsukimera.disk.mdRaw','tsukimera.disk.sections.v1',
+  'tsukimera.disk.minimap.view.v1','juunibi.disk.view','juunibi.disk.sort',
   'juunibi.disk.open','juunibi.disk.tree','juunibi.disk.mdRaw',
   'juunibi.disk.life.group'
 ];
@@ -859,7 +860,30 @@ function setupCard(id,body) {
         ' · заметок: '+data.counts.notes+' · версий: '+data.counts.versions+
         (data.backupCreated?' · исходная копия: '+data.backupCreated:'');
     }).catch(()=>{if(storage.isConnected)storage.textContent='Не удалось проверить SQLite';});
-    text(body,'Экспорт включает настройки, заметки, их ссылки по ID и параметры просмотра Диска — без ключей API. Содержимое файлов и версии нужно сохранить отдельно в разделе «Диск».','set-note');
+    text(body,'Экспорт включает настройки и заметки без ключей API. Сами документы и версии экспортируются отдельно в «Диске».','set-note');
+    const health=el('div','set-40-sqlite-health');
+    health.setAttribute('aria-label','Состояние SQLite');
+    health.append(el('small','muted','Проверяю базу, объём и индексы…'));
+    body.append(health);
+    void Promise.all([tsApi('/api/storage/diagnostics'),tsApi('/api/settings/backups')]).then(([info,backups])=>{
+      if(!health.isConnected)return;
+      const badge=(kind,label)=>el('span','set-state '+kind,label);
+      const backupNote=backups.lastBackup?
+        'Последняя копия: '+new Date(backups.lastBackup.at).toLocaleString('ru-RU'):
+        'Первая копия создаётся после запуска сервера';
+      health.replaceChildren(
+        line('База SQLite',Math.round(info.sizeBytes/1024).toLocaleString('ru-RU')+' КБ',
+          badge(info.integrity==='ok'?'ready':'error',info.integrity==='ok'?'Исправна':'Проверить')),
+        line('Схема / таблицы',info.schema+' / '+info.tables),
+        line('Записи',info.counts.files+' файлов · '+info.counts.notes+' заметок · '+
+          info.counts.versions+' версий · '+info.counts.preferences+' настроек'),
+        line('Автокопирование','Каждые '+backups.frequencyHours+' ч во время работы программы · '+
+          backups.stored+' копий',badge(backups.lastError?'error':'ready',backups.lastError?'Ошибка':'Включено')),
+        line('Хранилище копий',Math.round(backups.sizeBytes/1024).toLocaleString('ru-RU')+
+          ' КБ / '+Math.round(backups.maxTotalBytes/1048576)+' МБ · максимум '+backups.retain+' копий'),
+        el('p','set-note',backupNote+' · '+(backups.lastError||backups.lastOutcome))
+      );
+    }).catch(error=>{if(health.isConnected)health.textContent='Состояние хранилища недоступно: '+error.message;});
     const diagnostic=el('div','set-diagnostics');
     const inspect=btn('Проверить целостность SQLite',async()=>{
       inspect.disabled=true;
@@ -880,6 +904,7 @@ function setupCard(id,body) {
       finally{inspect.disabled=false;}
     },'btn');
     body.append(inspect,diagnostic);
+    text(body,'Автоматические копии сохраняют SQLite, но не содержимое data/disk/objects. Создаются локально при работающей Tsukimera, с проверкой свободного места и удалением только старых автоматических копий.','set-note');
     const actions=el('div','section-actions');
     actions.append(btn('Скачать резервную копию',()=>void downloadBackup(),'btn primary'));
     const input=el('input');input.type='file';input.accept='application/json,.json';input.setAttribute('aria-label','Импорт файла резервной копии');
