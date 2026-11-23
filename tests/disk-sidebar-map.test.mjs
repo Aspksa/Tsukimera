@@ -656,3 +656,46 @@ test("Disk 17 keeps the graph chrome-free while exposing global, route and edge 
   "canvas.dataset.focusNode=focusId||\"\""])
   assert.ok(source.includes(needle),"Missing Disk 17 gesture: "+needle);
 });
+
+
+test("Disk 18 removes retired graph chrome CSS without disturbing the lone Canvas",async()=>{
+ const css=await readFile(join(root,"web/disk.css"),"utf8");
+ const mini=await readFile(join(root,"disk-src/web/pages/disk-map-mini.ts"),"utf8");
+ assert.ok(!css.includes("/* Disk 13.0"),"Retired toolbar CSS must be deleted");
+ assert.ok(!css.includes("/* Disk 14 —"),"Retired semantic inspector CSS must be deleted");
+ assert.ok(css.includes("Disk 18 — single layout contract"));
+ assert.ok(css.includes("/* Disk 15 — PURE GRAPH"));
+ assert.ok(css.includes("/* Disk 16 — fluid graph viewport"));
+ for(const token of [
+  "--dk18-u1:4px","--dk18-u2:8px","--dk18-u3:12px",
+  "--dk18-u4:16px","--dk18-u5:24px",
+  "scrollbar-gutter:stable","overflow-wrap:anywhere",
+  "max-height:clamp(130px,32dvh,350px)",
+  "align-items:center","text-overflow:ellipsis",
+  "@container diskspace (min-width:1800px)",
+  "@container diskspace (max-width:1180px)",
+  "@container diskspace (max-width:760px)",
+  "@media (max-height:700px)"])
+  assert.ok(css.includes(token),"Missing Disk 18 responsive geometry: "+token);
+ const visible=mini.match(/const root=el\("section"[\s\S]*?,frame\);/)?.[0]||"";
+ assert.ok(visible.includes("dk-graph-only"));
+ assert.ok(!visible.includes("dk-graph-title"),"No graph header may reappear");
+ assert.ok(!visible.includes("dk-graph-inspect"),"No graph evidence card may reappear");
+});
+
+test("Disk 18 header and long names use real file metadata without duplicating controls",async()=>{
+ const src=await readFile(join(root,"disk-src/web/pages/disk.ts"),"utf8");
+ const css=await readFile(join(root,"web/disk.css"),"utf8");
+ assert.ok(src.includes('el("h2",{textContent:"Файлы и папки"})'));
+ assert.ok(!src.includes("Управление документами"),
+  "Redundant document-management subtitle must be removed");
+ assert.ok(src.includes('cls: "dk-name", textContent: f.name, title: f.name'),
+  "The file's complete real title must remain accessible on hover");
+ assert.ok(src.includes('attrs: { "aria-current": isCur ? "page" : "false", title: folder || "Корень Диска" }'));
+ assert.ok(src.includes('title:rule.name'),
+  "Smart folder labels must retain the exact full name");
+ assert.ok(css.includes("-webkit-line-clamp:2"));
+ assert.ok(css.includes("overflow:hidden;text-overflow:ellipsis"));
+ assert.ok(css.includes("overflow:visible; /* file virtualization uses the parent scroll host */"),
+  "Stable scrolling cannot break windowed file virtualization");
+});
