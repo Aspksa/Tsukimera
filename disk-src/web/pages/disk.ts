@@ -462,7 +462,7 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
     if(current&&current.links>0)result.push(el("span",{
       cls:"dk21-link-count",title:current.links+" сохранённых связей с другими документами",
       textContent:"↗ "+String(current.links),attrs:{"aria-label":
-        current.links+" подтверждённых записей о связях"}}));
+        current.links+" сохранённых связей по реквизитам"}}));
     if(current)result.push(el("span",{
       cls:"dk21-index-state state-"+current.state,
       textContent:current.state==="ready"?"●":current.state==="text-indexed"?"◌":"·",
