@@ -339,8 +339,8 @@ try{
   if(tiles21.heights.length>1)
     assert.ok(Math.max(...tiles21.heights)-Math.min(...tiles21.heights)<=2,
       "Visible tile rows have inconsistent height: "+JSON.stringify(tiles21));
-  const folderHover=await evaluate("(()=>{const label=document.querySelector('.dk-node[data-folder=\"Работа/2026\"] .dk-node-label');if(!label)return {found:false};label.dispatchEvent(new PointerEvent('pointerenter'));const graph=document.querySelector('.dk-mini-map-canvas');const linked=graph?.dataset.linkedFolder;label.dispatchEvent(new PointerEvent('pointerleave'));return {found:true,linked,cleared:graph?.dataset.linkedFolder}})()");
-  assert.ok(folderHover.found&&folderHover.linked==="folder:Работа/2026"&&
+  const folderHover=await evaluate("(()=>{const label=document.querySelector('.dk-node[data-folder=\"Работа\"] .dk-node-label');if(!label)return {found:false};label.dispatchEvent(new PointerEvent('pointerenter'));const graph=document.querySelector('.dk-mini-map-canvas');const linked=graph?.dataset.linkedFolder;label.dispatchEvent(new PointerEvent('pointerleave'));return {found:true,linked,cleared:graph?.dataset.linkedFolder}})()");
+  assert.ok(folderHover.found&&folderHover.linked==="folder:Работа"&&
     folderHover.cleared==="",
     "Hovering an actual folder must temporarily illuminate its existing graph node: "+JSON.stringify(folderHover));
   await assertAlignment("Disk 21 tiles and linked folder");
