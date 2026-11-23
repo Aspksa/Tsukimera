@@ -47,8 +47,8 @@ jobs:
           }
           check_disk_dom 'class="dk-layout'
           check_disk_dom 'dk-file'
-          check_disk_dom 'dkx-smart-head'
-          check_disk_dom 'Умные папки'
+          check_disk_dom 'dk-mini-map-canvas'
+          check_disk_dom 'Живая карта Диска'
           check_disk_dom 'aria-label="Изменить ширину панели папок"'
           check_disk_dom 'aria-label="Размер плиток"'
           node tests/browser-disk-layout.mjs http://127.0.0.1:49678
