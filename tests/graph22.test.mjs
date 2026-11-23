@@ -24,7 +24,7 @@ test("Disk 22 Python engine passes stdlib SQLite source+queue integration suite"
   const run=spawnSync(p.exe,[...p.prefix,"python/test_graph22.py","-v"],{
     cwd:root,encoding:"utf8",timeout:18000});
   assert.equal(run.status,0,run.stdout+"\n"+run.stderr);
-  assert.match(run.stderr,/Ran 3 tests/);
+  assert.match(run.stderr,/Ran 6 tests/);
 });
 test("Disk 22 read-only Python Graph API is additive and cannot alter files",async t=>{
   if(!python())return t.skip("Optional Python is not installed");
@@ -41,6 +41,8 @@ test("Disk 22 read-only Python Graph API is additive and cannot alter files",asy
     const view=await request("/api/disk/graph22/view?limit=18&level=far");
     assert.equal(view.status,200,JSON.stringify(view.data));
     assert.equal(view.data.source,"sqlite-python-22");
+    assert.equal(view.data.queryMode,"bounded-sql");
+    assert.ok(view.data.visible<=view.data.total);
     assert.ok(view.data.nodes.some(node=>node.id==="folder:"));
     assert.equal(view.data.level,"far");
     assert.ok(view.data.visible<=18);
@@ -82,6 +84,9 @@ test("Disk 22 has one reusable Canvas, real route parallax and fallback",async()
   assert.ok(map.includes("graph22ToSemantic(python.value)"));
   assert.ok(map.includes("api.diskKnowledgeGraph()"),"No regression without Python");
   assert.ok(map.includes("ctx.fillStyle=\"#09090c\""));
+  assert.ok(map.includes("api.diskGraph22Path(source,id)"));
+  assert.ok(map.includes("canvas.dataset.queryMode="));
+  assert.ok(map.includes("scheduleKnowledge(360)"));
   assert.ok(css.includes("pointer-events:none!important"));
   assert.ok(api.includes("diskGraph22View:"));
 });
