@@ -124,7 +124,7 @@ export function createDiskRouter({disk,zipStream,zipLength,collectLife,uploadDir
       // routes use Python; all existing disk operations keep their contract.
       if(method==="GET"&&p.startsWith("/api/disk/graph22/")){
         const action=p.slice("/api/disk/graph22/".length);
-        if(!["view","path","impact","timeline","diagnose"].includes(action))
+        if(!["view","path","impact","timeline","diagnose","contradictions"].includes(action))
           return send(res,404,{error:"Неизвестная операция графа"});
         if(!graphRoot||!graphDbPath)return send(res,503,{error:"Python Graph API не настроен"});
         const params=Object.fromEntries(url.searchParams);
