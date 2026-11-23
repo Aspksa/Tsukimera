@@ -330,3 +330,69 @@ test("Disk 13 graph constructs only factual connections and bounds force layout"
  assert.ok(huge.nodes.length<=40);
  assert.ok(huge.hidden>0);
 });
+
+
+test("Disk 14 source-backed text analysis extracts evidence without invented ties",async()=>{
+ const built=await prepareDisk(root);
+ const sem=await import(pathToFileURL(join(built.outputRoot,"web/pages/disk-map-semantic.js")).href);
+ const model=await import(pathToFileURL(join(built.outputRoot,"web/pages/disk-map-graph.js")).href);
+ const hashA="a".repeat(64),hashB="b".repeat(64);
+ const docs=[
+  {id:"a",name:"Договор-А.pdf",folder:"Работа",size:80,sha256:hashA,revision:3,tags:[]},
+  {id:"b",name:"Договор-Б.pdf",folder:"Работа",size:90,sha256:hashB,revision:1,tags:[]},
+  {id:"c",name:"Разное.txt",folder:"Работа",size:50,sha256:"c".repeat(64),tags:[]}
+ ];
+ const common="контракт аренда поставка контракт аренда поставка ";
+ const textA=common+"ООО «Гелиос» проект «Маяк» 12.06.2025 Иванов Иван Иванович "+
+  "В приложении Договор-Б.pdf указаны условия.";
+ const textB=common+"ООО «Гелиос» проект «Маяк» 12.06.2025 Иванов Иван Иванович "+
+  "Дополнительный контракт поставка аренда.";
+ const a=sem.extractDocument(docs[0],textA,docs.map(d=>d.name));
+ const b=sem.extractDocument(docs[1],textB,docs.map(d=>d.name));
+ const c=sem.extractDocument(docs[2],"Никаких схожих реквизитов",docs.map(d=>d.name));
+ assert.ok(a.organizations.includes("Гелиос"),"Cyrillic company must be extracted");
+ assert.ok(a.projects.includes("Маяк"),"Explicitly quoted project must be extracted");
+ assert.ok(a.dates.includes("12.06.2025"),"The date is sourced from the document text");
+ assert.ok(a.people.some(n=>n.includes("Иванов Иван")),"Person is an unverified candidate");
+ assert.ok(a.references.includes("Договор-Б.pdf"),"Exact filename mention is documented");
+ const index=sem.semanticFromRecords([a,b,c]);
+ assert.ok(index.nodes.some(n=>n.kind==="organization"));
+ assert.ok(index.nodes.some(n=>n.kind==="date"));
+ assert.ok(index.nodes.some(n=>n.kind==="project"));
+ assert.ok(index.nodes.some(n=>n.kind==="person"));
+ assert.ok(index.links.some(x=>x.kind==="reference"&&x.source==="file:a"&&x.target==="file:b"));
+ assert.ok(index.links.some(x=>x.kind==="lexical"&&x.evidence.includes("контракт")));
+ assert.ok(!index.links.some(x=>x.source==="file:c"||x.target==="file:c"));
+ const mixed=model.graphFromCatalog(docs,["Работа"],"Работа",{semantic:index,viewMode:"all",limit:120});
+ assert.ok(mixed.nodes.some(n=>n.kind==="organization"));
+ assert.ok(mixed.links.some(x=>x.kind==="entity"&&x.evidence.includes("Гелиос")));
+ assert.ok(mixed.links.some(x=>x.kind==="contains"));
+ assert.ok(mixed.links.some(x=>x.kind==="reference"));
+ assert.ok(mixed.links.some(x=>x.kind==="lexical"&&x.evidence.includes("общая папка")));
+ const meaning=model.graphFromCatalog(docs,["Работа"],"Работа",{semantic:index,viewMode:"meaning",limit:120});
+ assert.ok(meaning.links.some(x=>x.kind==="lexical"));
+ assert.ok(!meaning.links.some(x=>x.kind==="contains"));
+ const versions=model.graphFromCatalog(docs,["Работа"],"Работа",{semantic:index,viewMode:"versions",limit:120});
+ assert.ok(versions.nodes.some(n=>n.kind==="revision"&&n.name==="Редакция №3"));
+ assert.ok(versions.links.some(x=>x.kind==="revision"));
+ assert.ok(!versions.links.some(x=>x.kind==="lexical"));
+ const entities=model.graphFromCatalog(docs,["Работа"],"Работа",{semantic:index,viewMode:"entities",limit:120});
+ assert.ok(entities.links.length>0&&entities.links.every(l=>l.kind==="entity"));
+});
+
+test("Disk 14 UI restricts text analysis to deliberate local read-only action",async()=>{
+ const [mini,css]=await Promise.all([
+  readFile(join(root,"disk-src/web/pages/disk-map-mini.ts"),"utf8"),
+  readFile(join(root,"web/disk.css"),"utf8")
+ ]);
+ for(const token of ["analyzeDocuments()","api.diskText(file.id)","eligible.entries()",
+  "slice(0,24)","analyzeToken","semanticFromRecords(records)",
+  "renderInspector(","dk-graph-inspect","dk-graph-analyze",
+  "graphMode","dk-graph-mode","edge.evidence","edge.weight",
+  "createRadialGradient","ctx.ellipse(","ctx.setLineDash([3,5])",
+  "appearing=new Map","fading:Array","until:now+360","entrance>.62",
+  "scheduleBreathing()","prefers-reduced-motion"])
+  assert.ok(mini.includes(token)||css.includes(token),"Missing Disk 14 feature "+token);
+ assert.match(css,/\.dk-graph-expanded \.dk-graph-inspect/);
+ assert.match(css,/\.dk-graph-analyze:disabled/);
+});
