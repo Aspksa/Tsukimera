@@ -226,7 +226,7 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
     if(!routeStart||!scene.nodes.some(n=>n.id===id))return;
     const source=routeStart,request=++pythonRouteRequest;
     routeEnd=id;
-    route=graphRoute(scene,source,id);
+    route=graphRoute(scene,routeStart,id);
     selected=id;hovered=id;
     canvas.dataset.routeEngine="local";
     if(route){
