@@ -68,6 +68,8 @@ export const api={
     call<any>("/api/disk/graph22/diagnose")),
   diskGraph22Timeline:()=>attemptAsync(()=>
     call<any>("/api/disk/graph22/timeline")),
+  diskGraph22Conflicts:()=>attemptAsync(()=>
+    call<any>("/api/disk/graph22/contradictions")),
   diskKnowledgeStatus:()=>attemptAsync(()=>call<any>("/api/disk/knowledge/status")),
   diskTileInsights:(ids:readonly string[])=>attemptAsync(()=>call<{
     items:{id:string;links:number;state:"ready"|"text-indexed"|"waiting"}[];
