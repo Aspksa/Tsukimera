@@ -26,8 +26,14 @@ export function graphDocumentChain(scene:Pick<GraphScene,"nodes"|"links">,
     const a=nodes.get(e.source),b=nodes.get(e.target);
     const project=a?.kind==="project"?a:b?.kind==="project"?b:null;
     const file=a?.kind==="file"?a:b?.kind==="file"?b:null;
-    if(!project||!file||!/^Договор №/i.test(project.name)||
-      !/(?:договор|контракт)/i.test(e.evidence||""))continue;
+    if(!project||!file||!/^Договор №/i.test(project.name))continue;
+    // The evidence must literally contain the hub's contract number after
+    // a contract keyword; a generic organization mention cannot qualify.
+    const number=project.name.replace(/^Договор\s*№\s*/iu,"").toLocaleLowerCase("ru");
+    const documented=[...(e.evidence||"").matchAll(
+      /(?:договор|контракт)[\p{L}]*\s*(?:№|N|#|номер)?\s*([a-zа-я0-9][a-zа-я0-9/._-]{0,35})/giu)]
+      .some(m=>m[1]?.toLocaleLowerCase("ru")===number);
+    if(!documented)continue;
     matches.push({node:file,edge:e,project:project.id});
   }
   const projectIds=[...new Set(matches.filter(x=>x.node.id===fileNodeId).map(x=>x.project))];
