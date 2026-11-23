@@ -172,3 +172,15 @@ test("Disk 8.3 saved map viewport validates corrupt data and clamps scale/pan sa
   assert.match(source,/if\(Math\.max\(from\.x,to\.x\)<-margin/);
   assert.match(source,/if\(queued\|\|!root\.isConnected\)return/);
 });
+
+
+test("Disk 8.3 SQLite and backup allowlists accept both section layout and persistent mini-map view",async()=>{
+  const [db,server]=await Promise.all([
+    readFile(join(root,"scripts/tsukimera-db.mjs"),"utf8"),
+    readFile(join(root,"scripts/server.mjs"),"utf8"),
+  ]);
+  for(const key of ["tsukimera.disk.sections.v1","tsukimera.disk.minimap.view.v1"]){
+    assert.ok(db.includes('"'+key+'"'),"SQLite must allow "+key);
+    assert.ok(server.includes('"'+key+'"'),"Backup restore must allow "+key);
+  }
+});
