@@ -180,7 +180,7 @@ def _edges_for(conn,row,live):
     for peer in conn.execute("""SELECT id FROM disk_files WHERE sha256=?
       AND id<>? AND deleted_at IS NULL ORDER BY id LIMIT 30""",(row["sha"],row["id"])):
         other=live.get(peer["id"])
-        if other and row["id"]<other["id"]:
+        if other:
             insert_edge(conn,*canonical_edge(fid,file_node(other["id"]),
                 "duplicate",row["sha"],
                 "Совпадает SHA-256 оригинального содержимого",1,"disk_files",
