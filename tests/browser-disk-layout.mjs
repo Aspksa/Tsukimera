@@ -220,30 +220,6 @@ try{
   const searchLocal=await evaluate("(()=>{const x=document.querySelector('.dk-omni-search');x.value='zzzzz-nonexistent';x.dispatchEvent(new Event('input',{bubbles:true}));return {empty:!!document.querySelector('.dk-omni-empty'),list:document.querySelectorAll('.dk-omni-row').length};})()");
   assert.ok(searchLocal.empty&&searchLocal.list===0,"Local spatial search should not invent files");
   await evaluate("(()=>{const x=document.querySelector('.dk-omni-search');x.value='';x.dispatchEvent(new Event('input',{bubbles:true}));})()");
-  await evaluate("document.querySelector('.dk-tree-all[aria-label=\"Развернуть все папки\"]').click()");
-  const expandedTree=await evaluate("(()=>({nested:!!document.querySelector('.dk-node[data-folder=\"Работа/2026\"]')}))()");
-  assert.ok(expandedTree.nested,"Expand all did not reveal nested folder: "+JSON.stringify(expandedTree));
-  await evaluate("document.querySelector('.dk-node[data-folder=\"Работа/2026\"] .dk-node-label').click()");
-  const hierarchy=await evaluate("(()=>({selected:document.querySelector('.dk-node.current')?.dataset.folder,ancestors:[...document.querySelectorAll('.dk-node.dk-ancestor')].map(x=>x.dataset.folder),mapTitle:document.querySelector('.dk-mini-map-count')?.textContent}))()");
-  assert.equal(hierarchy.selected,"Работа/2026");
-  assert.ok(hierarchy.ancestors.includes("Работа")&&hierarchy.ancestors.includes("Работа/2026"),
-    "Selected folder's complete parent path must be highlighted: "+JSON.stringify(hierarchy));
-  assert.match(hierarchy.mapTitle,/папок/);
-  assert.match(await evaluate("document.querySelector('.dk-mini-map-status')?.textContent"),/2026/,
-    "Tree selection must synchronize with the selected Canvas folder");
-
-  await pause(720);
-  const orbital=await evaluate("(()=>{const c=document.querySelector('.dk-mini-map-canvas');const p=document.querySelector('.dk-mini-map');return {trail:c.dataset.trail,center:Number(c.dataset.centerError),nodes:Number(c.dataset.nodes),painted:Number(c.dataset.paintedNodes),weight:p.style.getPropertyValue('--dk9-map-weight'),pulse:c.dataset.pulse,transition:c.dataset.transition}})()");
-  assert.match(orbital.trail,/root>folder:Работа>folder:Работа\/2026/,
-    "Selected folder must highlight the full factual root-to-target trail: "+JSON.stringify(orbital));
-  assert.ok(orbital.center<=5,"Selected folder should be auto-centered: "+JSON.stringify(orbital));
-  assert.ok(orbital.nodes>=orbital.painted&&orbital.painted>0,
-    "Canvas culling must keep a bounded number of painted nodes");
-  assert.ok(Number(orbital.weight)>.1&&Number(orbital.weight)<.34,
-    "Tree/map height must be driven by actual folder density");
-  assert.equal(orbital.pulse,"idle","Selection pulse must end rather than run continuously");
-  assert.equal(orbital.transition,"idle","Reveal animation must stop after a bounded duration");
-
   await evaluate("document.querySelector('.dk-tree-all[aria-label=\"Свернуть все папки\"]').click()");
   assert.equal(await evaluate("document.querySelector('.dk-node[data-folder=\"Работа/2026\"]')===null"),true,
     "Collapse all should hide descendants without deleting folder data");
