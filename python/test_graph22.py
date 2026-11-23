@@ -159,7 +159,8 @@ class Graph22(unittest.TestCase):
 
     def test_stage2_indexed_path_is_not_cut_off_by_unrelated_edges(self):
         self.drain()
-        with self.conn:
+        self.conn.execute("BEGIN IMMEDIATE")
+        try:
             for i in range(1200):
                 node="folder:лишнее/"+str(i)
                 self.conn.execute("INSERT INTO graph22_nodes VALUES(?,?,?,?,?,?,?,?)",
@@ -168,6 +169,8 @@ class Graph22(unittest.TestCase):
                 self.conn.execute("INSERT INTO graph22_edges VALUES(?,?,?,?,?,?,?,?,?)",
                                   ("folder:",node,"contains","folder-tree",
                                    "Отдельная проверочная ветка",1,"fixture","",""))
+        finally:
+            self.conn.execute("COMMIT")
         path=shortest(self.conn,file_node(self.ids[0]),
                       knowledge_node("contract","57/2026"))
         self.assertTrue(path["found"])
