@@ -63,7 +63,7 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
   let semantic:SemanticIndex|null=null,analysisGeneration=0;
   let coords=new Map<string,GraphPoint>(),appearing=new Map<string,number>();
   let bounds:GraphBounds=graphBounds([]),screen:GraphScreen=graphScreen(320,280);
-  let lastScreenKey="",highlightTimer=0;
+  let lastScreenKey="",highlightTimer=0,pointerInsideGraph=false;
   let fading:Array<{point:GraphPoint;node:GraphNode;until:number}>=[];
   let hovered:string|null=null,selected:string|null=null;
   let expanded=false,anchor:Node|null=null,nextSibling:Node|null=null,homePage:HTMLElement|null=null;
@@ -149,7 +149,17 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
     panY=clamp(shift.panY,-1800,1800);
     persist();
     // Only changes in actual level of detail require new graph nodes.
-    if(oldDetail!==afterScreen.detail)rebuild();else draw();
+    if(oldDetail!==afterScreen.detail){
+      // Replacing folded folder groups changes graph bounds. Preserve the
+      // exact graph-space point under the cursor across this LOD transition.
+      const anchorWorldX=(anchorX-camera.cx)/camera.scale;
+      const anchorWorldY=(anchorY-camera.cy)/camera.scale;
+      rebuild();
+      const refreshed=graphCamera(bounds,measure(),zoom,0,0);
+      panX=clamp(anchorX-refreshed.cx-anchorWorldX*refreshed.scale,-1800,1800);
+      panY=clamp(anchorY-refreshed.cy-anchorWorldY*refreshed.scale,-1800,1800);
+      persist();draw();
+    }else draw();
   }
   function setExpanded(value:boolean){
     if(value===expanded)return;
@@ -424,6 +434,17 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
   }
   function repaint(){if(repaintQueued)return;repaintQueued=true;
     requestAnimationFrame(()=>{repaintQueued=false;draw();});}
+  // An 8 fps highlight shimmer only while a pointer is actually over the
+  // graph. No perpetual idle animation and no extra Canvas/DOM.
+  function highlightPulse(){
+    clearTimeout(highlightTimer);
+    if(!pointerInsideGraph||!hovered||reduced()||
+      document.visibilityState!=="visible"||!root.isConnected)return;
+    highlightTimer=window.setTimeout(()=>{
+      repaint();highlightPulse();
+    },120);
+  }
+  canvas.addEventListener("pointerenter",()=>{pointerInsideGraph=true;highlightPulse();});
   // UI is exclusively direct-manipulation. Never create permanent controls.
   canvas.addEventListener("pointerdown",e=>{
     if(e.button!==0)return;
@@ -441,7 +462,10 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
     if(!pointerDown){
       const hit=pointerHit(e.clientX,e.clientY);
       const next=hit?.id||null;
-      if(next!==hovered){hovered=next;canvas.style.cursor=next?"pointer":"grab";repaint();}
+      if(next!==hovered){
+        hovered=next;canvas.style.cursor=next?"pointer":"grab";
+        repaint();highlightPulse();
+      }
       return;
     }
     const dx=e.clientX-lastX,dy=e.clientY-lastY;
@@ -483,6 +507,7 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
     pointerDown=false;dragId=null;pointMoved=false;
   });
   canvas.addEventListener("pointerleave",()=>{
+    pointerInsideGraph=false;clearTimeout(highlightTimer);
     if(!pointerDown){hovered=null;draw();}
   });
   canvas.addEventListener("dblclick",e=>{
@@ -562,6 +587,7 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
     files=newFiles;folders=newFolders;
     if(folder!==current){
       current=folder;selected=null;hovered=null;panX=0;panY=0;
+      clearTimeout(highlightTimer);
     }
     rebuild();
   }};
