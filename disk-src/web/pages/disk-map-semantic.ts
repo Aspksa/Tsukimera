@@ -26,13 +26,13 @@ export function extractDocument(file:Pick<DiskFile,"id"|"name">,raw:string,names
  const keywords=[...counts].filter(([w,n])=>n>=2&&w.length>=4)
   .sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0],"ru"))
   .slice(0,18).map(([w])=>w);
- const organizations=unique([...text.matchAll(/\b(?:ООО|АО|ПАО|ОАО|ЗАО|ИП)\s*[«"']([^»"'\n]{3,70})[»"']/g)]
-  .map(m=>m[1]||""),12);
+ const organizations=unique([...text.matchAll(/((?:^|[^\p{L}]))(?:ООО|АО|ПАО|ОАО|ЗАО|ИП)\s*[«"']([^»"'\n]{3,70})[»"']/gu)]
+  .map(m=>m[2]||""),12);
  const dates=unique([...text.matchAll(/\b(?:0?[1-9]|[12]\d|3[01])[./-](?:0?[1-9]|1[0-2])[./-](?:19|20)\d{2}\b/g)]
   .map(m=>m[0]),12);
- const people=unique([...text.matchAll(/\b([А-ЯЁ][а-яё]{2,}\s+[А-ЯЁ][а-яё]{2,}(?:\s+[А-ЯЁ][а-яё]{2,})?)\b/g)]
-  .map(m=>m[1]||"").filter(x=>!["Российская Федерация","Санкт Петербург"].includes(x)),12);
- const projects=unique([...text.matchAll(/\b(?:проект|project)\s*[«"']([^»"'\n]{3,64})[»"']/gi)]
+ const people=unique([...text.matchAll(/((?:^|[^\p{L}]))([А-ЯЁ][а-яё]{2,}\s+[А-ЯЁ][а-яё]{2,}(?:\s+[А-ЯЁ][а-яё]{2,})?)(?=$|[^\p{L}])/gu)]
+  .map(m=>m[2]||"").filter(x=>!["Российская Федерация","Санкт Петербург"].includes(x)),12);
+ const projects=unique([...text.matchAll(/(?:^|[^\p{L}])(?:проект|project)\s*[«"']([^»"'\n]{3,64})[»"']/giu)]
   .map(m=>m[1]||""),12);
  const lower=norm(text);
  const references=unique(names.filter(n=>n.length>=8&&n!==file.name&&lower.includes(norm(n))),12);
