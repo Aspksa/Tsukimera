@@ -14,6 +14,8 @@ import {graphFromCatalog,graphInitial,graphForceStep,type GraphNode,type GraphPo
   type GraphScene,type GraphLink} from "./disk-map-graph";
 import {normalizeMiniView,MINI_VIEW_KEY,clampView} from "./disk-map-mini-model";
 import {SPATIAL_DENSITY_KEY} from "./disk-map-spatial";
+import {graphRoute,graphNeighbors,graphEdgeAt,graphEdgeExplanation,type GraphRoute}
+  from "./disk-map-explore";
 import {graphScreen,graphBounds,graphCamera,anchoredZoom,graphMotionBudget,graphLerp,
   type GraphBounds,type GraphScreen} from "./disk-map-responsive";
 import {writePreference} from "../preferences";
@@ -35,7 +37,7 @@ const shades:Record<string,string>={
 const relationColors:Record<string,string>={
   contains:"183,177,160",duplicate:"221,141,91",tag:"172,145,208",
   entity:"116,199,171",lexical:"113,163,224",reference:"237,185,104",
-  revision:"173,184,190"
+  revision:"173,184,190",co_mention:"229,159,196"
 };
 const parentOf=(p:string)=>p.includes("/")?p.slice(0,p.lastIndexOf("/")):"";
 const reduced=()=>window.matchMedia("(prefers-reduced-motion:reduce)").matches;
@@ -60,6 +62,9 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
   let files:DiskFile[]=[],folders:string[]=[],current="",depth=2;
   let scene:GraphScene=graphFromCatalog([],[],"");
   let mode:Mode="all",includeTags=true,includeDuplicates=true;
+  let globalGraph=true,focusId:string|null=null;
+  let routeStart:string|null=null,routeEnd:string|null=null,route:GraphRoute|null=null;
+  let hoverEdge:GraphLink|null=null,hoverX=0,hoverY=0;
   let semantic:SemanticIndex|null=null,analysisGeneration=0;
   let coords=new Map<string,GraphPoint>(),appearing=new Map<string,number>();
   let bounds:GraphBounds=graphBounds([]),screen:GraphScreen=graphScreen(320,280);
@@ -121,6 +126,39 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
     if(id&&!node)return;
     selected=node?.id||null;hovered=selected;
     fileHighlight(node||null);draw();
+  }
+  function centerNode(id:string,changeScale=true){
+    const p=coords.get(id);if(!p)return;
+    if(changeScale&&zoom<1.35){
+      zoom=1.35;
+      const next=measure();
+      if(next.detail!==screen.detail)rebuild();
+    }
+    const point=coords.get(id);if(!point)return;
+    const v=viewport();
+    panX=clamp(panX+v.w/2-(v.cx+point.x*v.scale),-1800,1800);
+    panY=clamp(panY+v.h/2-(v.cy+point.y*v.scale),-1800,1800);
+    persist();draw();
+  }
+  function focusOnNode(id:string|null){
+    if(id&&!scene.nodes.some(n=>n.id===id))return;
+    focusId=id;route=null;routeStart=null;routeEnd=null;
+    selected=id;hovered=id;
+    if(id)centerNode(id);else draw();
+  }
+  function startRoute(id:string|null){
+    if(!id||!scene.nodes.some(n=>n.id===id))return;
+    routeStart=id;routeEnd=null;route=null;focusId=null;
+    selected=id;hovered=id;
+    centerNode(id,false);
+  }
+  function finishRoute(id:string){
+    if(!routeStart||!scene.nodes.some(n=>n.id===id))return;
+    routeEnd=id;
+    route=graphRoute(scene,routeStart,id);
+    selected=id;hovered=id;
+    if(route)centerNode(id,false);else draw();
+    canvas.dataset.route=route?String(route.links.length):"unavailable";
   }
   function activate(n:GraphNode){
     if(n.kind==="folder")actions.openFolder(n.folder);
@@ -195,6 +233,26 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
     option("Дубликаты и редакции",()=>{mode="versions";rebuild();});
     option("Общие сущности",()=>{mode="entities";rebuild();});
     option("Глубина "+(depth===3?1:depth+1),()=>{depth=depth===3?1:depth+1;rebuild();});
+    option("Весь Диск: глобальный граф",()=>{
+      globalGraph=true;focusId=null;route=null;routeStart=null;routeEnd=null;rebuild();
+    });
+    option("Только текущая папка",()=>{
+      globalGraph=false;focusId=null;route=null;routeStart=null;routeEnd=null;rebuild();
+    });
+    const hit=pointerHit(event.clientX,event.clientY);
+    if(hit){selected=hit.id;hovered=hit.id;}
+    if(hit){
+      option("Фокус на этом узле",()=>focusOnNode(hit.id));
+      if(hit.kind==="file"){
+        option("Начать путь от этого файла",()=>startRoute(hit.id));
+        if(routeStart&&routeStart!==hit.id)
+          option("Показать путь от выбранного файла",()=>finishRoute(hit.id));
+      }
+    }
+    if(focusId)option("Сбросить фокус",()=>focusOnNode(null));
+    if(routeStart)option("Очистить маршрут",()=>{
+      routeStart=null;routeEnd=null;route=null;canvas.dataset.route="";draw();
+    });
     option("Развернуть / свернуть",()=>setExpanded(!expanded));
     const rect=frame.getBoundingClientRect();
     context.style.left=clamp(event.clientX-rect.left,3,Math.max(3,rect.width-205))+"px";
@@ -234,7 +292,7 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
     scene=graphFromCatalog(files,folders,current,{
       depth:detail==="detail"?3:detail==="overview"?Math.min(depth,2):depth,
       limit,perFolder:screen.perFolder,detailLevel:detail,
-      includeTags,includeDuplicates,semantic,viewMode:mode
+      includeTags,includeDuplicates,semantic,viewMode:mode,global:globalGraph
     });
     const currentTime=performance.now();
     const next=new Map<string,GraphPoint>(),entering=new Map<string,number>();
@@ -252,6 +310,15 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
       else if(appearing.has(n.id))entering.set(n.id,appearing.get(n.id)!);
     }
     coords=next;appearing=entering;physicsFrame=0;
+    if(focusId&&!next.has(focusId))focusId=null;
+    if(selected&&!next.has(selected))selected=null;
+    if(routeStart&&routeEnd){
+      route=graphRoute(scene,routeStart,routeEnd);
+      canvas.dataset.route=route?String(route.links.length):"unavailable";
+    }else if(routeStart&&!next.has(routeStart)){
+      routeStart=null;routeEnd=null;route=null;canvas.dataset.route="";
+    }
+    hoverEdge=null;
     // Freeze camera extents for each physics burst. Continual re-fitting
     // during every force tick would produce a nauseating zoom wobble.
     bounds=graphBounds(coords.values());
@@ -264,6 +331,8 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
     canvas.dataset.links=String(scene.links.length);
     canvas.dataset.focus=current;
     canvas.dataset.mode=mode;
+    canvas.dataset.scope=globalGraph?"global":"folder";
+    canvas.dataset.focusNode=focusId||"";
     schedule();
   }
   // Rich glow and grouping are painted INSIDE the Canvas: never DOM cards.
@@ -586,7 +655,9 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
     }
     files=newFiles;folders=newFolders;
     if(folder!==current){
-      current=folder;selected=null;hovered=null;panX=0;panY=0;
+      current=folder;
+      if(!globalGraph){selected=null;panX=0;panY=0;focusId=null;}
+      hovered=null;hoverEdge=null;
       clearTimeout(highlightTimer);
     }
     rebuild();
