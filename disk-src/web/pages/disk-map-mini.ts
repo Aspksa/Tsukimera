@@ -294,7 +294,10 @@ export function createMiniDiskMap(actions:MapActions):MiniDiskMap{
     page=scene.page;
     selected=-1;
     const numChanged=[...changed.values()].filter(x=>x!=="removed").length;
-    count.textContent=scene.folders+" папок · "+scene.files+" файлов"+(numChanged?" · "+numChanged+" измен.":"");
+    const numRemoved=[...changed.values()].filter(x=>x==="removed").length;
+    count.textContent=scene.folders+" папок · "+scene.files+" файлов"+
+      (numChanged?" · "+numChanged+" нов./изм.":"")+
+      (numRemoved?" · "+numRemoved+" удал.":"");
     back.disabled=history.length===0;up.disabled=!current;home.disabled=!current;
     prev.disabled=page===0;next.disabled=page===scene.pages-1;
     pageLabel.textContent=scene.total?((page+1)+" / "+scene.pages):"Пусто";
@@ -364,14 +367,21 @@ export function createMiniDiskMap(actions:MapActions):MiniDiskMap{
       ctx.strokeStyle=picked?"rgba(241,190,104,.9)":"rgba(197,168,119,.22)";
       ctx.lineWidth=picked?2.2:1;ctx.stroke();
       const node=nodes.querySelector<HTMLElement>('[data-index="'+i+'"]');
-      if(node){node.style.left=p.x+"px";node.style.top=p.y+"px";}
+      if(node){
+        node.style.left=p.x+"px";node.style.top=p.y+"px";
+        // Even in a narrow rail, zoom changes the actual glyph size without
+        // allowing labels to overlap or disappear outside the map.
+        if(compact)node.style.transform="translate(-50%,-50%) scale("+
+          Math.min(1.08,Math.max(.88,view.zoom))+")";
+      }
     });
     ctx.beginPath();ctx.arc(cx,cy,compact?43:64,0,2*Math.PI);
     ctx.strokeStyle="rgba(218,170,89,.28)";ctx.lineWidth=1;ctx.stroke();ctx.restore();
     const focus=nodes.querySelector<HTMLElement>(".dk-omni-focus");
     if(focus){
       focus.style.left=cx+"px";focus.style.top=cy+"px";
-      focus.style.setProperty("--dk-focus-scale",String(view.zoom));
+      focus.style.transform="translate(-50%,-50%) scale("+
+        Math.min(1.14,Math.max(.87,view.zoom))+")";
     }
     zoomLabel.textContent=Math.round(view.zoom*100)+"%";
     canvas.dataset.layer="spatial";
