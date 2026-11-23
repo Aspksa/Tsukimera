@@ -98,7 +98,7 @@ test("Disk 13 retains a single Graph View below the folder hierarchy",async()=>{
  assert.match(mini,/ctx\.moveTo\(/);
  assert.match(mini,/canvas\.dataset\.layer="graph"/);
  assert.match(mini,/dk-graph-expanded/);
- assert.match(css,/\.dk-graph-view\.dk-graph-expanded/);
+ assert.match(css,/\.dk-graph-only\.dk-graph-expanded/);
  assert.match(css,/\.disk-page\.dk-map-left \.dk-layout>.dk-side>.dk-graph-view/);
  assert.doesNotMatch(mini,/spatialSlots\(/,"Card orbit must not be used");
 });
