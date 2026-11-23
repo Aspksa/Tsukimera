@@ -131,6 +131,13 @@ try{
   assert.ok(mobile.scrollWidth<=mobile.width+3,"Unexpected horizontal scroll: "+JSON.stringify(mobile));
   assert.equal(mobile.sidePosition,"fixed","Folders should become a mobile drawer");
 
+  const mobileFlow=await evaluate("(()=>{const map=document.querySelector('.disk-page > .dk-mini-map'),heading=document.querySelector('.disk-page > .dk-files-section-head'),layout=document.querySelector('.disk-page > .dk-layout'),frame=map.querySelector('.dk-mini-map-frame');return {width:map.getBoundingClientRect().width,body:document.querySelector('.disk-page').getBoundingClientRect().width,frameHeight:frame.getBoundingClientRect().height,above:map.getBoundingClientRect().bottom<layout.getBoundingClientRect().top,heading:heading.getBoundingClientRect().top}})()");
+  assert.ok(mobileFlow.width>300&&mobileFlow.width<=mobileFlow.body+3&&mobileFlow.above,
+    "Mobile must show map before file explorer, without horizontal overflow: "+JSON.stringify(mobileFlow));
+  assert.ok(mobileFlow.frameHeight>=180&&mobileFlow.frameHeight<=320,
+    "Mobile map should be touch friendly and not consume the whole screen: "+JSON.stringify(mobileFlow));
+
+
   // Disk 8.0: reversible Focus mode, sticky path, real file cards and no
   // overwriting of the panel widths explicitly chosen by the user.
   await device(1920,1080);
@@ -142,6 +149,8 @@ try{
   await pause(200);
   const focused=await evaluate("(()=>({enabled:document.querySelector('.disk-page').classList.contains('dk-focus'),button:document.querySelector('.dk-focus-btn').getAttribute('aria-pressed'),sidebar:getComputedStyle(document.querySelector('.dk-side')).display,life:getComputedStyle(document.querySelector('.dkl')).display,main:document.querySelector('.dk-main').getBoundingClientRect().width}))()");
   assert.equal(focused.enabled,true);
+  assert.equal(await evaluate("getComputedStyle(document.querySelector('.disk-page > .dk-mini-map')).display"),
+    "none","File-only Focus mode should hide the overview map");
   assert.equal(focused.button,"true");
   assert.equal(focused.sidebar,"none");
   assert.equal(focused.life,"none");
@@ -155,11 +164,22 @@ try{
 
   // Disk 8.1: new folder hierarchy and section configuration controls must be
   // usable in a real Chrome page and must not mutate the original Disk files.
-  const initialTree=await evaluate("(()=>({actions:document.querySelectorAll('.dk-tree-all').length,hasSidebarSections:!!document.querySelector('.dk-side .dk-sections'),hasMap:!!document.querySelector('.dk-side .dk-mini-map'),map:document.querySelector('.dk-mini-map-canvas')?.getBoundingClientRect().width}))()");
+  const initialTree=await evaluate("(()=>({actions:document.querySelectorAll('.dk-tree-all').length,hasSidebarSections:!!document.querySelector('.dk-side .dk-sections'),hasMap:!!document.querySelector('.disk-page > .dk-mini-map'),map:document.querySelector('.dk-mini-map-canvas')?.getBoundingClientRect().width}))()");
   assert.equal(initialTree.actions,2,"Expand/collapse hierarchy controls missing");
   assert.equal(initialTree.hasSidebarSections,false,"Sections must be removed from the left rail");
-  assert.equal(initialTree.hasMap,true,"Live Canvas map must replace sections in the left rail");
+  assert.equal(initialTree.hasMap,true,"Live Canvas map must be shown before the file explorer, outside the folder rail");
   assert.ok(initialTree.map>160,"Mini map should use available sidebar width: "+JSON.stringify(initialTree));
+
+  // Disk 10.1: main page order is the live Canvas map followed by the file
+  // manager. This is checked both in DOM order and on-screen geometry.
+  const ordering=await evaluate("(()=>{const page=document.querySelector('.disk-page'),map=page.querySelector(':scope > .dk-mini-map'),heading=page.querySelector(':scope > .dk-files-section-head'),layout=page.querySelector(':scope > .dk-layout'),bar=page.querySelector(':scope > .dk-bar'),side=layout.querySelector('.dk-side');return {order:[...page.children].map(n=>n.className||n.tagName),first:bar?.compareDocumentPosition(map)&Node.DOCUMENT_POSITION_FOLLOWING,second:map?.compareDocumentPosition(heading)&Node.DOCUMENT_POSITION_FOLLOWING,third:heading?.compareDocumentPosition(layout)&Node.DOCUMENT_POSITION_FOLLOWING,above:map?.getBoundingClientRect().bottom<=layout?.getBoundingClientRect().top,width:map?.getBoundingClientRect().width,files:layout?.getBoundingClientRect().width,inSide:!!side?.querySelector('.dk-mini-map'),label:heading?.textContent}})()");
+  assert.ok(ordering.first&&ordering.second&&ordering.third&&ordering.above,
+    "Live Map must precede the document manager visually and in DOM: "+JSON.stringify(ordering));
+  assert.ok(ordering.width>900&&ordering.width<=ordering.files+8,
+    "Live Map should span the workspace width: "+JSON.stringify(ordering));
+  assert.equal(ordering.inSide,false,"There must not be a duplicate/narrow map in the folder tree");
+  assert.match(ordering.label,/Диск · файлы и папки/);
+
 
   // Disk 8.3: no search, pinned or sorting strip in the hierarchy; the
   // real Canvas retains the view state and exposes bounded detail on zoom.
@@ -168,8 +188,8 @@ try{
     "Unwanted folder controls must not crowd the hierarchy");
   const mapBefore=await evaluate("(()=>({layer:document.querySelector('.dk-mini-map-canvas')?.dataset.layer,nodes:Number(document.querySelector('.dk-mini-map-canvas')?.dataset.nodes),height:document.querySelector('.dk-mini-map-frame')?.getBoundingClientRect().height}))()");
   assert.equal(mapBefore.layer,"overview");
-  assert.ok(mapBefore.height>=90&&mapBefore.height<=265,
-    "Height should adapt to desktop workspace: "+JSON.stringify(mapBefore));
+  assert.ok(mapBefore.height>=240&&mapBefore.height<=430,
+    "Full-width map must have room for its graph: "+JSON.stringify(mapBefore));
   await evaluate("(()=>{const c=document.querySelector('.dk-mini-map-canvas');for(let i=0;i<6;i++)c.dispatchEvent(new WheelEvent('wheel',{bubbles:true,cancelable:true,deltaY:-110,clientX:c.getBoundingClientRect().left+c.clientWidth/2,clientY:c.getBoundingClientRect().top+c.clientHeight/2}));})()");
   await pause(520);
   const zoomedMap=await evaluate("(()=>({layer:document.querySelector('.dk-mini-map-canvas').dataset.layer,saved:JSON.parse(localStorage.getItem('tsukimera.disk.minimap.view.v1')||'null')}))()");
@@ -407,8 +427,14 @@ try{
     }
   }
   assert.ok(autosaved,"Normal model preferences should autosave to SQLite without Save button");
-  assert.match(await evaluate("document.querySelector('.set-save-state')?.textContent"),/Сохранено/,
-    "Visual save state must show persisted settings");
+  let saveStateReady=false;
+  for(let i=0;i<24;i++){
+    saveStateReady=await evaluate("document.querySelector('.set-save-state')?.dataset.state==='saved'");
+    if(saveStateReady)break;
+    await pause(100);
+  }
+  assert.ok(saveStateReady,
+    "Visual save state must confirm completion after the server persisted the settings");
   await evaluate("document.querySelector('[data-settings-group=\"general\"]').click()");
   await evaluate("document.querySelector('[data-settings-group=\"cloud\"]').click()");
   assert.equal(await evaluate("document.querySelector('#set-model .beh-field input')?.value"),

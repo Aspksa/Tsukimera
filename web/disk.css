@@ -1779,3 +1779,103 @@ button.dk-crumb:hover{background:var(--hover);color:var(--fg)}
     transition:none!important;
   }
 }
+
+
+/* Disk 10.1 — desired reading order: Living Map first, real files below.
+   Existing graph instance, selection, SQLite viewport, full-map action and
+   folder tree remain unchanged; only their screen placement changes. */
+.disk-page.dk-experience-v8.dk-map-first{
+  gap:12px;
+}
+.disk-page.dk-experience-v8.dk-map-first > .dk-mini-map{
+  box-sizing:border-box;
+  width:100%;
+  min-width:0;
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+  padding:14px 16px 12px;
+  border:1px solid color-mix(in srgb,var(--brand) 22%,transparent);
+  border-radius:16px;
+  background:linear-gradient(158deg,
+    color-mix(in srgb,var(--brand) 4%,var(--surface)),
+    color-mix(in srgb,var(--bg) 97%,var(--surface)));
+}
+.disk-page.dk-experience-v8.dk-map-first > .dk-mini-map .dk-mini-map-head strong{
+  font-size:clamp(.95rem,1.4vw,1.08rem);
+  font-weight:680;
+  letter-spacing:-.01em;
+}
+.disk-page.dk-experience-v8.dk-map-first > .dk-mini-map .dk-mini-map-frame{
+  height:clamp(240px,calc(100dvh * var(--dk9-map-weight, .22) + 120px),430px);
+  max-height:none;
+  min-height:240px;
+  border-radius:13px;
+  border-color:color-mix(in srgb,var(--brand) 18%,transparent);
+}
+.disk-page.dk-experience-v8.dk-map-first > .dk-mini-map .dk-mini-map-count,
+.disk-page.dk-experience-v8.dk-map-first > .dk-mini-map .dk-mini-map-status{
+  font-size:.75rem;
+  line-height:1.45;
+}
+.disk-page.dk-experience-v8.dk-map-first > .dk-mini-map .dk-mini-map-status{
+  min-height:18px;
+}
+.disk-page.dk-experience-v8.dk-map-first > .dk-mini-map .dk-mini-map-reset{
+  align-self:flex-end;
+}
+.disk-page.dk-experience-v8.dk-map-first > .dk-files-section-head{
+  display:flex;
+  justify-content:space-between;
+  align-items:baseline;
+  flex-wrap:wrap;
+  gap:6px 15px;
+  padding:12px 3px 8px;
+  margin:3px 0 -4px;
+  border-bottom:1px solid var(--dk8-hairline);
+}
+.disk-page.dk-experience-v8.dk-map-first > .dk-files-section-head h2{
+  margin:0;
+  color:var(--fg);
+  font-size:clamp(.97rem,1.25vw,1.09rem);
+  font-weight:670;
+}
+.disk-page.dk-experience-v8.dk-map-first > .dk-files-section-head small{
+  color:var(--muted);
+  font-size:.75rem;
+}
+.disk-page.dk-experience-v8.dk-map-first > .dk-layout{
+  min-width:0;
+}
+.disk-page.dk-experience-v8.dk-map-first > .dk-layout > .dk-side > .dk-tree-panel{
+  flex:1 1 auto;
+  min-height:120px;
+}
+.disk-page.dk-experience-v8.dk-map-first.dk-focus > .dk-mini-map,
+.disk-page.dk-experience-v8.dk-map-first.dk-focus > .dk-files-section-head{
+  display:none;
+}
+@container diskspace (max-width:760px){
+  .disk-page.dk-experience-v8.dk-map-first > .dk-mini-map{
+    padding:10px;
+    border-radius:13px;
+  }
+  .disk-page.dk-experience-v8.dk-map-first > .dk-mini-map .dk-mini-map-frame{
+    height:clamp(205px,34dvh,310px);
+    min-height:205px;
+    max-height:none;
+  }
+  .disk-page.dk-experience-v8.dk-map-first > .dk-files-section-head{
+    padding:6px 2px 7px;
+  }
+  .disk-page.dk-experience-v8.dk-map-first > .dk-files-section-head small{
+    display:none;
+  }
+}
+@media (max-height:610px){
+  .disk-page.dk-experience-v8.dk-map-first > .dk-mini-map .dk-mini-map-frame{
+    height:clamp(180px,30dvh,250px);
+    min-height:180px;
+    max-height:none;
+  }
+}
