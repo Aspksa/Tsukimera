@@ -149,7 +149,7 @@ export function createMiniDiskMap(actions:MapActions):MiniDiskMap{
     }
   }
   function render(){
-    const limit=frame.clientWidth<480?6:frame.clientWidth<760?8:12;
+    const limit=frame.clientWidth<560?6:frame.clientWidth<760?8:12;
     renderLimit=limit;
     scene=spatialScene(files,folders,current,page,limit,filter);
     page=scene.page;
@@ -190,15 +190,22 @@ export function createMiniDiskMap(actions:MapActions):MiniDiskMap{
     if(!ctx)return;
     ctx.setTransform(dpr,0,0,dpr,0,0);
     ctx.clearRect(0,0,w,h);
-    const cx=w/2+view.panX,cy=h/2+view.panY;
+    const narrow=w<560;
+    const cx=w/2+(narrow?0:view.panX),cy=(narrow?59:h/2+view.panY);
     const radiusX=Math.max(55,w/2-100)*view.zoom;
     const radiusY=Math.max(65,h/2-65)*view.zoom;
-    const positions=spatialSlots(scene.items.length).map(p=>({
-      x:cx+(p.x-50)/38*radiusX,y:cy+(p.y-50)/39*radiusY}));
+    // On phones, a radial ring would make 108px cards overlap the central
+    // focus. Use two readable columns below it, preserving all navigation.
+    const positions=narrow?scene.items.map((_,i)=>({
+      x:w*(i%2?.72:.28),y:142+Math.floor(i/2)*65})):
+      spatialSlots(scene.items.length).map(p=>({
+        x:cx+(p.x-50)/38*radiusX,y:cy+(p.y-50)/39*radiusY}));
     ctx.save();
     ctx.lineCap="round";
-    ctx.beginPath();ctx.ellipse(cx,cy,Math.min(radiusX,w*.49),Math.min(radiusY,h*.49),0,0,2*Math.PI);
-    ctx.strokeStyle="rgba(203,161,86,.10)";ctx.lineWidth=1;ctx.stroke();
+    if(!narrow){
+      ctx.beginPath();ctx.ellipse(cx,cy,Math.min(radiusX,w*.49),Math.min(radiusY,h*.49),0,0,2*Math.PI);
+      ctx.strokeStyle="rgba(203,161,86,.10)";ctx.lineWidth=1;ctx.stroke();
+    }
     positions.forEach((p,i)=>{
       const picked=i===selected;
       ctx.beginPath();ctx.moveTo(cx,cy);ctx.lineTo(p.x,p.y);
@@ -294,7 +301,7 @@ export function createMiniDiskMap(actions:MapActions):MiniDiskMap{
     const observer=new ResizeObserver(()=>{
       if(root.isConnected){
         if(!mounted){mounted=true;render();}
-        else if((frame.clientWidth<480?6:frame.clientWidth<760?8:12)!==renderLimit)render();
+        else if((frame.clientWidth<560?6:frame.clientWidth<760?8:12)!==renderLimit)render();
         else schedulePaint();
         everMounted=true;
       }else if(everMounted){observer.disconnect();if(raf)cancelAnimationFrame(raf);}
