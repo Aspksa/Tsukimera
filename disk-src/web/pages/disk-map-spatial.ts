@@ -14,6 +14,7 @@ export type SpatialScene={
   filtered:boolean;
 };
 export const SPATIAL_PAGE_SIZE=14;
+export const SPATIAL_DENSITY_KEY="tsukimera.disk.spatial.density.v1";
 
 const sortRu=(a:string,b:string)=>a.localeCompare(b,"ru",{numeric:true,sensitivity:"base"});
 const parentOf=(path:string)=>path.includes("/")?path.slice(0,path.lastIndexOf("/")):"";
