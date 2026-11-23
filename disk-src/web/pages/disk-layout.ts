@@ -20,6 +20,12 @@ export function paneSize(value:unknown,kind:"left"|"right"):number {
   const n=Number(value);
   return Number.isFinite(n)&&n>=min&&n<=max?Math.round(n):fallback;
 }
+/** Automatically balance sidebars while no manual width has been saved. */
+export function autoPaneSize(available:number,kind:"left"|"right"):number{
+  const space=Number.isFinite(available)?Math.max(320,available):1400;
+  const base=kind==="left"?space*.19:space*.235;
+  return clamp(Math.round(base),kind==="left"?210:260,kind==="left"?360:440);
+}
 const read=(key:string):string|null=>{
   try{return localStorage.getItem(key);}catch{return null;}
 };
@@ -31,8 +37,11 @@ export interface DiskSplitters{
   left:HTMLDivElement;right:HTMLDivElement;reset:()=>void;
 }
 export function createDiskSplitters(layout:HTMLElement):DiskSplitters{
-  let left=paneSize(read(LEFT_KEY),"left");
-  let right=paneSize(read(RIGHT_KEY),"right");
+  const savedLeft=read(LEFT_KEY),savedRight=read(RIGHT_KEY);
+  const available=()=>layout.parentElement?.getBoundingClientRect().width||window.innerWidth||1400;
+  let manualLeft=savedLeft!==null,manualRight=savedRight!==null;
+  let left=manualLeft?paneSize(savedLeft,"left"):autoPaneSize(available(),"left");
+  let right=manualRight?paneSize(savedRight,"right"):autoPaneSize(available(),"right");
   const update=()=>{
     layout.style.setProperty("--dk-tree-width",left+"px");
     layout.style.setProperty("--dk-right-width",right+"px");
@@ -65,7 +74,10 @@ export function createDiskSplitters(layout:HTMLElement):DiskSplitters{
     const value=limit(kind,width);
     if(kind==="left")left=value;else right=value;
     update();
-    if(persist)write(kind==="left"?LEFT_KEY:RIGHT_KEY,value);
+    if(persist){
+      if(kind==="left")manualLeft=true;else manualRight=true;
+      write(kind==="left"?LEFT_KEY:RIGHT_KEY,value);
+    }
   };
   for(const [kind,handle] of [["left",leftHandle],["right",rightHandle]] as const){
     let startX=0,startWidth=0,active=false;
@@ -83,6 +95,7 @@ export function createDiskSplitters(layout:HTMLElement):DiskSplitters{
     const done=()=>{
       if(!active)return;
       active=false;layout.classList.remove("dk-resizing");
+      if(kind==="left")manualLeft=true;else manualRight=true;
       write(kind==="left"?LEFT_KEY:RIGHT_KEY,kind==="left"?left:right);
     };
     handle.addEventListener("pointerup",done);
@@ -105,6 +118,18 @@ export function createDiskSplitters(layout:HTMLElement):DiskSplitters{
     });
   }
   update();
+  // Automatic widths never overwrite the user's explicit drag/keyboard setting.
+  // Observe the parent, not the grid itself, to avoid resize feedback loops.
+  if(typeof ResizeObserver!=="undefined"&&layout.parentElement){
+    const watcher=new ResizeObserver(()=>{
+      if(!layout.isConnected){watcher.disconnect();return;}
+      const space=available();
+      if(!manualLeft)left=autoPaneSize(space,"left");
+      if(!manualRight)right=autoPaneSize(space,"right");
+      update();
+    });
+    watcher.observe(layout.parentElement);
+  }
   return {
     left:leftHandle,right:rightHandle,
     reset:()=>{set("left",266,true);set("right",340,true);}

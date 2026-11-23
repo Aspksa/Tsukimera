@@ -207,7 +207,26 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
   const newFolderBtn = btn("Новая папка", () => void createFolder(uploadFolder()), {});
   newFolderBtn.classList.add("dk-newfolder-btn");
   newFolderBtn.prepend(dIcon("folderPlus", 17));
-  const moreBtn = el("button", { type: "button", cls: "icon-btn dk-more-btn", attrs: { "aria-label": "Ещё", "aria-haspopup": "menu", "aria-expanded": "false", title: "Ещё" } }, dIcon("more", 19));
+  const moreBtn=el("button",{type:"button",cls:"icon-btn dk-more-btn",
+    attrs:{"aria-label":"Ещё","aria-haspopup":"menu","aria-expanded":"false",title:"Ещё"}},dIcon("more",19));
+  // Focus is a view state, not a file operation. The three-pane layout is
+  // restored unchanged, including the user's manually resized widths.
+  let focus=false;
+  const focusBtn=el("button",{type:"button",cls:"btn dk-focus-btn",
+    attrs:{"aria-label":"Режим Фокус","aria-pressed":"false",title:"Скрыть боковые панели и оставить файлы"}},
+    dIcon("maximize",17),el("span",{textContent:"Фокус"}));
+  focusBtn.addEventListener("click",()=>{
+    if(!focus&&page.classList.contains("dk-life-expanded"))
+      life.root.querySelector<HTMLButtonElement>(".dkl-expand")?.click();
+    focus=!focus;
+    page.classList.toggle("dk-focus",focus);
+    focusBtn.setAttribute("aria-pressed",String(focus));
+    focusBtn.title=focus?"Вернуть панели папок и аналитики":"Скрыть боковые панели";
+    focusBtn.querySelector("span")!.textContent=focus?"Выйти из фокуса":"Фокус";
+    focusBtn.querySelector("svg")?.replaceWith(dIcon(focus?"minimize":"maximize",17));
+    if(focus)page.classList.remove("drawer-open");
+    requestAnimationFrame(()=>{renderFiles();});
+  });
   moreBtn.addEventListener("click", () => openMenu(moreBtn, [
     { icon: "folderPlus", label: "Новая папка", run: () => void createFolder(uploadFolder()) },
     { icon: "folderUp", label: "Загрузить папку…", run: chooseFolder },
@@ -259,7 +278,7 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
   const bar = el("div", { cls: "dk-bar" },
     drawerBtn,
     el("label", { cls: "dk-search" }, dIcon("search", 18), search, el("span", { cls: "dk-bar-chips" }, textChip, everyChip)),
-    el("div", { cls: "dk-bar-actions" }, newFolderBtn, uploadBtn, moreBtn));
+    el("div", { cls: "dk-bar-actions" }, newFolderBtn, uploadBtn, focusBtn, moreBtn));
 
   /* ---------------------------------------------------------------- list header: path, sort, view, filters */
   const crumbs = el("nav", { cls: "dk-crumbs", attrs: { "aria-label": "Путь" } });
@@ -380,6 +399,9 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
   let currentWindow="";
   let scrollQueued=false;
   const dropzone = el("div", { cls: "dk-dropzone", attrs: { "aria-hidden": "true" } }, dIcon("upload", 34), el("strong"), el("span", { textContent: "До 500 МБ на файл, можно целые папки" }));
+  const moveHint=el("div",{cls:"dk-move-hint",hidden:true,attrs:{role:"status","aria-live":"polite"}});
+  let draggingCount=0;
+  const hideMoveHint=()=>{moveHint.hidden=true;moveHint.textContent="";};
   const main = el("section", { cls: "dk-main" }, head, selBar, trashBar, filesBox, dropzone);
   const sourceList = () => view === "trash" ? trash
     : all.filter(f=>{
@@ -420,6 +442,8 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
     if (selected.has(f.id)) c.classList.add("picked");
     if (focusId === f.id) c.tabIndex = 0;
     c.draggable = view !== "trash";
+    const extLabel=(f.name.includes(".")?f.name.split(".").pop()||"Файл":"Файл")
+      .slice(0,7).toLocaleUpperCase("ru-RU");
     const meta = view === "trash"
       ? "Удалён " + fmtDate(f.deletedAt ?? f.uploadedAt) + ((d) => (d === null ? "" : " · сотрётся через " + plural(d, "день", "дня", "дней")))(daysLeft(f.deletedAt, keepDays))
       : human(f.size) + " · " + fmtDate(f.uploadedAt) + (view !== "all" || virtual !== "none" || everywhere ? " · " + (f.folder || "Корень") : "");
@@ -427,8 +451,11 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
       el("label", { cls: "dk-check", title: "Выбрать" }, el("input", { type: "checkbox", checked: selected.has(f.id), attrs: { "aria-label": "Выбрать " + f.name } })),
       thumbFor(f, mode === "large" ? 56 : mode === "table" ? 26 : 40),
       el("div", { cls: "dk-meta" },
+        el("div",{cls:"dk-file-labels"},
+          el("span",{cls:"dk-kind-label",textContent:extLabel}),
+          ...(f.revision&&f.revision>1?[el("span",{cls:"dk-revision-label",textContent:"v"+f.revision})]:[])),
         el("strong", { cls: "dk-name", textContent: f.name, title: f.name + (f.tags?.length ? "\nМетки: " + f.tags.join(", ") : "") }),
-        el("small", { textContent: meta }),
+        el("small", { cls:"dk-file-sub",textContent: meta }),
         ...(f.tags?.length && mode !== "table" ? [el("span", { cls: "dk-tags" }, ...f.tags.slice(0, 3).map((t) => el("i", { textContent: t })))] : [])),
       ...(mode==="table"&&view!=="trash"?[
         el("small",{cls:"dkx-col dkx-col-size",textContent:human(f.size)}),
@@ -575,9 +602,14 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
     const ids = selected.has(c.dataset.id!) ? [...selected] : [c.dataset.id!];
     e.dataTransfer.setData(DISK_DRAG, JSON.stringify(ids));
     e.dataTransfer.effectAllowed = "copyMove";
+    draggingCount=ids.length;
     page.classList.add("dk-dragging");
   });
-  filesBox.addEventListener("dragend", () => page.classList.remove("dk-dragging"));
+  filesBox.addEventListener("dragend",()=>{
+    draggingCount=0;hideMoveHint();
+    page.classList.remove("dk-dragging");
+    page.querySelectorAll(".dk-node.drop,.dk-section.drop").forEach(node=>node.classList.remove("drop"));
+  });
 
   /* ---------------------------------------------------------------- file menu (built when opened) */
   const fileMenu = (f: DiskFile): MenuItem[] => view === "trash" ? [
@@ -962,10 +994,23 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
   const dropFiles = (target: HTMLElement, folder: string) => {
     target.addEventListener("dragover", (e) => {
       const types = e.dataTransfer?.types ?? [];
-      if (types.includes("application/x-juunibi-files") || types.includes("application/x-juunibi-folder")) { e.preventDefault(); if (e.dataTransfer) e.dataTransfer.dropEffect = "move"; target.classList.add("drop"); }
+      if (types.includes("application/x-juunibi-files") || types.includes("application/x-juunibi-folder")){
+        e.preventDefault();
+        if(e.dataTransfer)e.dataTransfer.dropEffect="move";
+        target.classList.add("drop");
+        moveHint.hidden=false;
+        moveHint.textContent=(folder===TRASH_DROP?"В корзину":folder?"В папку «"+folder+"»":"В корень Диска")+
+          (draggingCount?" · "+filesWord(draggingCount):"")+" · отпустите для перемещения";
+      }
     });
-    target.addEventListener("dragleave", () => target.classList.remove("drop"));
+    target.addEventListener("dragleave",(e)=>{
+      if(e.relatedTarget instanceof Node&&target.contains(e.relatedTarget))return;
+      target.classList.remove("drop");
+      hideMoveHint();
+    });
     target.addEventListener("drop", (e) => {
+      hideMoveHint();
+      draggingCount=0;
       target.classList.remove("drop"); page.classList.remove("dk-dragging");
       const moving = e.dataTransfer?.getData("application/x-juunibi-folder");
       const ids = e.dataTransfer?.getData("application/x-juunibi-files");
@@ -1663,7 +1708,9 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
   const layout = el("div", { cls: "dk-layout" + (treeHidden ? " no-tree" : "") });
   const panes=createDiskSplitters(layout);
   layout.append(side,panes.left,main,panes.right,life.root,info);
-  page.append(el("h1", { cls: "sr-only", textContent: "Диск" }), bar, layout, scrim, uploader.root, picker, folderPicker, restorePicker, chatDrop);
+  page.classList.add("dk-experience-v8");
+  page.append(el("h1", { cls: "sr-only", textContent: "Диск" }),
+    bar,layout,moveHint,scrim,uploader.root,picker,folderPicker,restorePicker,chatDrop);
   const scrollHost=document.querySelector<HTMLElement>(".content");
   scrollHost?.addEventListener("scroll",()=>{
     if(!page.isConnected){autoMoreObserver?.disconnect();return;}

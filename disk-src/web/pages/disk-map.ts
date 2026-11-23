@@ -18,7 +18,7 @@ export function openLiveDiskMap(files:DiskFile[],folders:string[],
   const byId=new Map(graph.nodes.map(node=>[node.id,node]));
   const panel=el("div",{cls:"dkx-live-map"});
   const top=el("div",{cls:"dkx-map-intro"},
-    el("p",{cls:"muted",textContent:"Живая карта реальных папок, файлов и подтверждённых связей. Колесо — масштаб, перетаскивание — перемещение."}),
+    el("p",{cls:"muted",textContent:"Живая карта реальных папок и файлов. Клик выделяет и подсвечивает связи; повторный клик или кнопка открывают объект. Колесо — масштаб."}),
     el("strong",{textContent:graph.totalFiles+" файлов · "+graph.totalFolders+" папок · "+human(graph.bytes)}),
     el("small",{textContent:graph.shownFiles<graph.totalFiles||graph.shownFolders<graph.totalFolders
       ?"Для плавной работы показано "+graph.shownFiles+" из "+graph.totalFiles+" файлов и "+
@@ -30,8 +30,10 @@ export function openLiveDiskMap(files:DiskFile[],folders:string[],
   const zoomOut=el("button",{type:"button",cls:"btn sm",textContent:"−",attrs:{"aria-label":"Уменьшить карту"}});
   const zoomIn=el("button",{type:"button",cls:"btn sm",textContent:"+",attrs:{"aria-label":"Увеличить карту"}});
   const reset=el("button",{type:"button",cls:"btn sm",textContent:"Вся карта"});
-  const selected=el("span",{cls:"dkx-map-selected",attrs:{"aria-live":"polite"},textContent:"Наведите на узел, чтобы увидеть его сведения"});
-  buttons.append(zoomOut,zoomIn,reset);
+  const selected=el("span",{cls:"dkx-map-selected",attrs:{"aria-live":"polite"},textContent:"Выберите узел на карте или найдите его по имени"});
+  const openSelected=el("button",{type:"button",cls:"btn sm dkx-map-open",disabled:true,
+    textContent:"Открыть выбранное",attrs:{"aria-label":"Открыть выбранный файл или папку"}});
+  buttons.append(zoomOut,zoomIn,reset,openSelected);
   const tools=el("div",{cls:"dkx-map-tools"},search,buttons);
   const frame=el("div",{cls:"dkx-map-frame"});
   const canvas=el("canvas",{cls:"dkx-map-canvas",attrs:{
@@ -69,7 +71,8 @@ export function openLiveDiskMap(files:DiskFile[],folders:string[],
   if(!sorted.length)fallback.append(el("p",{textContent:"Загрузите первый документ, чтобы карта начала расти."}));
   panel.append(top,tools,selected,frame,note,fallback);
   const ctx=canvas.getContext("2d");
-  let width=0,height=0,scale=1,panX=0,panY=0,hover:MapNode|null=null,query="";
+  let width=0,height=0,scale=1,panX=0,panY=0,hover:MapNode|null=null,active:MapNode|null=null,query="";
+  let zoomFrame=0;
   let progress=prefersReduced()?1:0,animation=0,dragging=false,moved=false;
   let startX=0,startY=0,lastX=0,lastY=0;
   const markerRadius=(n:MapNode)=>n.kind==="root"?13:n.kind==="folder"?8:4;
@@ -96,27 +99,40 @@ export function openLiveDiskMap(files:DiskFile[],folders:string[],
     ctx.clearRect(0,0,width,height);
     const brand=getComputedStyle(document.documentElement).getPropertyValue("--brand").trim()||"#d9a441";
     ctx.lineCap="round";
+    const connected=new Set<string>();
+    if(active){
+      connected.add(active.id);
+      for(const e of graph.edges){
+        if(e.from===active.id)connected.add(e.to);
+        if(e.to===active.id)connected.add(e.from);
+      }
+    }
     for(const e of graph.edges){
       const a=byId.get(e.from),b=byId.get(e.to);
       if(!a||!b)continue;
       if(query&&!visible(a)&&!visible(b))continue;
       const from=location(a),to=location(b);
       ctx.beginPath();ctx.moveTo(from.x,from.y);ctx.lineTo(to.x,to.y);
-      ctx.strokeStyle=e.kind==="duplicate"?"rgba(252,178,80,.66)":
-        e.kind==="tag"?"rgba(83,210,180,.45)":"rgba(164,161,180,.17)";
-      ctx.lineWidth=e.kind==="contains"?1:1.6;
+      const relevant=!!active&&(e.from===active.id||e.to===active.id);
+      ctx.strokeStyle=relevant?"rgba(245,201,120,.9)":
+        e.kind==="duplicate"?"rgba(252,178,80,.48)":
+        e.kind==="tag"?"rgba(83,210,180,.32)":"rgba(164,161,180,.15)";
+      ctx.globalAlpha=active&&!relevant?.18:1;
+      ctx.lineWidth=relevant?2.3:e.kind==="contains"?1:1.6;
       ctx.setLineDash(e.kind==="contains"?[]:[4,5]);ctx.stroke();
     }
+    ctx.globalAlpha=1;
     ctx.setLineDash([]);
     for(const n of graph.nodes){
       const pos=location(n),radius=markerRadius(n);
       if(pos.x<-30||pos.y<-30||pos.x>width+30||pos.y>height+30)continue;
-      const highlighted=hover?.id===n.id;
-      const muted=query&&!visible(n);
-      ctx.globalAlpha=muted?.17:1;
+      const highlighted=hover?.id===n.id||active?.id===n.id;
+      const muted=(query&&!visible(n))||(active&&!connected.has(n.id));
+      ctx.globalAlpha=muted?.2:1;
       if(n.kind!=="file"||highlighted){
         ctx.beginPath();ctx.arc(pos.x,pos.y,radius+(highlighted?9:5),0,Math.PI*2);
-        ctx.fillStyle=n.kind==="root"?"rgba(217,164,65,.13)":
+        ctx.fillStyle=highlighted?"rgba(245,191,100,.32)":
+          n.kind==="root"?"rgba(217,164,65,.13)":
           n.kind==="folder"?"rgba(120,147,239,.13)":"rgba(217,164,65,.16)";
         ctx.fill();
       }
@@ -145,15 +161,30 @@ export function openLiveDiskMap(files:DiskFile[],folders:string[],
     panX=0;panY=0;paint();
   };
   const zoom=(factor:number,x=width/2,y=height/2)=>{
-    const before=scale;scale=clamp(scale*factor,.14,3.4);
-    const change=scale/before;
-    panX=x-width/2-(x-width/2-panX)*change;
-    panY=y-height/2-(y-height/2-panY)*change;
-    paint();
+    cancelAnimationFrame(zoomFrame);
+    const startScale=scale,startX=panX,startY=panY;
+    const destScale=clamp(scale*factor,.14,3.4);
+    const change=destScale/startScale;
+    const destX=x-width/2-(x-width/2-startX)*change;
+    const destY=y-height/2-(y-height/2-startY)*change;
+    if(prefersReduced()){
+      scale=destScale;panX=destX;panY=destY;paint();return;
+    }
+    const begin=performance.now();
+    const frame=(now:number)=>{
+      const t=clamp((now-begin)/180,0,1),ease=t*t*(3-2*t);
+      scale=startScale+(destScale-startScale)*ease;
+      panX=startX+(destX-startX)*ease;panY=startY+(destY-startY)*ease;
+      paint();
+      if(t<1&&sheet.open)zoomFrame=requestAnimationFrame(frame);
+    };
+    zoomFrame=requestAnimationFrame(frame);
   };
   const showTip=(node:MapNode|null,p?:{x:number;y:number})=>{
     hover=node;
-    if(!node){tooltip.hidden=true;selected.textContent="Наведите на узел, чтобы увидеть его сведения";}
+    if(!node){tooltip.hidden=true;selected.textContent=active?
+      "Выбрано: "+active.name+" · "+human(active.size):
+      "Выберите узел на карте или найдите его по имени";}
     else{
       selected.textContent=(node.kind==="file"?"Файл · ":node.kind==="folder"?"Папка · ":"Диск · ")+
         node.name+" · "+human(node.size);
@@ -166,10 +197,18 @@ export function openLiveDiskMap(files:DiskFile[],folders:string[],
     }
     paint();
   };
+  const choose=(node:MapNode|null)=>{
+    active=node;
+    openSelected.disabled=!node;
+    selected.textContent=node?"Выбрано: "+node.name+" · "+human(node.size)+
+      " · связанные узлы подсвечены":"Выберите узел на карте";
+    tooltip.hidden=true;paint();
+  };
   const navigate=(node:MapNode)=>{
     if(node.kind==="file"&&openFile){sheet.close();openFile(node.id.slice(5));return;}
     sheet.close();openFolder(node.folder);
   };
+  openSelected.addEventListener("click",()=>{if(active)navigate(active);});
   canvas.addEventListener("pointerdown",event=>{
     if(event.button!==0)return;
     dragging=true;moved=false;startX=lastX=point(event).x;startY=lastY=point(event).y;
@@ -188,7 +227,10 @@ export function openLiveDiskMap(files:DiskFile[],folders:string[],
     dragging=false;
     if(!moved){
       const p=point(event),node=hit(p.x,p.y);
-      if(node)navigate(node);
+      if(node){
+        if(active?.id===node.id)navigate(node);
+        else choose(node);
+      }else choose(null);
     }
   });
   canvas.addEventListener("pointercancel",()=>{dragging=false;});
@@ -205,13 +247,22 @@ export function openLiveDiskMap(files:DiskFile[],folders:string[],
     else if(event.key==="ArrowUp"){panY+=28;paint();event.preventDefault();}
     else if(event.key==="ArrowDown"){panY-=28;paint();event.preventDefault();}
     else if(event.key==="0"){fit();event.preventDefault();}
+    else if(event.key==="Enter"&&active){navigate(active);event.preventDefault();}
+    else if(event.key==="Escape"&&active){choose(null);event.preventDefault();}
   });
   search.addEventListener("input",()=>{
     query=search.value.trim().toLocaleLowerCase("ru");
     const matches=graph.nodes.filter(n=>visible(n)&&n.kind!=="root");
-    selected.textContent=query?"Найдено на карте: "+matches.length+
-      (graph.shownFiles<graph.totalFiles?" · карта показывает часть файлов":""):
-      "Наведите на узел, чтобы увидеть его сведения";
+    if(query&&matches.length){
+      choose(matches[0]!);
+      // Centre the first verified matching node without inventing a file link.
+      const found=matches[0]!;
+      panX=-found.x*scale;panY=-found.y*scale;
+      selected.textContent="Найдено: "+matches.length+" · выбран "+found.name+
+        (graph.shownFiles<graph.totalFiles?" · карта частичная":"");
+    }else if(query){
+      choose(null);selected.textContent="Совпадений на карте нет";
+    }else choose(null);
     paint();
   });
   zoomOut.addEventListener("click",()=>zoom(.8));
@@ -219,7 +270,7 @@ export function openLiveDiskMap(files:DiskFile[],folders:string[],
   reset.addEventListener("click",fit);
   const resizeObserver=typeof ResizeObserver==="function"?new ResizeObserver(()=>resize()):null;
   const sheet=openSheet({title:"Живая карта Диска",icon:"folder",content:panel,
-    onClose:()=>{cancelAnimationFrame(animation);resizeObserver?.disconnect();}});
+    onClose:()=>{cancelAnimationFrame(animation);cancelAnimationFrame(zoomFrame);resizeObserver?.disconnect();}});
   if(!ctx){
     canvas.hidden=true;
     selected.textContent="Canvas недоступен — папки можно открыть в списке ниже.";

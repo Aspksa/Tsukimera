@@ -124,6 +124,29 @@ try{
   assert.ok(mobile.scrollWidth<=mobile.width+3,"Unexpected horizontal scroll: "+JSON.stringify(mobile));
   assert.equal(mobile.sidePosition,"fixed","Folders should become a mobile drawer");
 
+  // Disk 8.0: reversible Focus mode, sticky path, real file cards and no
+  // overwriting of the panel widths explicitly chosen by the user.
+  await device(1920,1080);
+  const beforeFocus=await evaluate("(()=>({left:localStorage.getItem('tsukimera.disk.layout.left.v1'),side:getComputedStyle(document.querySelector('.dk-side')).display,sticky:getComputedStyle(document.querySelector('.dk-head')).position,kind:!!document.querySelector('.dk-file .dk-kind-label'),focus:!!document.querySelector('.dk-focus-btn')}))()");
+  assert.ok(beforeFocus.focus&&beforeFocus.kind,"File kind badges and Focus control must render");
+  assert.equal(beforeFocus.sticky,"sticky","Breadcrumb path must remain fixed while scrolling");
+  assert.notEqual(beforeFocus.side,"none","Folder panel should initially be visible");
+  await evaluate("document.querySelector('.dk-focus-btn').click()");
+  await pause(200);
+  const focused=await evaluate("(()=>({enabled:document.querySelector('.disk-page').classList.contains('dk-focus'),button:document.querySelector('.dk-focus-btn').getAttribute('aria-pressed'),sidebar:getComputedStyle(document.querySelector('.dk-side')).display,life:getComputedStyle(document.querySelector('.dkl')).display,main:document.querySelector('.dk-main').getBoundingClientRect().width}))()");
+  assert.equal(focused.enabled,true);
+  assert.equal(focused.button,"true");
+  assert.equal(focused.sidebar,"none");
+  assert.equal(focused.life,"none");
+  assert.ok(focused.main>1000,"Focus workspace must give file list substantially more room");
+  await evaluate("document.querySelector('.dk-focus-btn').click()");
+  await pause(180);
+  const restored=await evaluate("(()=>({enabled:document.querySelector('.disk-page').classList.contains('dk-focus'),side:getComputedStyle(document.querySelector('.dk-side')).display,left:localStorage.getItem('tsukimera.disk.layout.left.v1')}))()");
+  assert.equal(restored.enabled,false);
+  assert.notEqual(restored.side,"none");
+  assert.equal(restored.left,beforeFocus.left,"Focus mode must not override manual panel sizes");
+
+
   // Life 4.0: verify six real highlight cards, 15 original groups in five areas,
   // the expanded full-width layout, a method dialog and a real-file source link.
   await device(1920,1080);
@@ -143,6 +166,16 @@ try{
   const expanded=await evaluate("(()=>({flag:document.querySelector('.disk-page').classList.contains('dk-life-expanded'),count:document.querySelectorAll('.dkl-tile').length,files:getComputedStyle(document.querySelector('.dk-main')).display,life:document.querySelector('.dkl').getBoundingClientRect().width,areas:document.querySelectorAll('.dkl-area').length}))()");
   assert.equal(expanded.flag,true,"Full-width analytics did not activate");
   assert.equal(expanded.count,10,"Expanded group must show all its ten metrics");
+
+  const compactLife=await evaluate("getComputedStyle(document.querySelector('.dkl-compact .dkl-areas')).display").catch(()=>null);
+  const allToggle=await evaluate("(()=>{const button=document.querySelector('.dkl-all-toggle');if(!button||button.hidden)return false;button.click();return true;})()");
+  assert.ok(allToggle,"All-150 analytics toggle must be visible in full mode");
+  const allCards=await evaluate("document.querySelectorAll('.dkl-tile').length");
+  assert.equal(allCards,150,"Full analytics must expose all 150 original metrics");
+  await evaluate("document.querySelector('.dkl-all-toggle').click()");
+  assert.equal(await evaluate("document.querySelectorAll('.dkl-tile').length"),10,
+    "Returning from 150 metrics must restore the previous group");
+
   assert.equal(expanded.files,"none","File workspace must yield its width to analytics");
   assert.ok(expanded.life>1200,"Analytics remained constrained inside the right sidebar");
   const details=await evaluate("(()=>{document.querySelector('.dkl-tile[data-id=\"biggest\"]').click();return {dialog:!!document.querySelector('.dkl-detail-sheet'),method:document.querySelector('.dkl-detail-sheet')?.textContent.includes('Как рассчитывается'),source:!!document.querySelector('.dkl-detail-sheet .btn.primary')};})()");
@@ -197,11 +230,14 @@ try{
   assert.ok(opened,"The existing Disk menu did not expose the new live map");
   await pause(350);
   const canvas=await evaluate("(()=>{const c=document.querySelector('.dkx-map-canvas');const f=document.querySelector('.dkx-map-frame');return {ready:!!c,width:c?.width,height:c?.height,context:!!c?.getContext('2d'),controls:document.querySelectorAll('.dkx-map-controls button').length,legend:document.querySelectorAll('.dkx-map-legend span').length,frame:f?.getBoundingClientRect().width};})()");
-  assert.ok(canvas.ready&&canvas.context&&canvas.width>500&&canvas.height>250&&canvas.controls===3&&canvas.legend===5,
+  assert.ok(canvas.ready&&canvas.context&&canvas.width>500&&canvas.height>250&&canvas.controls===4&&canvas.legend===5,
     "Live Canvas graph did not render with real files: "+JSON.stringify(canvas));
   await evaluate("document.querySelector('.dkx-map-controls button[aria-label=\"Увеличить карту\"]').click()");
   const mapSearch=await evaluate("(()=>{const x=document.querySelector('.dkx-map-search');x.value='Тест';x.dispatchEvent(new Event('input',{bubbles:true}));return document.querySelector('.dkx-map-selected').textContent;})()");
-  assert.match(mapSearch,/Найдено на карте/);
+  assert.match(mapSearch,/Найдено:/);
+  const mapActive=await evaluate("(()=>({enabled:!document.querySelector('.dkx-map-open').disabled,selection:document.querySelector('.dkx-map-selected').textContent}))()");
+  assert.ok(mapActive.enabled&&mapActive.selection.includes('выбран'),
+    "Searching the Canvas map must select an existing node and enable opening it");
   await evaluate("document.querySelector('.mod-sheet button[aria-label=\"Закрыть\"]').click()");
   let savedSettings;
   for(let i=0;i<25;i++){

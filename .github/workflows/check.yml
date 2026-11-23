@@ -35,12 +35,22 @@ jobs:
           grep -q 'aria-label="Быстрые разделы"' /tmp/tsukimera-rendered.html
           echo 'Chrome rendered JUUNIBI-style menu and Tsukimera settings.'
           timeout 50s google-chrome --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage --virtual-time-budget=6000 --dump-dom 'http://127.0.0.1:49678/#/disk' > /tmp/tsukimera-disk-rendered.html
-          grep -q 'class="dk-layout' /tmp/tsukimera-disk-rendered.html
-          grep -q 'dk-file' /tmp/tsukimera-disk-rendered.html
-          grep -q 'dkx-smart-head' /tmp/tsukimera-disk-rendered.html
-          grep -q 'Умные папки' /tmp/tsukimera-disk-rendered.html
-          grep -q 'aria-label="Изменить ширину панели папок"' /tmp/tsukimera-disk-rendered.html
-          grep -q 'aria-label="Размер плиток"' /tmp/tsukimera-disk-rendered.html
+          echo "Disk HTML: $(wc -c < /tmp/tsukimera-disk-rendered.html) bytes"
+          grep -o 'class="dk-[^"]*"' /tmp/tsukimera-disk-rendered.html | head -18 || true
+          check_disk_dom() {
+            if ! grep -q "$1" /tmp/tsukimera-disk-rendered.html; then
+              echo "Missing Disk UI marker: $1"
+              grep -o 'Не удалось[^<]*' /tmp/tsukimera-disk-rendered.html | head -5 || true
+              tail -20 /tmp/tsukimera-launch.log || true
+              return 1
+            fi
+          }
+          check_disk_dom 'class="dk-layout'
+          check_disk_dom 'dk-file'
+          check_disk_dom 'dkx-smart-head'
+          check_disk_dom 'Умные папки'
+          check_disk_dom 'aria-label="Изменить ширину панели папок"'
+          check_disk_dom 'aria-label="Размер плиток"'
           node tests/browser-disk-layout.mjs http://127.0.0.1:49678
           echo 'Chrome rendered the complete JUUNIBI Disk page.'
   linux-node24:
