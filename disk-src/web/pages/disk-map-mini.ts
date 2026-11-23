@@ -9,6 +9,7 @@ import {mapNodeRadius} from "./disk-map-layout";
 import {miniGraphFromCatalog,normalizeMiniView,clampView,MINI_VIEW_KEY,
   type MiniGraph,type MiniNode,type MiniView} from "./disk-map-mini-model";
 import {writePreference} from "../preferences";
+import {orbitLayout,containmentTrail,adaptiveMapWeight} from "./disk-map-orbits";
 import type {DiskFile} from "../api";
 
 type MiniMapActions={
@@ -21,6 +22,7 @@ export interface MiniDiskMap{
   update:(files:DiskFile[],folders:string[],current:string)=>void;
 }
 type Point={node:MiniNode;x:number;y:number;r:number};
+const reducedMotion=()=>window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 const readView=():MiniView=>{
   try{return normalizeMiniView(JSON.parse(localStorage.getItem(MINI_VIEW_KEY)||"null"));}
   catch{return normalizeMiniView(null);}
@@ -61,6 +63,10 @@ export function createMiniDiskMap(actions:MiniMapActions):MiniDiskMap{
   let graph:MiniGraph=miniGraphFromCatalog([],[]),hash=-1;
   let modeKey="",active:MiniNode|null=null,points:Point[]=[];
   let queued=false,raf=0,saveTimer=0,width=1,height=1;
+  let revealStart=0,pulseStart=0;
+  let revealFrom=new Map<string,Point>();
+  let revealOrigin={x:0,y:0};
+  let lastFolder="";
   let dragging=false,dragged=false,suppressClick=false,startX=0,startY=0,startPanX=0,startPanY=0;
   const save=()=>{
     clearTimeout(saveTimer);
@@ -75,7 +81,15 @@ export function createMiniDiskMap(actions:MiniMapActions):MiniDiskMap{
     const focus=detail?focusFolder():"";
     const key=hash+":"+detail+":"+focus;
     if(key===modeKey)return;
-    graph=miniGraphFromCatalog(files,folders,focus,detail);
+    // Remember screen positions before replacing a cluster with its members.
+    // Newly exposed nodes emerge from the prior selected cluster.
+    const origin=points.find(p=>p.node.id===active?.id);
+    if(points.length&&!reducedMotion()){
+      revealFrom=new Map(points.map(p=>[p.node.id,p]));
+      revealOrigin=origin?{x:origin.x,y:origin.y}:{x:width/2,y:height/2};
+      revealStart=performance.now();
+    }else{revealStart=0;revealFrom.clear();}
+    graph=orbitLayout(miniGraphFromCatalog(files,folders,focus,detail,current));
     modeKey=key;
     canvas.dataset.layer=detail?"detail":"overview";
     canvas.dataset.nodes=String(graph.nodes.length);
@@ -91,13 +105,20 @@ export function createMiniDiskMap(actions:MiniMapActions):MiniDiskMap{
   };
   const getBaseScale=()=>{
     const reach=Math.max(160,...graph.nodes.map(n=>Math.max(Math.abs(n.x),Math.abs(n.y))+38));
-    return clampView(Math.min(width*.46,height*.46)/reach,.07,1.1);
+    return clampView(Math.min(width*.46,height*.46)/reach,.025,1.1);
   };
   const project=(n:MiniNode,scale:number):Point=>({
     node:n,x:width/2+view.panX+n.x*scale,y:height/2+view.panY+n.y*scale,
     r:n.kind==="cluster"?clampView(6+Math.sqrt(n.count+n.hiddenFolders)*.8,6,15):
       clampView(mapNodeRadius(n,graph.bytes)*Math.sqrt(scale),3,16),
   });
+  const centerOn=(node:MiniNode|null)=>{
+    if(!node)return;
+    const scale=getBaseScale()*view.zoom;
+    view.panX=clampView(-node.x*scale,-3000,3000);
+    view.panY=clampView(-node.y*scale,-3000,3000);
+    save();
+  };
   const drawShape=(ctx:CanvasRenderingContext2D,p:Point)=>{
     const {node,x,y,r}=p;
     ctx.beginPath();
@@ -126,11 +147,32 @@ export function createMiniDiskMap(actions:MiniMapActions):MiniDiskMap{
     ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,width,height);
     rebuild();
     const scale=getBaseScale()*view.zoom;
-    points=graph.nodes.map(n=>project(n,scale));
+    const now=performance.now();
+    const revealProgress=revealStart&&!reducedMotion()?
+      clampView((now-revealStart)/420,0,1):1;
+    const revealEase=1-Math.pow(1-revealProgress,3);
+    const pulse=pulseStart&&!reducedMotion()?clampView(1-(now-pulseStart)/560,0,1):0;
+    points=graph.nodes.map(n=>{
+      const dest=project(n,scale);
+      if(revealProgress>=1)return dest;
+      const source=revealFrom.get(n.id)||{...dest,...revealOrigin,r:1};
+      return {...dest,
+        x:source.x+(dest.x-source.x)*revealEase,
+        y:source.y+(dest.y-source.y)*revealEase,
+        r:Math.max(1,source.r+(dest.r-source.r)*revealEase)};
+    });
+    canvas.dataset.transition=revealProgress<1?"revealing":"idle";
     const byId=new Map(points.map(p=>[p.node.id,p]));
+    const centered=active?byId.get(active.id):null;
+    canvas.dataset.centerError=centered?
+      String(Math.round(Math.hypot(centered.x-width/2,centered.y-height/2))):"";
     const margin=22;
     const inside=(p:Point)=>p.x>=-margin&&p.y>=-margin&&p.x<=width+margin&&p.y<=height+margin;
-    const relevant=new Set<string>();
+    const trail=active?containmentTrail(graph,active.id):[];
+    const trailIds=new Set(trail);
+    const trailLinks=new Set(trail.slice(1).map((id,i)=>trail[i]+"|"+id));
+    canvas.dataset.trail=trail.join(">");
+    const relevant=new Set<string>(trailIds);
     if(active){
       relevant.add(active.id);
       for(const e of graph.edges){
@@ -145,12 +187,14 @@ export function createMiniDiskMap(actions:MiniMapActions):MiniDiskMap{
       // cost no Canvas stroke, even when the catalog is much larger.
       if(Math.max(from.x,to.x)<-margin||Math.min(from.x,to.x)>width+margin||
          Math.max(from.y,to.y)<-margin||Math.min(from.y,to.y)>height+margin)continue;
+      const onPath=edge.kind==="contains"&&trailLinks.has(edge.from+"|"+edge.to);
       const selected=!!active&&(edge.from===active.id||edge.to===active.id);
       ctx.beginPath();ctx.moveTo(from.x,from.y);ctx.lineTo(to.x,to.y);
-      ctx.strokeStyle=selected?"rgba(241,191,92,.82)":
+      ctx.strokeStyle=onPath?"rgba(247,198,105,.96)":
+        selected?"rgba(241,191,92,.65)":
         edge.kind==="duplicate"?"rgba(218,169,75,.4)":
         edge.kind==="tag"?"rgba(79,187,169,.3)":"rgba(176,187,205,.22)";
-      ctx.lineWidth=selected?1.7:edge.kind==="contains"?.8:1.1;
+      ctx.lineWidth=onPath?2.1+pulse*1.2:selected?1.6:edge.kind==="contains"?.8:1.1;
       ctx.stroke();
     }
     let paintedNodes=0;
@@ -167,10 +211,26 @@ export function createMiniDiskMap(actions:MiniMapActions):MiniDiskMap{
         ctx.fill();
       }
       drawShape(ctx,p);
-      ctx.fillStyle=node.kind==="root"?"#D9A441":node.kind==="cluster"?"#C6A366":
+      const base=node.kind==="root"?"#D9A441":node.kind==="cluster"?"#C6A366":
         node.kind==="folder"?(inPath?"#E9BA65":"#8CA8ED"):"#CFD5E1";
+      const dense=graph.nodes.length>160;
+      // Faux 3D volume with bounded radial shading; a selective glow is
+      // deliberately limited to active/ancestral nodes (no continuous GPU loop).
+      const grad=!dense?ctx.createRadialGradient(x-r*.35,y-r*.4,.3,x,y,Math.max(3,r*1.4)):null;
+      if(grad){grad.addColorStop(0,"#fff2cf");grad.addColorStop(.3,base);grad.addColorStop(1,"#292634");}
+      ctx.fillStyle=grad||base;
       ctx.globalAlpha=active&&!relevant.has(node.id)&&!inPath?0.48:1;
-      ctx.fill();ctx.globalAlpha=1;
+      if(chosen||trailIds.has(node.id)){
+        ctx.shadowColor="rgba(242,191,88,.7)";
+        ctx.shadowBlur=chosen?10+pulse*9:5;
+      }
+      ctx.fill();
+      ctx.shadowBlur=0;ctx.globalAlpha=1;
+      if(chosen&&pulse>0){
+        ctx.beginPath();ctx.arc(x,y,r+5+(1-pulse)*15,0,2*Math.PI);
+        ctx.strokeStyle="rgba(248,199,93,"+(pulse*.66)+")";
+        ctx.lineWidth=1.4+pulse*1.2;ctx.stroke();
+      }
       if(chosen){
         drawShape(ctx,{...p,r:r+3});
         ctx.strokeStyle="#E9BA65";ctx.lineWidth=1.4;ctx.stroke();
@@ -182,6 +242,8 @@ export function createMiniDiskMap(actions:MiniMapActions):MiniDiskMap{
       }
     }
     canvas.dataset.paintedNodes=String(paintedNodes);
+    canvas.dataset.pulse=pulse>0?"active":"idle";
+    if((revealProgress<1||pulse>0)&&!document.hidden)invalidate();
     if(graph.nodes.length===1){
       ctx.fillStyle="rgba(206,207,211,.6)";ctx.textAlign="center";ctx.font="11px system-ui";
       ctx.fillText("Загрузите файлы, чтобы карта выросла",width/2,height-17);
@@ -208,6 +270,7 @@ export function createMiniDiskMap(actions:MiniMapActions):MiniDiskMap{
     return best?.node??null;
   };
   const choose=(node:MiniNode|null)=>{
+    if(active?.id!==node?.id)pulseStart=performance.now();
     active=node;
     status.textContent=node?detail(node):"Клик — выбор, двойной клик — открыть";
     invalidate();
@@ -216,8 +279,9 @@ export function createMiniDiskMap(actions:MiniMapActions):MiniDiskMap{
     if(node.kind==="cluster"){
       view.focus=node.folder;view.zoom=Math.max(2.5,view.zoom);
       view.panX=0;view.panY=0;
-      modeKey="";rebuild();choose(graph.nodes.find(n=>n.kind==="folder"&&n.folder===node.folder)||null);
-      save();return;
+      modeKey="";rebuild();
+      choose(graph.nodes.find(n=>n.kind==="folder"&&n.folder===node.folder)||null);
+      centerOn(active);save();return;
     }
     if(node.kind==="file")actions.openFile(node.id.slice(5));
     else actions.openFolder(node.folder);
@@ -233,7 +297,7 @@ export function createMiniDiskMap(actions:MiniMapActions):MiniDiskMap{
     view.panX=clampView(x-width/2-(x-width/2-view.panX)*r,-3000,3000);
     view.panY=clampView(y-height/2-(y-height/2-view.panY)*r,-3000,3000);
     view.zoom=next;
-    modeKey="";rebuild();invalidate();save();
+    rebuild();invalidate();save();
   };
   canvas.addEventListener("wheel",event=>{
     event.preventDefault();
@@ -304,7 +368,15 @@ export function createMiniDiskMap(actions:MiniMapActions):MiniDiskMap{
     if(hash!==nextHash){hash=nextHash;modeKey="";}
     if(view.focus&&!folders.includes(view.focus))view.focus="";
     rebuild();selectFolder();
+    // When navigating the folder tree, center the real matching node. The
+    // same-folder refresh leaves the user's saved/manual pan untouched.
+    if(lastFolder!==folder){
+      centerOn(active);
+      if(folder)pulseStart=performance.now();
+    }
+    lastFolder=folder;
     const sampled=graph.shownFiles<graph.totalFiles||graph.shownFolders<graph.totalFolders;
+    root.style.setProperty("--dk9-map-weight",String(adaptiveMapWeight(folders.length)));
     count.textContent=files.filter(f=>!f.deletedAt).length+" файлов · "+folders.length+" папок"+
       (sampled?" · группы":"");
     status.textContent=sampled?"Кластеры: увеличение раскрывает детали":detail(active||graph.nodes[0]!);

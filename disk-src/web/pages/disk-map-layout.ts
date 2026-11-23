@@ -12,7 +12,7 @@ export type DiskGraph={nodes:MapNode[];edges:MapEdge[];shownFiles:number;totalFi
   shownFolders:number;totalFolders:number;bytes:number};
 
 export function graphFromFiles(files:DiskFile[],folderNames:string[],
-  limitFiles=240,limitFolders=110):DiskGraph{
+  limitFiles=240,limitFolders=110,preferredFolder=""):DiskGraph{
   const active=files.filter(f=>!f.deletedAt);
   const folderSet=new Set<string>();
   const addPath=(path:string)=>{
@@ -38,6 +38,13 @@ export function graphFromFiles(files:DiskFile[],folderNames:string[],
     (b?b.split("/").length:0)-(a?a.split("/").length:0) || a.localeCompare(b,"ru"));
   // Prefer folders containing data, but always include their parents.
   const picked=new Set<string>();
+  // Keep the owner's currently selected folder and ancestors on the small map
+  // even when the catalog is much larger than the rendering limit.
+  if(preferredFolder&&folderSet.has(preferredFolder)){
+    const parts=preferredFolder.split("/");
+    for(let i=1;i<=parts.length&&picked.size<Math.max(1,limitFolders);i++)
+      picked.add(parts.slice(0,i).join("/"));
+  }
   const weighted=[...allFolders].sort((a,b)=>
     (sizes.get(b)||0)-(sizes.get(a)||0) || a.split("/").length-b.split("/").length || a.localeCompare(b,"ru"));
   for(const folder of weighted){
