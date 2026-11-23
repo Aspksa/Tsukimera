@@ -9,7 +9,7 @@ import { cp, copyFile, mkdir, rm, stat, writeFile } from "node:fs/promises";
 import { join, relative } from "node:path";
 import { randomUUID } from "node:crypto";
 import {installDiskIndex,readDiskState,saveDiskState,textIndexTargets,cachedText,indexText,indexedSearch,indexStatus,auditTarget,recordAudit,auditStatus} from "./disk-index.mjs";
-import {installDiskKnowledge,pendingDiskKnowledge,putDiskKnowledge,diskKnowledgeStatus,diskKnowledgeForFile,diskKnowledgeGraph,rankedDiskSearch} from "./disk-knowledge.mjs";
+import {installDiskKnowledge,pendingDiskKnowledge,putDiskKnowledge,diskKnowledgeStatus,diskKnowledgeForFile,diskKnowledgeGraph,rankedDiskSearch,diskTileInsights} from "./disk-knowledge.mjs";
 
 const exists = async path => { try { await stat(path); return true; } catch (error) {
   if (error.code === "ENOENT") return false;
@@ -275,6 +275,7 @@ export async function initializeDatabase(dataDir) {
     knowledgeStats: () => withDb(diskKnowledgeStatus),
     knowledgeForFile: id => withDb(db => diskKnowledgeForFile(db,id)),
     knowledgeGraph: (limit=240) => withDb(db => diskKnowledgeGraph(db,limit)),
+    diskTileInsights: ids => withDb(db => diskTileInsights(db,ids)),
     rankedSearch: query => withDb(db => rankedDiskSearch(db,query)),
     auditNext: () => withDb(auditTarget),
     auditRecord: (target,status) => transaction(db => recordAudit(db,target,status)),
