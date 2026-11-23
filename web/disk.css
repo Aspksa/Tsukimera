@@ -1434,7 +1434,7 @@ button.dk-crumb:hover{background:var(--hover);color:var(--fg)}
 }
 .disk-page.dk-experience-v8 .dk-tree .dk-branch-kids::before{
   content:"";position:absolute;
-  left:calc(6px + (var(--branch-depth,0) + 1)*14px);
+  left:var(--branch-line,20px);
   top:0;bottom:15px;width:1px;pointer-events:none;
   background:color-mix(in srgb,var(--fg) 14%,transparent);
 }
