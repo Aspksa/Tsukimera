@@ -82,7 +82,7 @@ test("Disk 20 automatically indexes, cites, ranks and persists knowledge without
     assert.ok(graph.nodes.some(n=>n.kind==="project"&&n.name.includes("57/2026")));
     const found=(await get(s.url,"/api/disk/search?q="+encodeURIComponent("солнеч"))).data;
     assert.ok(found.ids.includes(one.id)&&found.ids.includes(two.id));
-    assert.ok(found.matches.some(x=>x.id===one.id&&x.excerpt.includes("«солнеч")),
+    assert.ok(found.matches.some(x=>x.id===one.id&&x.excerpt.toLocaleLowerCase("ru").includes("«солнеч")),
       "FTS5 query snippets should identify the actual matched text");
     assert.ok(found.matches.every(x=>Number.isFinite(x.rank)));
     const invalid=await get(s.url,"/api/disk/knowledge?fileId=../../anything");
