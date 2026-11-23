@@ -207,6 +207,13 @@ try{
   await pause(360);
   const centered=await evaluate("JSON.parse(localStorage.getItem('tsukimera.disk.minimap.view.v1')||'null')");
   assert.equal(centered?.zoom,1,"Reset must restore 100% zoom");
+  const semanticControls=await evaluate("(()=>({button:!!document.querySelector('.dk-graph-analyze'),mode:!!document.querySelector('.dk-graph-mode'),card:!!document.querySelector('.dk-graph-inspect')}))()");
+  assert.ok(semanticControls.button&&semanticControls.mode&&semanticControls.card,
+    "Disk 14 local analysis and explanation controls must exist: "+JSON.stringify(semanticControls));
+  await evaluate("(()=>{const select=document.querySelector('.dk-graph-mode');select.value='versions';select.dispatchEvent(new Event('change',{bubbles:true}));})()");
+  await pause(90);
+  assert.equal(await evaluate("document.querySelector('.dk-graph-mode').value"),"versions");
+  await evaluate("(()=>{const select=document.querySelector('.dk-graph-mode');select.value='all';select.dispatchEvent(new Event('change',{bubbles:true}));})()");
   await evaluate("document.querySelector('.dk-graph-expand').click()");
   await pause(240);
   const graphExpansion=await evaluate("(()=>({isExpanded:document.querySelector('.dk-graph-view').classList.contains('dk-graph-expanded'),count:document.querySelectorAll('.dk-graph-view').length,width:document.querySelector('.dk-graph-stage').getBoundingClientRect().width,close:!!document.querySelector('.dk-graph-close')}))()");
