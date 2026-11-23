@@ -397,29 +397,56 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
     const ctx=canvas.getContext("2d");if(!ctx)return;
     ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,w,h);
     const now=performance.now();
-    // A diffuse nebula makes real clusters legible without hard outlines.
-    const groups=new Map<string,GraphPoint[]>();
-    const folderCounts=new Map(scene.nodes.filter(n=>n.kind==="folder")
-      .map(n=>[n.folder,n.count||0]));
-    for(const n of scene.nodes){
-      if(n.kind!=="file")continue;
-      const p=coords.get(n.id);if(!p)continue;
-      const a=groups.get(n.folder)||[];a.push(p);groups.set(n.folder,a);
+    // Three passes: deep black space, grounded colour-cloud communities,
+    // then factual curves and high-DPI luminous nodes. No DOM overlays.
+    ctx.fillStyle="#07090e";ctx.fillRect(0,0,w,h);
+    const camera={cx,cy,scale};
+    const clouds=artClouds(art,coords,camera,11);
+    for(const cloud of clouds){
+      if(cloud.x+cloud.rx<0||cloud.x-cloud.rx>w||
+        cloud.y+cloud.ry<0||cloud.y-cloud.ry>h)continue;
+      const rgb=artRgb(cloud.color);
+      ctx.save();ctx.translate(cloud.x,cloud.y);
+      ctx.scale(Math.max(1,cloud.rx),Math.max(1,cloud.ry));
+      const shape=ctx.createRadialGradient(0,0,.025,0,0,1);
+      shape.addColorStop(0,"rgba("+rgb+",.16)");
+      shape.addColorStop(.42,"rgba("+rgb+",.078)");
+      shape.addColorStop(1,"rgba("+rgb+",0)");
+      ctx.fillStyle=shape;ctx.beginPath();
+      ctx.ellipse(0,0,1,.91,cloud.layer*.37,0,Math.PI*2);ctx.fill();
+      // Offset lobe softens the geometry without hard or invented boundaries.
+      ctx.translate(cloud.layer*.16-.16,.12);
+      const outer=ctx.createRadialGradient(0,0,.03,0,0,.72);
+      outer.addColorStop(0,"rgba("+rgb+",.052)");
+      outer.addColorStop(1,"rgba("+rgb+",0)");
+      ctx.fillStyle=outer;ctx.beginPath();
+      ctx.ellipse(0,0,.72,.62,cloud.layer*.27,0,Math.PI*2);ctx.fill();
+      ctx.restore();
     }
-    let cloud=0;
-    for(const positions of groups.values()){
-      if(positions.length<3||cloud++>8)continue;
-      const x=cx+positions.reduce((sum,p)=>sum+p.x,0)/positions.length*scale;
-      const y=cy+positions.reduce((sum,p)=>sum+p.y,0)/positions.length*scale;
-      const descendants=folderCounts.get([...groups.keys()].find(k=>groups.get(k)===positions)||"")||positions.length;
-      const radius=clamp(positions.reduce((max,p)=>Math.max(max,Math.hypot(
-        cx+p.x*scale-x,cy+p.y*scale-y)),0)+
-        16+Math.sqrt(descendants)*2.5,28,Math.min(w,h)*.48);
-      const grad=ctx.createRadialGradient(x,y,2,x,y,radius);
-      grad.addColorStop(0,"rgba(219,166,83,.11)");
-      grad.addColorStop(.44,"rgba(154,112,68,.045)");
-      grad.addColorStop(1,"rgba(154,112,68,0)");
-      ctx.fillStyle=grad;ctx.beginPath();ctx.arc(x,y,radius,0,Math.PI*2);ctx.fill();
+    // Existing folder nesting becomes a second, subtler visual level only
+    // when zoomed in. Names and actual file parentage are never altered.
+    if(zoom>=1.2){
+      const subgroups=new Map<string,GraphPoint[]>();
+      for(const n of scene.nodes){
+        if(n.kind!=="file"||!n.folder.includes("/"))continue;
+        const p=coords.get(n.id);if(!p)continue;
+        const arr=subgroups.get(n.folder)||[];arr.push(p);subgroups.set(n.folder,arr);
+      }
+      let count=0;
+      for(const [folder,points] of subgroups){
+        if(points.length<3||count++>=16)continue;
+        const x=cx+points.reduce((sum,p)=>sum+p.x,0)/points.length*scale;
+        const y=cy+points.reduce((sum,p)=>sum+p.y,0)/points.length*scale;
+        const radius=clamp((27+Math.sqrt(points.length)*9)*scale,18,105);
+        if(x+radius<0||x-radius>w||y+radius<0||y-radius>h)continue;
+        const node=scene.nodes.find(n=>n.kind==="file"&&n.folder===folder);
+        const rgb=artRgb(node?artCommunityColor(art,node.id):"#b9a1e7");
+        const grad=ctx.createRadialGradient(x,y,0,x,y,radius);
+        grad.addColorStop(0,"rgba("+rgb+",.10)");
+        grad.addColorStop(1,"rgba("+rgb+",0)");
+        ctx.fillStyle=grad;ctx.beginPath();
+        ctx.ellipse(x,y,radius,radius*.75,0,0,Math.PI*2);ctx.fill();
+      }
     }
     const active=hovered||selected;
     const routeNodes=route?new Set(route.nodes):null;
@@ -439,38 +466,64 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
         rootPath.add(up.source+"|"+up.target);child=up.source;
       }
     }
-    // Connections are factual; luminous routes reveal hierarchy/semantic ties.
-    for(const e of scene.links){
-      const p=coords.get(e.source),q=coords.get(e.target);
-      if(!p||!q)continue;
-      const sx=cx+p.x*scale,sy=cy+p.y*scale;
-      const tx=cx+q.x*scale,ty=cy+q.y*scale;
-      if((sx<0&&tx<0)||(sx>w&&tx>w)||(sy<0&&ty<0)||(sy>h&&ty>h))continue;
+    // Visual bundles select real representative source-target pairs. Route,
+    // hover and root-path evidence always remain individually visible.
+    const forced=new Set(scene.links.filter(e=>
+      routeEdges?.has(e)||e===hoverEdge||rootPath.has(e.source+"|"+e.target)||
+      !!active&&(e.source===active||e.target===active)));
+    renderBundles=artBundleEdges(scene.links,art,zoom,forced);
+    const nodeColor=new Map(scene.nodes.map(n=>[n.id,tint(n)]));
+    for(const bundle of renderBundles){
+      const e=bundle.edge,curve=artCurve(e,coords,camera,art);
+      if(!curve)continue;
+      const {x1:sx,y1:sy,x2:tx,y2:ty}=curve;
+      const margin=36;
+      if(Math.max(sx,tx,curve.cx)<-margin||Math.min(sx,tx,curve.cx)>w+margin||
+        Math.max(sy,ty,curve.cy)<-margin||Math.min(sy,ty,curve.cy)>h+margin)continue;
       const onRoute=routeEdges?.has(e)||false;
       const onFocus=focusNodes?focusNodes.has(e.source)&&focusNodes.has(e.target):false;
       const highlighted=onRoute||e===hoverEdge||
         !!active&&(e.source===active||e.target===active);
       const partOfPath=rootPath.has(e.source+"|"+e.target);
-      const fade=routeNodes?!onRoute:
-        focusNodes?!onFocus:
+      const fade=routeNodes?!onRoute:focusNodes?!onFocus:
         !!active&&!highlighted&&!partOfPath;
       const rgb=relationColors[e.kind]||relationColors.contains;
-      const activePulse=highlighted&&!reduced()?
-        .08*Math.sin(now/230):0;
-      const opacity=fade?.048:onRoute?.97:highlighted?.82+activePulse:
-        partOfPath?.69:e.kind==="contains"?.18:.31;
+      const pulse=highlighted&&!reduced()?.06*Math.sin(now/230):0;
+      const opacity=fade?.045:onRoute?.94:highlighted?.72+pulse:
+        partOfPath?.66:e.kind==="contains"?.16:.27;
       const strength=clamp(e.weight??1,.25,1.6);
-      ctx.save();
-      ctx.beginPath();ctx.moveTo(sx,sy);ctx.lineTo(tx,ty);
-      ctx.strokeStyle="rgba("+rgb+","+opacity+")";
-      ctx.lineWidth=((onRoute?2.3:highlighted?1.25:.45)+
-        strength*(highlighted?1.1:.5))*lineScale;
-      if(e.kind==="lexical"||e.kind==="entity")ctx.setLineDash([3.2,5.1]);
+      const thickness=clamp(((onRoute?2.25:highlighted?1.25:.38)+
+        strength*(highlighted?.9:.44)+Math.log2(bundle.count)*.28)*lineScale,.45,4.3);
+      const startRgb=artRgb(nodeColor.get(e.source)||"#a0b7d9");
+      const endRgb=artRgb(nodeColor.get(e.target)||"#e1b879");
+      ctx.save();ctx.beginPath();ctx.moveTo(curve.x1,curve.y1);
+      ctx.quadraticCurveTo(curve.cx,curve.cy,curve.x2,curve.y2);
+      const gradient=ctx.createLinearGradient(sx,sy,tx,ty);
+      gradient.addColorStop(0,"rgba("+startRgb+","+opacity+")");
+      gradient.addColorStop(.5,"rgba("+rgb+","+opacity*.85+")");
+      gradient.addColorStop(1,"rgba("+endRgb+","+opacity+")");
+      ctx.strokeStyle=gradient;ctx.lineWidth=thickness;
+      if(e.kind==="lexical"||e.kind==="entity"||e.kind==="co_mention")
+        ctx.setLineDash([3.2,5.2]);
       if(highlighted||partOfPath){
-        ctx.shadowColor="rgba("+rgb+",.75)";
-        ctx.shadowBlur=expanded?12:6;
+        ctx.shadowColor="rgba("+rgb+",.70)";
+        ctx.shadowBlur=expanded?10:5;
       }
       ctx.stroke();ctx.restore();
+      // A single transient light pulse can follow a selected, evidenced
+      // chain. It never runs indefinitely or implies a new relationship.
+      if(onRoute&&route&&now<routePulseUntil&&!reduced()){
+        const idx=route.links.indexOf(e);
+        const overall=(1-(routePulseUntil-now)/950)*route.links.length;
+        const progress=overall-idx;
+        if(progress>=0&&progress<=1){
+          const p=artCurvePoint(curve,progress);
+          ctx.save();ctx.shadowColor="#f4d6a3";ctx.shadowBlur=12;
+          ctx.fillStyle="#ffe7bf";ctx.beginPath();
+          ctx.arc(p.x,p.y,clamp(2.2*markerScale,1.8,4),0,Math.PI*2);
+          ctx.fill();ctx.restore();
+        }
+      }
     }
     fading=fading.filter(x=>x.until>now);
     for(const ghost of fading){
