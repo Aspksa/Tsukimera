@@ -1073,6 +1073,18 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
       go({folder:file.folder});reveal(id);openInfo(id);setDrawer(false);
     }
   });
+  // Bidirectional selection: a row in the real file manager highlights the
+  // corresponding object on the left map. No second file state is persisted.
+  filesBox.addEventListener("pointerover",event=>{
+    const target=event.target as HTMLElement;
+    const card=target.closest<HTMLElement>(".dk-file[data-file-id]");
+    if(card)miniMap.highlightFile(card.dataset.fileId||null);
+  });
+  filesBox.addEventListener("focusin",event=>{
+    const target=event.target as HTMLElement;
+    const card=target.closest<HTMLElement>(".dk-file[data-file-id]");
+    if(card)miniMap.highlightFile(card.dataset.fileId||null);
+  });
   const treePanel=el("div",{cls:"dk-tree-panel"},treeCommands,tree);
   // The spatial map follows the hierarchy in the *same* left rail.
   // Nothing is mounted above the ordinary file manager.
