@@ -160,6 +160,37 @@ try{
   assert.equal(initialTree.hasSidebarSections,false,"Sections must be removed from the left rail");
   assert.equal(initialTree.hasMap,true,"Live Canvas map must replace sections in the left rail");
   assert.ok(initialTree.map>160,"Mini map should use available sidebar width: "+JSON.stringify(initialTree));
+
+  // Disk 8.3: no search, pinned or sorting strip in the hierarchy; the
+  // real Canvas retains the view state and exposes bounded detail on zoom.
+  const clean=await evaluate("(()=>({search:!!document.querySelector('.dk-tree-find'),sort:!!document.querySelector('.dk-tree-sort'),pinned:!!document.querySelector('.dk-tree .dk-pin'),control:document.querySelector('.dk-tree-panel')?.textContent.includes('Закреплённые')}))()");
+  assert.deepEqual(clean,{search:false,sort:false,pinned:false,control:false},
+    "Unwanted folder controls must not crowd the hierarchy");
+  const mapBefore=await evaluate("(()=>({layer:document.querySelector('.dk-mini-map-canvas')?.dataset.layer,nodes:Number(document.querySelector('.dk-mini-map-canvas')?.dataset.nodes),height:document.querySelector('.dk-mini-map-frame')?.getBoundingClientRect().height}))()");
+  assert.equal(mapBefore.layer,"overview");
+  assert.ok(mapBefore.height>=90&&mapBefore.height<=265,
+    "Height should adapt to desktop workspace: "+JSON.stringify(mapBefore));
+  await evaluate("(()=>{const c=document.querySelector('.dk-mini-map-canvas');for(let i=0;i<6;i++)c.dispatchEvent(new WheelEvent('wheel',{bubbles:true,cancelable:true,deltaY:-110,clientX:c.getBoundingClientRect().left+c.clientWidth/2,clientY:c.getBoundingClientRect().top+c.clientHeight/2}));})()");
+  await pause(400);
+  const zoomedMap=await evaluate("(()=>({layer:document.querySelector('.dk-mini-map-canvas').dataset.layer,saved:JSON.parse(localStorage.getItem('tsukimera.disk.minimap.view.v1')||'null')}))()");
+  assert.equal(zoomedMap.layer,"detail","Zooming must reveal the more detailed source-backed graph");
+  assert.ok(zoomedMap.saved?.zoom>2.1&&zoomedMap.saved?.zoom<=9,
+    "Wheel viewport should be persistently saved: "+JSON.stringify(zoomedMap));
+
+  let sqliteView=null;
+  for(let i=0;i<28;i++){
+    const prefs=(await(await fetch(origin+"/api/preferences")).json()).preferences||{};
+    try{sqliteView=JSON.parse(prefs["tsukimera.disk.minimap.view.v1"]||"null");}catch{}
+    if(sqliteView?.zoom>2.1)break;
+    await pause(120);
+  }
+  assert.ok(sqliteView?.zoom>2.1,
+    "Mini-map viewport must persist in SQLite, not only localStorage: "+JSON.stringify(sqliteView));
+
+  await evaluate("document.querySelector('.dk-mini-map-reset').click()");
+  await pause(400);
+  assert.equal(await evaluate("document.querySelector('.dk-mini-map-canvas').dataset.layer"),"overview");
+
   await evaluate("document.querySelector('.dk-tree-all[aria-label=\"Развернуть все папки\"]').click()");
   const expandedTree=await evaluate("(()=>({nested:!!document.querySelector('.dk-node[data-folder=\"Работа/2026\"]')}))()");
   assert.ok(expandedTree.nested,"Expand all did not reveal nested folder: "+JSON.stringify(expandedTree));
@@ -169,6 +200,8 @@ try{
   assert.ok(hierarchy.ancestors.includes("Работа")&&hierarchy.ancestors.includes("Работа/2026"),
     "Selected folder's complete parent path must be highlighted: "+JSON.stringify(hierarchy));
   assert.match(hierarchy.mapTitle,/папок/);
+  assert.match(await evaluate("document.querySelector('.dk-mini-map-status')?.textContent"),/2026/,
+    "Tree selection must synchronize with the selected Canvas folder");
   await evaluate("document.querySelector('.dk-tree-all[aria-label=\"Свернуть все папки\"]').click()");
   assert.equal(await evaluate("document.querySelector('.dk-node[data-folder=\"Работа/2026\"]')===null"),true,
     "Collapse all should hide descendants without deleting folder data");

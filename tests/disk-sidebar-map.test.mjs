@@ -93,8 +93,9 @@ test("Disk rail swaps Sections for an interactive, bounded source-backed mini Ca
   assert.match(page,/sectionsRegion\.hidden=false/);
   assert.match(page,/miniMap\.update\(all,folders,current\)/);
   assert.match(page,/title:"Разделы и умные папки"/);
-  for(const wanted of ["graphFromFiles(files,folders,70,40)",
-    "mapNodeRadius(node,graph.bytes)","canvas.addEventListener(\"click\"",
+  for(const wanted of ["miniGraphFromCatalog(files,folders,focus,detail)",
+    "mapNodeRadius(n,graph.bytes)","canvas.addEventListener(\"wheel\"",
+    "canvas.addEventListener(\"pointermove\"","canvas.addEventListener(\"click\"",
     "canvas.addEventListener(\"dblclick\"","canvas.addEventListener(\"keydown\"",
     "actions.openFull()","actions.openFile(node.id.slice(5))",
     "actions.openFolder(node.folder)"])
@@ -102,4 +103,84 @@ test("Disk rail swaps Sections for an interactive, bounded source-backed mini Ca
   assert.match(styles,/\.dk-mini-map-frame\{/);
   assert.match(styles,/\.dk-sections-dialog \.dk-sections\{/);
   assert.match(styles,/\.dk-mini-map-canvas:focus-visible/);
+});
+
+
+test("Disk 8.3 unclutters folder rail without losing stored folder style or controls",async()=>{
+  const source=await readFile(join(root,"disk-src/web/pages/disk.ts"),"utf8");
+  assert.doesNotMatch(source,/const treeFind\s*=/);
+  assert.doesNotMatch(source,/const treeSortSel\s*=/);
+  assert.doesNotMatch(source,/treeSort\s*===/);
+  assert.doesNotMatch(source,/Закрепить наверху/);
+  assert.match(source,/const treePanel=el\("div",\{cls:"dk-tree-panel"\},treeCommands,tree\)/);
+  assert.match(source,/const order=\(a:string,b:string\)=>a\.localeCompare\(b,"ru",\{numeric:true\}\)/);
+  assert.match(source,/api\.diskFolderStyle\(folder, color \|\| "#b89cff", st\.pinned/);
+  assert.match(source,/const expanded = new Set<string>/);
+});
+
+test("Disk 8.3 mini map bounded, truthful aggregation and closer zoom reveals additional files",async()=>{
+  const built=await prepareDisk(root);
+  const mod=await import(pathToFileURL(join(built.outputRoot,"web/pages/disk-map-mini-model.js")).href);
+  const folders=Array.from({length:100},(_,i)=>"Область"+String(i).padStart(3,"0"));
+  const files=Array.from({length:10000},(_,i)=>({
+    id:"file"+i,name:"Отчёт "+i+".txt",folder:folders[i%100],size:i+1,
+    sha256:i<2?"duplicate":String(i),tags:i%9===0?["отчёт"]:[],
+  }));
+  const t0=performance.now();
+  const overview=mod.miniGraphFromCatalog(files,folders);
+  const elapsed=performance.now()-t0;
+  assert.ok(elapsed<12000,"Mini map model should handle 10k files without freezing: "+elapsed+"ms");
+  assert.equal(overview.totalFiles,10000);
+  assert.equal(overview.totalFolders,100);
+  assert.ok(overview.shownFiles<=70);
+  assert.ok(overview.nodes.length<=1+40+70+12);
+  const clusters=overview.nodes.filter(n=>n.kind==="cluster");
+  assert.ok(clusters.length>0&&clusters.length<=12);
+  assert.equal(clusters.reduce((n,c)=>n+c.hiddenFiles,0),10000-overview.shownFiles,
+    "Every excluded real file must be included in exactly one cluster");
+  assert.equal(clusters.reduce((n,c)=>n+c.hiddenFolders,0),100-overview.shownFolders,
+    "Every excluded real folder must be accounted for in a cluster");
+  assert.equal(clusters.reduce((n,c)=>n+c.size,0),
+    files.reduce((sum,f)=>sum+f.size,0)-overview.nodes.filter(n=>n.kind==="file").reduce((sum,n)=>sum+n.size,0));
+  assert.ok(overview.edges.every(e=>overview.nodes.some(n=>n.id===e.from)&&overview.nodes.some(n=>n.id===e.to)),
+    "No edge may point at an invented or unrendered node");
+  const detailed=mod.miniGraphFromCatalog(files,folders,"",true);
+  assert.ok(detailed.shownFiles>overview.shownFiles&&detailed.shownFiles<=190);
+  assert.ok(detailed.nodes.length<=1+100+190+12);
+  assert.equal(detailed.nodes.filter(n=>n.kind==="cluster").reduce((n,c)=>n+c.hiddenFiles,0),
+    10000-detailed.shownFiles);
+  const focused=mod.miniGraphFromCatalog(files,folders,folders[1],true);
+  assert.equal(focused.totalFiles,100);
+  assert.ok(focused.nodes.some(n=>n.kind==="folder"&&n.folder===folders[1]));
+  assert.ok(focused.nodes.filter(n=>n.kind==="cluster").reduce((n,c)=>n+c.hiddenFiles,0)===0);
+});
+
+test("Disk 8.3 saved map viewport validates corrupt data and clamps scale/pan safely",async()=>{
+  const built=await prepareDisk(root);
+  const mod=await import(pathToFileURL(join(built.outputRoot,"web/pages/disk-map-mini-model.js")).href);
+  assert.deepEqual(mod.normalizeMiniView(null),{zoom:1,panX:0,panY:0,focus:""});
+  assert.deepEqual(mod.normalizeMiniView({zoom:Infinity,panX:"oops",panY:NaN,focus:4}),
+    {zoom:1,panX:0,panY:0,focus:""});
+  assert.deepEqual(mod.normalizeMiniView({zoom:99,panX:99999,panY:-99999,focus:"A/B"}),
+    {zoom:9,panX:3000,panY:-3000,focus:"A/B"});
+  assert.equal(mod.MINI_VIEW_KEY,"tsukimera.disk.minimap.view.v1");
+  const source=await readFile(join(root,"disk-src/web/pages/disk-map-mini.ts"),"utf8");
+  assert.match(source,/writePreference\(MINI_VIEW_KEY,JSON\.stringify\(view\)\)/);
+  assert.match(source,/ctx\.roundRect\(/);
+  assert.match(source,/for\(let k=0;k<6;k\+\+\)/);
+  assert.match(source,/ctx\.lineTo\(x\+r,y\)/);
+  assert.match(source,/if\(Math\.max\(from\.x,to\.x\)<-margin/);
+  assert.match(source,/if\(queued\|\|!root\.isConnected\)return/);
+});
+
+
+test("Disk 8.3 SQLite and backup allowlists accept both section layout and persistent mini-map view",async()=>{
+  const [db,server]=await Promise.all([
+    readFile(join(root,"scripts/tsukimera-db.mjs"),"utf8"),
+    readFile(join(root,"scripts/server.mjs"),"utf8"),
+  ]);
+  for(const key of ["tsukimera.disk.sections.v1","tsukimera.disk.minimap.view.v1"]){
+    assert.ok(db.includes('"'+key+'"'),"SQLite must allow "+key);
+    assert.ok(server.includes('"'+key+'"'),"Backup restore must allow "+key);
+  }
 });

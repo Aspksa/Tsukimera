@@ -297,7 +297,8 @@ export function createAppServer({root,dataDir=join(root,"data"),cloudRequest,clo
           "tsukimera.disk.layout.left.v1","tsukimera.disk.layout.right.v1",
           "tsukimera.disk.tiles.v1","tsukimera.disk.view","tsukimera.disk.sort",
           "tsukimera.disk.open","tsukimera.disk.tree","tsukimera.disk.life.group",
-          "tsukimera.disk.mdRaw"]);
+          "tsukimera.disk.mdRaw","tsukimera.disk.sections.v1",
+  "tsukimera.disk.minimap.view.v1"]);
         if(Object.entries(input.diskPrefs).some(([k,v])=>!allowedPrefs.has(k)||typeof v!=="string"||v.length>16000))bad("Недопустимые настройки Диска");
         const prefs={...input.diskPrefs,
           "tsukimera:nav:v1":JSON.stringify(input.menu),
