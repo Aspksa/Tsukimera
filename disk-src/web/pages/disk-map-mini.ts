@@ -152,6 +152,7 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
     selected=node.id;hovered=node.id;
     focusPulseUntil=reduced()?0:performance.now()+760;
     centerNode(node.id,false);schedule();
+    scheduleKnowledge(260);
   }
   // Folder rows highlight the corresponding real graph community. This is
   // visual-only: never switches the user's folder or changes file selection.
@@ -220,16 +221,43 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
     selected=id;hovered=id;
     centerNode(id,false);
   }
+  let pythonRouteRequest=0;
   function finishRoute(id:string){
     if(!routeStart||!scene.nodes.some(n=>n.id===id))return;
+    const source=routeStart,request=++pythonRouteRequest;
     routeEnd=id;
-    route=graphRoute(scene,routeStart,id);
+    route=graphRoute(scene,source,id);
     selected=id;hovered=id;
+    canvas.dataset.routeEngine="local";
     if(route){
       routePulseUntil=reduced()?0:performance.now()+950;
       centerNode(id,false);schedule();
     }else draw();
     canvas.dataset.route=route?String(route.links.length):"unavailable";
+    // An indexed Python path can replace the in-memory path only when EVERY
+    // step is also visibly backed by an existing Canvas edge. Never draw a
+    // supposed connection to a hidden node or invent intermediate evidence.
+    if(canvas.dataset.graphEngine!=="python")return;
+    void api.diskGraph22Path(source,id).then(result=>{
+      if(request!==pythonRouteRequest||routeStart!==source||routeEnd!==id||
+        !result.ok||!result.value.found)return;
+      const nodes=result.value.nodes as string[];
+      if(!Array.isArray(nodes)||nodes.length<2||
+        !nodes.every(key=>scene.nodes.some(node=>node.id===key)))return;
+      const links:GraphLink[]=[];
+      for(let i=1;i<nodes.length;i++){
+        const edge=scene.links.find(item=>
+          (item.source===nodes[i-1]&&item.target===nodes[i])||
+          (item.target===nodes[i-1]&&item.source===nodes[i]));
+        if(!edge)return;
+        links.push(edge);
+      }
+      route={nodes,links,cost:links.length};
+      canvas.dataset.routeEngine="python";
+      canvas.dataset.route=String(links.length);
+      routePulseUntil=reduced()?0:performance.now()+950;
+      schedule();
+    });
   }
   function activate(n:GraphNode){
     if(n.kind==="folder")actions.openFolder(n.folder);
@@ -246,6 +274,7 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
   function changeZoom(factor:number,atX?:number,atY?:number){
     cancelCamera();
     const previous=viewport();
+    const priorLevel=zoom<.9?"far":zoom>1.6?"near":"medium";
     const next=clampView(zoom*factor,.65,4);
     if(Math.abs(next-zoom)<.00001)return;
     const anchorX=atX===undefined?previous.w/2:clamp(atX,0,previous.w);
@@ -257,6 +286,8 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
     const shift=anchoredZoom(camera,afterScreen,bounds,next,anchorX,anchorY);
     zoom=next;panX=clamp(shift.panX,-1800,1800);
     panY=clamp(shift.panY,-1800,1800);
+    if(priorLevel!==(next<.9?"far":next>1.6?"near":"medium"))
+      scheduleKnowledge(360);
     persist();
     // Only changes in actual level of detail require new graph nodes.
     if(oldDetail!==afterScreen.detail){
@@ -371,7 +402,7 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
     // Prefer Python's bounded SQLite scene. Existing source-backed Disk 20
     // index is the safe fallback on a machine without Python installed.
     const python=await api.diskGraph22View({
-      folder:globalGraph?"":current,limit:240,
+      folder:globalGraph?"":current,focus:focusId||selected||"",limit:240,
       level:zoom<.9?"far":zoom>1.6?"near":"medium"});
     if(generation!==knowledgeRequest||!root.isConnected)return;
     const response=python.ok?python:await api.diskKnowledgeGraph();
@@ -380,6 +411,7 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
       response.value as SemanticIndex;
     if(!Array.isArray(candidate.nodes)||!Array.isArray(candidate.links))return;
     canvas.dataset.graphEngine=python.ok?"python":"local-fallback";
+    canvas.dataset.queryMode=python.ok?String(python.value.queryMode||"legacy"):"local";
     if(python.ok){
       canvas.dataset.hiddenNodes=String(python.value.omitted||0);
       canvas.dataset.graphPending=String(python.value.progress?.pending||0);
@@ -948,7 +980,7 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
       if(current)actions.openFolder(parentOf(current));e.preventDefault();
     }else if(e.key.toLowerCase()==="g"){
       globalGraph=!globalGraph;focusId=null;route=null;routeStart=null;routeEnd=null;
-      rebuild();e.preventDefault();
+      rebuild();scheduleKnowledge(320);e.preventDefault();
     }else if(e.key.toLowerCase()==="f"){
       focusOnNode(focusId?null:selected);e.preventDefault();
     }else if(e.key.toLowerCase()==="p"){
