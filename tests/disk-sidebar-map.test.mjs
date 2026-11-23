@@ -184,3 +184,71 @@ test("Disk 8.3 SQLite and backup allowlists accept both section layout and persi
     assert.ok(server.includes('"'+key+'"'),"Backup restore must allow "+key);
   }
 });
+
+
+test("Disk 9.0 orbit layout uses factual parents, collision spacing and deterministic coordinates",async()=>{
+  const built=await prepareDisk(root);
+  const base=await import(pathToFileURL(join(built.outputRoot,"web/pages/disk-map-mini-model.js")).href);
+  const orbits=await import(pathToFileURL(join(built.outputRoot,"web/pages/disk-map-orbits.js")).href);
+  const folders=["Работа","Работа/2026","Работа/2026/Счета","Архив",...Array.from({length:70},(_,i)=>"Группа/"+i)];
+  const files=Array.from({length:220},(_,i)=>({
+    id:"test"+i,name:"Файл-"+i+".txt",
+    folder:i<30?"Работа/2026/Счета":folders[(i%folders.length)],size:50+i,
+    tags:i%3?[]:["учёт"],sha256:"hash"+i
+  }));
+  const model=base.miniGraphFromCatalog(files,folders,"",false,"Работа/2026/Счета");
+  const graph=orbits.orbitLayout(model);
+  assert.ok(graph.nodes.some(n=>n.id==="folder:Работа/2026/Счета"),"Selected folder must be included in sampled graph");
+  const trail=orbits.containmentTrail(graph,"folder:Работа/2026/Счета");
+  assert.deepEqual(trail,["root","folder:Работа","folder:Работа/2026","folder:Работа/2026/Счета"]);
+  assert.deepEqual(orbits.containmentTrail(graph,"missing"),[]);
+  assert.ok(graph.nodes.some(n=>n.kind==="cluster"));
+  const children=new Map(graph.edges.filter(e=>e.kind==="contains").map(e=>[e.to,e.from]));
+  const positions=new Map(graph.nodes.map(n=>[n.id,n]));
+  for(const node of graph.nodes){
+    assert.ok(Number.isFinite(node.x)&&Number.isFinite(node.y),"Invalid orbit coordinates: "+node.id);
+    if(node.kind==="root")continue;
+    const parent=positions.get(children.get(node.id));
+    assert.ok(parent,"Every orbital node must retain a factual containment parent: "+node.id);
+    const distance=Math.hypot(node.x-parent.x,node.y-parent.y);
+    assert.ok(distance>=30,"Child node is overlapping its parent: "+node.id);
+  }
+  for(let i=0;i<graph.nodes.length;i++)for(let j=i+1;j<graph.nodes.length;j++){
+    const a=graph.nodes[i],b=graph.nodes[j];
+    assert.ok(Math.hypot(a.x-b.x,a.y-b.y)>=28.9,"Orbit collisions between "+a.id+" and "+b.id);
+  }
+  const same=orbits.orbitLayout(model);
+  assert.deepEqual(graph.nodes.map(n=>[n.id,n.x,n.y]),same.nodes.map(n=>[n.id,n.x,n.y]),
+    "Orbit placement must be stable between catalog refreshes");
+  const file=graph.nodes.find(n=>n.kind==="file"&&n.folder==="Работа/2026/Счета");
+  assert.ok(file);
+  assert.deepEqual(orbits.containmentTrail(graph,file.id),[...trail,file.id],
+    "File path must consist only of real parent-child relationships");
+});
+
+test("Disk 9.0 adaptive tree/map shares height without obscuring the hierarchy",async()=>{
+  const built=await prepareDisk(root);
+  const orbits=await import(pathToFileURL(join(built.outputRoot,"web/pages/disk-map-orbits.js")).href);
+  const empty=orbits.adaptiveMapWeight(0),moderate=orbits.adaptiveMapWeight(20),
+    busy=orbits.adaptiveMapWeight(100000);
+  assert.ok(empty>moderate&&moderate>busy);
+  assert.ok(busy>=.15&&empty<=.33);
+  const [mini,style]=await Promise.all([
+    readFile(join(root,"disk-src/web/pages/disk-map-mini.ts"),"utf8"),
+    readFile(join(root,"web/disk.css"),"utf8")
+  ]);
+  assert.match(mini,/root\.style\.setProperty\("--dk9-map-weight"/);
+  assert.match(style,/height:clamp\(100px,calc\(100dvh \* var\(--dk9-map-weight\)\),260px\)/);
+});
+
+test("Disk 9.0 noncontinuous glow, finite pulse and cluster-reveal animation respect reduced motion",async()=>{
+  const source=await readFile(join(root,"disk-src/web/pages/disk-map-mini.ts"),"utf8");
+  for(const token of ["containmentTrail(graph,active.id)","trailLinks.has(edge.from+\"|\"+edge.to)",
+    "centerOn(active)","revealProgress","revealFrom","ctx.createRadialGradient",
+    "ctx.shadowBlur","ctx.arc(x,y,r+5+(1-pulse)*15","reducedMotion()",
+    "canvas.dataset.transition","canvas.dataset.pulse","canvas.dataset.trail",
+    "canvas.dataset.centerError"])
+    assert.ok(source.includes(token),"Missing selected Disk 9.0 map behavior: "+token);
+  assert.ok(!source.includes('modeKey="";rebuild();invalidate();save();'),
+    "Zoom must not regenerate the whole orbit layout on every wheel event");
+});
