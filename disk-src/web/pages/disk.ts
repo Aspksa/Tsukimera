@@ -1417,7 +1417,7 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
       for(const relation of (data.links||[]).slice(0,12)){
         const open=btn(relation.name,()=>{
           go({folder:relation.folder});reveal(relation.fileId);
-        },{small:true,icon:"link"});
+        },{small:true,icon:"attach"});
         open.title=relation.evidence+" · точность "+Math.round(relation.confidence*100)+"%";
         knowledge.append(el("div",{cls:"dk-knowledge-item"},
           el("small",{cls:"muted",textContent:
