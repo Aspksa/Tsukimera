@@ -1,5 +1,5 @@
 import {spawn} from "node:child_process";
-import {mkdtemp,readFile,rm} from "node:fs/promises";
+import {mkdtemp,readFile,rm,mkdir,writeFile} from "node:fs/promises";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import assert from "node:assert/strict";
@@ -70,11 +70,53 @@ try{
     if(result.exceptionDetails)throw Error(result.exceptionDetails.text||JSON.stringify(result.exceptionDetails));
     return result.result?.value;
   }
-  async function device(width,height=960){
+  async function device(width,height=960,dpr=1){
     await send("Emulation.setDeviceMetricsOverride",{
-      width,height,deviceScaleFactor:1,mobile:width<600
+      width,height,deviceScaleFactor:dpr,mobile:width<600
     });
     await pause(300);
+  }
+  // Disk 18: real Chrome PNGs and measurable alignment on every viewport.
+  const screenshotFolder=join(process.cwd(),".runtime","disk-ui-screenshots");
+  async function screenshot(label){
+    const captured=await send("Page.captureScreenshot",{format:"png",fromSurface:true});
+    const bytes=Buffer.from(captured.data||"","base64");
+    assert.equal(bytes.subarray(0,8).toString("hex"),"89504e470d0a1a0a");
+    assert.ok(bytes.length>6000,"Empty screenshot: "+label);
+    const w=bytes.readUInt32BE(16),h=bytes.readUInt32BE(20);
+    assert.ok(w>240&&h>200,"Invalid PNG dimensions: "+label);
+    await mkdir(screenshotFolder,{recursive:true});
+    await writeFile(join(screenshotFolder,label+".png"),bytes);
+    return {width:w,height:h,bytes:bytes.length};
+  }
+  const diskAlignment="("+(()=>{
+    const r=q=>{const rect=document.querySelector(q)?.getBoundingClientRect();
+      return rect?{x:rect.x,y:rect.y,right:rect.right,bottom:rect.bottom,
+        width:rect.width,height:rect.height}:null;};
+    const search=r(".dk-search"),actions=r(".dk-bar-actions"),side=r(".dk-side"),
+      tree=r(".dk-tree-panel"),graph=r(".dk-graph-stage"),files=r(".dk-main");
+    const overlaps=(a,b)=>!!(a&&b&&a.x<b.right-1&&b.x<a.right-1&&
+      a.y<b.bottom-1&&b.y<a.bottom-1);
+    const element=document.querySelector(".dk-graph-stage");
+    return {width:innerWidth,scrollWidth:document.documentElement.scrollWidth,
+      dpr:devicePixelRatio,filesWidth:files?.width,sideWidth:side?.width,
+      searchActionOverlap:overlaps(search,actions),
+      folderGraphOverlap:overlaps(tree,graph),
+      border:element?getComputedStyle(element).borderTopWidth:null,
+      background:element?getComputedStyle(element).backgroundColor:null,
+      canvasCount:document.querySelectorAll(".dk-graph-only canvas").length};
+  }).toString()+")()";
+  async function assertAlignment(label,withDrawer=false){
+    const a=await evaluate(diskAlignment);
+    assert.ok(!a.searchActionOverlap,"Toolbar collision "+label+": "+JSON.stringify(a));
+    if(withDrawer)assert.ok(!a.folderGraphOverlap,
+      "Folder / graph overlap "+label+": "+JSON.stringify(a));
+    assert.ok(a.scrollWidth<=a.width+4,
+      "Unexpected page overflow "+label+": "+JSON.stringify(a));
+    assert.equal(a.border,"0px","Graph stage must remain borderless");
+    assert.equal(a.background,"rgba(0, 0, 0, 0)");
+    assert.equal(a.canvasCount,1);
+    return a;
   }
   const metrics="("+(()=> {
     const q=x=>document.querySelector(x);
@@ -108,6 +150,10 @@ try{
   assert.ok(wide.files.width>490,"File grid too narrow: "+JSON.stringify(wide));
   assert.equal(wide.leftDisplay,"flex");
   assert.equal(wide.rightDisplay,"flex");
+  const fullHdGeometry=await assertAlignment("Full HD 1920");
+  assert.ok(fullHdGeometry.filesWidth>490);
+  const fullHdScreenshot=await screenshot("disk-full-hd-1920x1080");
+  assert.ok(fullHdScreenshot.width>=1800);
   const x=wide.left.x+wide.left.width/2,y=wide.left.y+Math.min(100,wide.left.height/2);
   await send("Input.dispatchMouseEvent",{type:"mouseMoved",x,y});
   await send("Input.dispatchMouseEvent",{type:"mousePressed",x,y,button:"left",clickCount:1});
@@ -124,12 +170,15 @@ try{
   const middle=await evaluate(metrics);
   assert.equal(middle.rightDisplay,"none","Right divider should disappear on a laptop");
   assert.ok(middle.files.width>390,"Laptop file grid too narrow: "+JSON.stringify(middle));
+  await assertAlignment("Laptop 1366");
+  await screenshot("disk-laptop-1366x900");
   await device(390,844);
   const mobile=await evaluate(metrics);
   assert.equal(mobile.leftDisplay,"none","Folder divider should disappear on mobile");
   assert.ok(mobile.files.width>300,"Mobile file grid too narrow: "+JSON.stringify(mobile));
   assert.ok(mobile.scrollWidth<=mobile.width+3,"Unexpected horizontal scroll: "+JSON.stringify(mobile));
   assert.equal(mobile.sidePosition,"fixed","Folders should become a mobile drawer");
+  await screenshot("disk-mobile-files-390x844");
 
   // Disk 12: mobile files remain immediately visible; the map lives INSIDE
   // the folders drawer, directly below the hierarchy, not above documents.
@@ -140,6 +189,8 @@ try{
     "Mobile map must be accessible from the folder drawer: "+JSON.stringify(mobileFlow));
   assert.ok(mobileFlow.mapWidth<=mobileFlow.sideWidth+3&&mobileFlow.frameHeight>=300&&mobileFlow.frameHeight<=440,
     "Compact mobile map should fit the folder drawer: "+JSON.stringify(mobileFlow));
+  await assertAlignment("Mobile drawer",true);
+  await screenshot("disk-mobile-drawer-390x844");
   await evaluate("document.querySelector('.dk-side-close').click()");
 
   // Disk 8.0: reversible Focus mode, sticky path, real file cards and no
@@ -246,6 +297,31 @@ try{
   await device(1920,1080);
   assert.ok(await evaluate("!!document.querySelector('.dk-side > .dk-graph-only')"),
     "Resizing must restore the same graph under the folder hierarchy");
+
+  // Disk 18: browser-level visual geometry across 100–200% Windows scaling.
+  for(const dpr of [1,1.25,1.5,1.75,2]){
+    await device(1920,1080,dpr);
+    const layout=await assertAlignment("DPI "+dpr);
+    assert.ok(Math.abs(layout.dpr-dpr)<.03,"DPI mismatch "+dpr);
+    const pixels=await evaluate("(()=>{const c=document.querySelector('.dk-graph-canvas');return c.width*c.height})()");
+    assert.ok(pixels>0&&pixels<=10100000,
+      "Canvas DPR pixel budget overflow: "+dpr+" / "+pixels);
+  }
+  await screenshot("disk-windows-200pct");
+  await device(2560,1440,1.5);
+  const twoK=await assertAlignment("2K 150%");
+  assert.ok(twoK.filesWidth>600,"2K must leave enough file workspace");
+  await screenshot("disk-2k-2560x1440");
+  await device(3440,1440,1);
+  await assertAlignment("Ultrawide 3440");
+  await screenshot("disk-ultrawide-3440x1440");
+  await device(1920,1080,1);
+  const longName=await evaluate("(()=>{const e=document.querySelector('.dk-file .dk-name');if(!e)return null;const old=e.textContent,title=e.title;e.textContent='Сверхдлинное-название-договора-'.repeat(12)+'.docx';e.title=e.textContent;const c=getComputedStyle(e);return {old,title,hasFullTitle:e.title.length>100,overflow:c.overflow,width:e.getBoundingClientRect().width}})()");
+  assert.ok(longName?.hasFullTitle&&longName.overflow==="hidden"&&longName.width>0,
+    "Long document names must remain visually clipped with full tooltips: "+JSON.stringify(longName));
+  await screenshot("disk-long-document-name");
+  await evaluate("(()=>{const e=document.querySelector('.dk-file .dk-name');if(e){e.textContent="+JSON.stringify(longName.old)+";e.title="+JSON.stringify(longName.title)+";}})()");
+  await assertAlignment("Restored Full HD");
 
   await evaluate("(()=>{const c=document.querySelector('.dk-mini-map-canvas');for(let i=0;i<3;i++)c.dispatchEvent(new WheelEvent('wheel',{bubbles:true,cancelable:true,deltaY:-110}));})()");
   await pause(490);
