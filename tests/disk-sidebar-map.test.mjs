@@ -404,7 +404,7 @@ test("Disk 15 preserves optional evidence analysis behind contextual actions, no
   "semantic,viewMode:mode","openMenu(event:MouseEvent)",
   "canvas.addEventListener(\"contextmenu\",openMenu)",
   "clickItem(","dismissMenu()","createRadialGradient",
-  "ctx.setLineDash([3.2,5.1])","appearing=new Map",
+  "ctx.setLineDash([3.2,5.2])","appearing=new Map",
   "fading:Array","reduceMotion","prefers-reduced-motion"]){
    if(token==="reduceMotion")continue;
    assert.ok(mini.includes(token)||css.includes(token),"Missing retained feature "+token);
