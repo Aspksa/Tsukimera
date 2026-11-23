@@ -9,6 +9,7 @@ import { cp, copyFile, mkdir, rm, stat, writeFile } from "node:fs/promises";
 import { join, relative } from "node:path";
 import { randomUUID } from "node:crypto";
 import {installDiskIndex,readDiskState,saveDiskState,textIndexTargets,cachedText,indexText,indexedSearch,indexStatus,auditTarget,recordAudit,auditStatus} from "./disk-index.mjs";
+import {installDiskKnowledge,pendingDiskKnowledge,putDiskKnowledge,diskKnowledgeStatus,diskKnowledgeForFile,diskKnowledgeGraph,rankedDiskSearch} from "./disk-knowledge.mjs";
 
 const exists = async path => { try { await stat(path); return true; } catch (error) {
   if (error.code === "ENOENT") return false;
@@ -152,6 +153,7 @@ export async function initializeDatabase(dataDir) {
   withDb(db => {
     for (const sql of SCHEMA) db.exec(sql);
     installDiskIndex(db);
+    installDiskKnowledge(db);
     db.prepare("INSERT OR IGNORE INTO metadata(key,value) VALUES('instance_id',?)").run(randomUUID());
     db.prepare("INSERT OR IGNORE INTO metadata(key,value) VALUES('schema_version','1')").run();
     db.prepare("UPDATE metadata SET value='3' WHERE key='schema_version'").run();
@@ -268,6 +270,12 @@ export async function initializeDatabase(dataDir) {
     putTextIndex: row => transaction(db => indexText(db,row)),
     searchTextIndex: query => withDb(db => indexedSearch(db,query)),
     indexStats: () => withDb(indexStatus),
+    pendingKnowledge: (limit=1) => withDb(db => pendingDiskKnowledge(db,limit)),
+    putKnowledge: row => transaction(db => putDiskKnowledge(db,row)),
+    knowledgeStats: () => withDb(diskKnowledgeStatus),
+    knowledgeForFile: id => withDb(db => diskKnowledgeForFile(db,id)),
+    knowledgeGraph: (limit=240) => withDb(db => diskKnowledgeGraph(db,limit)),
+    rankedSearch: query => withDb(db => rankedDiskSearch(db,query)),
     auditNext: () => withDb(auditTarget),
     auditRecord: (target,status) => transaction(db => recordAudit(db,target,status)),
     auditStats: () => withDb(auditStatus),

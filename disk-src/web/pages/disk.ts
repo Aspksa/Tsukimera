@@ -132,6 +132,7 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
   let sort: SortKey = (["new", "old", "name", "size"] as const).find((s) => s === store.get("juunibi.disk.sort")) ?? "new";
   let groupBy: GroupKey = "none", limit = PAGE;
   let query = "", inText = false, contentIds: Set<string> | null = null;
+  let rankedContent=new Map<string,{rank:number;excerpt:string}>();
   let ext = "", minKb: number | null = null, maxKb: number | null = null, after = "";
   const selected = new Set<string>();
   let anchorId: string | null = null, focusId: string | null = null, infoId: string | null = null;
@@ -267,14 +268,18 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
   everyChip.addEventListener("click", () => { everywhere = !everywhere; everyChip.setAttribute("aria-pressed", String(everywhere)); limit = PAGE; redraw(); });
   const searchContent = async () => {
     const gen = ++searchGen, q = search.value.trim();
-    contentIds = null;
+    contentIds = null;rankedContent.clear();
     if (inText && q.length >= 2) {
       try {
         const r = await fetch("/api/disk/search?q=" + encodeURIComponent(q));
         if (!r.ok) throw new Error();
-        const data=(await r.json()) as {ids:string[];index?:{indexed:number;pending:number}};
+        const data=(await r.json()) as {ids:string[];
+          matches?:{id:string;rank:number;excerpt:string}[];
+          index?:{indexed:number;pending:number}};
         if (gen !== searchGen) return;
         contentIds = new Set(data.ids);
+        rankedContent=new Map((data.matches||[]).map(x=>
+          [x.id,{rank:x.rank,excerpt:x.excerpt}]));
         const pending=data.index?.pending??0;
         textChip.title=pending?"Индексирование документов продолжается: "+pending+" осталось. Повторите поиск после обработки.":
           "Текстовые документы полностью проиндексированы";
@@ -463,6 +468,9 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
           ...(f.revision&&f.revision>1?[el("span",{cls:"dk-revision-label",textContent:"v"+f.revision})]:[])),
         el("strong", { cls: "dk-name", textContent: f.name, title: f.name + (f.tags?.length ? "\nМетки: " + f.tags.join(", ") : "") }),
         el("small", { cls:"dk-file-sub",textContent: meta }),
+        ...(inText&&rankedContent.has(f.id)&&mode!=="table"?
+          [el("small",{cls:"dk-fts-excerpt",textContent:
+            rankedContent.get(f.id)!.excerpt})]:[]),
         ...(f.tags?.length && mode !== "table" ? [el("span", { cls: "dk-tags" }, ...f.tags.slice(0, 3).map((t) => el("i", { textContent: t })))] : [])),
       ...(mode==="table"&&view!=="trash"?[
         el("small",{cls:"dkx-col dkx-col-size",textContent:human(f.size)}),
@@ -495,6 +503,10 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
       (columns.size?"":" dkx-hide-size")+(columns.date?"":" dkx-hide-date")+(columns.folder?"":" dkx-hide-folder");
     if (!loaded) { filesBox.replaceChildren(...skeleton()); return; }
     shown = filterFiles(sourceList(), { text: query, contentIds, ext, minKb, maxKb, after, sort });
+    if(inText&&query.trim()&&rankedContent.size)
+      shown.sort((a,b)=>(rankedContent.get(a.id)?.rank??Infinity)-
+        (rankedContent.get(b.id)?.rank??Infinity)||
+        a.name.localeCompare(b.name,"ru"));
     const total = sourceList().length;
     countNote.textContent = !total ? "" : shown.length === total ? filesWord(total) : shown.length + " из " + total;
     if (!shown.length) { filesBox.replaceChildren(emptyView()); renderSelBar(); return; }
@@ -636,7 +648,7 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
     { icon: "move", label: "Переместить…", run: () => void moveFiles([f.id]) },
     { icon: "copy", label: "Копировать в папку…", run: () => void copyFiles([f.id]) },
     { icon: "tag", label: "Метки и цвет", run: () => openInfo(f.id, true) },
-    { icon: "versions", label: "Версии", run: () => openInfo(f.id) },
+    // Версии уже доступны из «Сведения» — не дублируем один и тот же экран.
     "-",
     { icon: "trash", label: "В корзину", run: () => void trashFiles([f.id]), danger: true, hint: "Del" },
   ];
@@ -1291,6 +1303,7 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
       replace(r.value); renderFiles(); showToast("Сведения сохранены");
     }, { small: true, primary: true });
     const versions = el("div", { cls: "dk-versions" }, el("small", { cls: "muted", textContent: "Загрузка версий…" }));
+    const knowledge=el("section",{cls:"dk-info-block dk-knowledge",hidden:true});
     const newVersion = el("input", { type: "file", hidden: true });
     newVersion.addEventListener("change", async () => {
       const file = newVersion.files?.[0]; newVersion.value = "";
@@ -1375,8 +1388,57 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
       ...(!f.deletedAt ? [
         el("section", { cls: "dk-info-block" }, el("h4", { textContent: "Метки и цвет" }), tags, sw, note, saveMeta),
         el("section", { cls: "dk-info-block" }, el("h4", { textContent: "Версии" }), versions),
-        linked,
+        knowledge,linked,
       ] : []));
+    // Disk 20: display reviewable evidence beside real file metadata, never
+    // as an invented relationship or an automatic file operation.
+    if(!f.deletedAt)void api.diskKnowledge(f.id).then(result=>{
+      if(infoId!==f.id||!knowledge.isConnected)return;
+      knowledge.hidden=false;
+      knowledge.replaceChildren(el("h4",{textContent:"Реквизиты и связи"}));
+      if(!result.ok){
+        knowledge.append(el("small",{cls:"muted",textContent:
+          "Локальный индекс недоступен: "+result.error.message}));return;
+      }
+      const data=result.value;
+      if(!data.ready){
+        knowledge.append(el("small",{cls:"muted",textContent:
+          "Документ ожидает автоматического анализа или формат не поддерживается"}));
+        return;
+      }
+      const factNames:Record<string,string>={
+        contract:"Номер договора",appendix:"Приложение",
+        organization:"Организация",date:"Дата",amount:"Сумма",account:"Номер акта/счёта"};
+      for(const fact of (data.facts||[]).slice(0,18)){
+        knowledge.append(el("div",{cls:"dk-knowledge-item"},
+          el("small",{cls:"muted",textContent:factNames[fact.kind]||fact.kind}),
+          el("span",{textContent:fact.value,title:fact.evidence})));
+      }
+      for(const relation of (data.links||[]).slice(0,12)){
+        const open=btn(relation.name,()=>{
+          go({folder:relation.folder});reveal(relation.fileId);
+        },{small:true,icon:"attach"});
+        open.title=relation.evidence+" · точность "+Math.round(relation.confidence*100)+"%";
+        knowledge.append(el("div",{cls:"dk-knowledge-item"},
+          el("small",{cls:"muted",textContent:
+            relation.kind==="contract"?"Совпадающий номер договора":"Упоминание организации"}),
+          open));
+      }
+      for(const warning of (data.alerts||[]).slice(0,5)){
+        knowledge.append(el("div",{cls:"dk-knowledge-warning"},
+          el("strong",{textContent:warning.label}),
+          el("small",{textContent:warning.reason})));
+      }
+      for(const suggestion of (data.suggestions||[]).slice(0,8)){
+        knowledge.append(el("div",{cls:"dk-knowledge-item"},
+          el("small",{cls:"muted",textContent:"Предложение · без автоматических действий"}),
+          el("span",{textContent:suggestion.label,title:suggestion.reason})));
+      }
+      if(!(data.facts?.length||data.links?.length||data.alerts?.length||data.suggestions?.length)){
+        knowledge.append(el("small",{cls:"muted",textContent:
+          "Подтверждённых реквизитов и совпадающих связей пока нет"}));
+      }
+    });
     info.hidden = false;
     layout.classList.add("with-info");
     if (focusTags) requestAnimationFrame(() => tags.focus());
@@ -1615,6 +1677,10 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
         el("strong",{textContent:data.running?"Очередь активна":"Очередь не работает"}),
         el("small",{textContent:"Сейчас: "+(data.active?.type??"ожидание")}),
         el("small",{textContent:"FTS5: "+data.index.indexed+" обработано · "+data.index.pending+" ожидает"}),
+        el("small",{textContent:"Знания документов: "+(data.knowledge?.analyzed??0)+
+          " обработано · "+(data.knowledge?.facts??0)+" реквизитов · "+
+          (data.knowledge?.links??0)+" связей · "+
+          (data.knowledge?.pending??0)+" ожидают"}),
         el("small",{textContent:"Аудит SHA-256: "+data.audit.checked+" проверено · "+(data.audit.corrupt||0)+" повреждено · "+(data.audit.missing||0)+" отсутствует"}),
         el("small",{textContent:"SQLite: "+(data.counts.lastOptimized??"ещё не обслуживалась")}),
         el("small",{textContent:"Сбоев фоновых задач: "+data.counts.failures}),

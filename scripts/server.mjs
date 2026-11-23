@@ -138,7 +138,7 @@ export function createAppServer({root,dataDir=join(root,"data"),cloudRequest,clo
       readText:(id,limit)=>diskStore.readText(id,limit),
     });
     diskRouter=createDiskRouter({disk:diskStore,zipStream,zipLength,collectLife,
-      uploadDir:join(dataDir,"uploads"),automation});
+      uploadDir:join(dataDir,"uploads"),automation,database});
     await diskRouter.initUploads();
     automation.start();
     settingsBackups.start();

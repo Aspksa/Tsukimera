@@ -3,6 +3,7 @@
  * No third party dependency and no background execution outside the local app.
  * The v2 disk_state JSON is migration-only; do not overwrite it on every edit.
  */
+import {invalidateDiskKnowledge} from "./disk-knowledge.mjs";
 const parse=row=>JSON.parse(row.data);
 const iso=()=>new Date().toISOString();
 
@@ -62,13 +63,18 @@ export function saveDiskState(db,state){
     // Revision replacement or trash must never leave stale search hits.
     if(!before||before.sha256!==e.sha256||!!before.deletedAt!==!!e.deletedAt){
       ftsDelete.run(e.id);
+      invalidateDiskKnowledge(db,e.id);
       db.prepare("DELETE FROM disk_audit WHERE target=?").run("file:"+e.id);
+    }else if(before.name!==e.name){
+      // The document kind and literal mentions can depend on its filename.
+      // Keep the full-text content cache but rebuild only these extracted facts.
+      invalidateDiskKnowledge(db,e.id);
     }
     changed++;
   }
   for(const id of old.keys()){
     if(next.has(id))continue;
-    ftsDelete.run(id);fileDelete.run(id);entryDelete.run(id);deleted++;
+    ftsDelete.run(id);invalidateDiskKnowledge(db,id);fileDelete.run(id);entryDelete.run(id);deleted++;
     db.prepare("DELETE FROM disk_audit WHERE target=? OR target LIKE ?").run("file:"+id,"version:"+id+":%");
   }
   const previous=new Map();

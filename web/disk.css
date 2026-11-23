@@ -2470,3 +2470,34 @@ button.dk-crumb:hover{background:var(--hover);color:var(--fg)}
     animation:none!important;transition:none!important;
   }
 }
+
+
+/* Disk 20: source excerpts and review-only insights live inside existing
+   file metadata, not as another column, navigation tab or toolbar. */
+.disk-page.dk-experience-v8 .dk-file .dk-fts-excerpt{
+  min-width:0;max-width:100%;display:-webkit-box;
+  -webkit-line-clamp:2;-webkit-box-orient:vertical;
+  overflow:hidden;overflow-wrap:anywhere;white-space:normal;
+  font-size:var(--fs-xs);line-height:1.4;
+  color:var(--muted);
+}
+.disk-page.dk-experience-v8 .dk-knowledge{
+  display:flex;flex-direction:column;gap:8px;min-width:0;
+}
+.disk-page.dk-experience-v8 .dk-knowledge[hidden]{display:none;}
+.disk-page.dk-experience-v8 .dk-knowledge-item{
+  display:flex;flex-direction:column;align-items:flex-start;gap:3px;
+  border-bottom:1px solid var(--line);padding:0 0 7px;
+  min-width:0;overflow-wrap:anywhere;
+}
+.disk-page.dk-experience-v8 .dk-knowledge-item>:is(span,small,button){
+  max-width:100%;overflow-wrap:anywhere;
+}
+.disk-page.dk-experience-v8 .dk-knowledge-warning{
+  padding:8px 10px;border-inline-start:2px solid var(--brand);
+  background:color-mix(in srgb,var(--brand) 6%,transparent);
+  border-radius:5px;display:flex;flex-direction:column;gap:4px;
+}
+.disk-page.dk-experience-v8 .dk-knowledge-warning>:is(strong,small){
+  font-size:var(--fs-xs);line-height:1.45;overflow-wrap:anywhere;
+}

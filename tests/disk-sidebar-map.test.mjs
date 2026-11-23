@@ -401,7 +401,7 @@ test("Disk 15 preserves optional evidence analysis behind contextual actions, no
  ]);
  for(const token of ["async function analyzeDocuments()","api.diskText(f.id)",
   "slice(0,24)","analysisGeneration","semanticFromRecords(records)",
-  "semantic,viewMode:mode","openMenu(event:MouseEvent)",
+  "semantic:semantic||persistedSemantic,viewMode:mode","openMenu(event:MouseEvent)",
   "canvas.addEventListener(\"contextmenu\",openMenu)",
   "clickItem(","dismissMenu()","createRadialGradient",
   "ctx.setLineDash([3.2,5.2])","appearing=new Map",

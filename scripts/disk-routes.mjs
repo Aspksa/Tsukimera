@@ -8,7 +8,7 @@ import { createResumableUploads } from "./resumable-uploads.mjs";
  * The source disk's LocalDisk methods enforce name, folder, size and data-integrity limits.
  * Only loopback calls are accepted by the parent server.
  */
-export function createDiskRouter({disk,zipStream,zipLength,collectLife,uploadDir,automation=null}) {
+export function createDiskRouter({disk,zipStream,zipLength,collectLife,uploadDir,automation=null,database=null}) {
   const uploads=createResumableUploads({disk,dir:uploadDir});
   const zipTokens=new Map();
   const verified=new Map();
@@ -117,6 +117,16 @@ export function createDiskRouter({disk,zipStream,zipLength,collectLife,uploadDir
       if(method==="GET"&&p==="/api/disk/life")return send(res,200,await collectLife(disk));
       if(method==="GET"&&p==="/api/disk/automation")
         return send(res,200,automation?.status()??{running:false});
+      if(method==="GET"&&p==="/api/disk/knowledge/status")
+        return send(res,200,database?.knowledgeStats()??{analyzed:0,pending:0});
+      if(method==="GET"&&p==="/api/disk/knowledge/graph")
+        return send(res,200,database?.knowledgeGraph(240)??{nodes:[],links:[]});
+      if(method==="GET"&&p==="/api/disk/knowledge"){
+        const id=url.searchParams.get("fileId")||"";
+        if(!/^[0-9a-f-]{36}$/.test(id))
+          return send(res,400,{error:"Некорректный идентификатор документа"});
+        return send(res,200,database?.knowledgeForFile(id)??{ready:false});
+      }
       if(method==="POST"&&p==="/api/disk/automation/run"){
         automation?.wake();
         return send(res,202,{scheduled:!!automation,details:automation?.status()??null});
@@ -220,10 +230,15 @@ export function createDiskRouter({disk,zipStream,zipLength,collectLife,uploadDir
         const b=await body(req,14*1024*1024);
         return send(res,201,await disk.upload(b.name,b.folder,b.base64));
       }
-      if(method==="GET"&&p==="/api/disk/search")return send(res,200,{
-        ids:await disk.searchContent(url.searchParams.get("q")??""),
-        index:automation?.status().index??{indexed:0,pending:0}
-      });
+      if(method==="GET"&&p==="/api/disk/search"){
+        const query=url.searchParams.get("q")??"";
+        const ids=await disk.searchContent(query);
+        // Results retain original id shape; enriched snippets are optional
+        // and always text-only, with no HTML or user-supplied SQL operators.
+        const matches=database?.rankedSearch(query)??[];
+        return send(res,200,{ids,index:automation?.status().index??{indexed:0,pending:0},
+          matches,knowledge:database?.knowledgeStats()??null});
+      }
       if(method==="POST"&&p==="/api/disk/bulk"){const b=await body(req);return send(res,200,await disk.bulk(b.ids,b.action,b.folder));}
       if(method==="POST"&&p==="/api/disk/restore")return send(res,200,await disk.restore(String((await body(req)).id??"")));
       if(method==="POST"&&p==="/api/disk/purge")return send(res,200,await disk.purge(String((await body(req)).id??"")));

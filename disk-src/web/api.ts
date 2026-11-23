@@ -55,6 +55,11 @@ const unsupported=()=>attemptAsync(async()=>{throw new Error("Функция н�
 
 export const api={
   diskLife:()=>attemptAsync(()=>call<DiskLife>("/api/disk/life")),
+  // Disk 20: read-only local evidence; never a write/move/delete operation.
+  diskKnowledgeGraph:()=>attemptAsync(()=>call<any>("/api/disk/knowledge/graph")),
+  diskKnowledgeStatus:()=>attemptAsync(()=>call<any>("/api/disk/knowledge/status")),
+  diskKnowledge:(id:string)=>attemptAsync(()=>call<any>(
+    "/api/disk/knowledge?fileId="+encodeURIComponent(id))),
   diskAudit:()=>attemptAsync(()=>call<any>("/api/disk/audit")),
   diskDuplicates:()=>attemptAsync(()=>call<{groups:DiskFile[][]}>("/api/disk/duplicates")),
   diskSnapshot:()=>attemptAsync(()=>call<any>("/api/disk/snapshot")),
