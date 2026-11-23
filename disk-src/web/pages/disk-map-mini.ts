@@ -5,10 +5,12 @@
  */
 import {el} from "../dom";
 import {human} from "./disk-model";
+import {api} from "../api";
+import {extractDocument,semanticFromRecords,type SemanticIndex,type SemanticRecord} from "./disk-map-semantic";
 import {graphFromCatalog,graphInitial,graphForceStep,type GraphNode,type GraphLink,
   type GraphScene,type GraphPoint,type LinkKind} from "./disk-map-graph";
 import {normalizeMiniView,MINI_VIEW_KEY,clampView} from "./disk-map-mini-model";
-import {SPATIAL_DENSITY_KEY} from "./disk-map-spatial";
+import {SPATIAL_DENSITY_KEY,spatialFileType} from "./disk-map-spatial";
 import {writePreference} from "../preferences";
 import type {DiskFile} from "../api";
 
@@ -40,18 +42,27 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
   const breadcrumb=el("nav",{cls:"dk-omni-trail dk-graph-trail",attrs:{"aria-label":"Текущая папка карты"}});
   const list=el("div",{cls:"dk-omni-list dk-graph-list",attrs:{role:"group","aria-label":"Доступный список узлов"}});
   const listPanel=el("details",{cls:"dk-graph-list-panel"},el("summary",{textContent:"Список узлов"}),list);
+  const mode=el("select",{cls:"dk-graph-mode",attrs:{"aria-label":"Тип связей"}},
+    el("option",{value:"all",textContent:"Все связи"}),
+    el("option",{value:"meaning",textContent:"Содержание"}),
+    el("option",{value:"versions",textContent:"Дубликаты и редакции"}),
+    el("option",{value:"entities",textContent:"Люди · компании · проекты"}));
+  const analyze=button("Изучить","Прочитать доступные тексты документов для графа",()=>{void analyzeDocuments();},"dk-graph-analyze dk-graph-btn");
+  const inspect=el("aside",{cls:"dk-graph-inspect",attrs:{"aria-label":"Сведения об узле и основания связей","aria-live":"polite"}},
+    el("strong",{textContent:"Выберите точку графа"}),
+    el("small",{textContent:"Здесь появятся свойства и объяснения реальных связей"}));
   const depthLabel=el("span",{cls:"dk-graph-depth-label",textContent:"2 уровня"});
   const depthBtn=button("2","Глубина графа: изменить количество уровней",()=>{
     depth=depth===3?1:depth+1;
     depthLabel.textContent=depth+" ур.";
-    render();
+    rebuild();
   });
   const tagBtn=button("#","Показать или скрыть связи по меткам",()=>{
-    tagsEnabled=!tagsEnabled;tagBtn.setAttribute("aria-pressed",String(tagsEnabled));render();
+    tagsEnabled=!tagsEnabled;tagBtn.setAttribute("aria-pressed",String(tagsEnabled));rebuild();
   });
   tagBtn.setAttribute("aria-pressed","true");
   const dupBtn=button("≡","Показать или скрыть дубликаты SHA-256",()=>{
-    duplicatesEnabled=!duplicatesEnabled;dupBtn.setAttribute("aria-pressed",String(duplicatesEnabled));render();
+    duplicatesEnabled=!duplicatesEnabled;dupBtn.setAttribute("aria-pressed",String(duplicatesEnabled));rebuild();
   });
   dupBtn.setAttribute("aria-pressed","true");
   const zoomOut=button("−","Уменьшить граф",()=>changeZoom(.84));
@@ -67,9 +78,9 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
     el("div",{cls:"dk-graph-utility"},
       breadcrumb,
       el("div",{cls:"dk-graph-search-wrap"},search)),
-    el("div",{cls:"dk-graph-controls"},depthBtn,depthLabel,tagBtn,dupBtn,
+    el("div",{cls:"dk-graph-controls"},mode,analyze,depthBtn,depthLabel,tagBtn,dupBtn,
       el("span",{cls:"dk-graph-zoom"},zoomOut,zoomIn,reset)),
-    frame,
+    frame,inspect,
     el("footer",{cls:"dk-graph-footer"},status,
       el("div",{cls:"dk-graph-legend"},
         el("span",{textContent:"● Папки",cls:"dk-graph-legend-folder"}),
@@ -78,6 +89,12 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
     listPanel);
   let files:DiskFile[]=[],folders:string[]=[],current="",depth=2;
   let tagsEnabled=true,duplicatesEnabled=true;
+  let semantic:SemanticIndex|null=null,analyzeToken=0;
+  let graphMode:"all"|"meaning"|"versions"|"entities"="all";
+  mode.addEventListener("change",()=>{
+    graphMode=mode.value as typeof graphMode;
+    rebuild();
+  });
   let scene:GraphScene=graphFromCatalog([],[],"");
   let coords=new Map<string,GraphPoint>();
   let frameNumber=0,raf=0,resizeObserver:ResizeObserver|null=null;
@@ -115,7 +132,7 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
       }
       canvas.focus({preventScroll:true});
     }
-    requestAnimationFrame(()=>{render();});
+    requestAnimationFrame(()=>{rebuild();});
   }
   function changeZoom(factor:number){
     zoomLevel=clampView(zoomLevel*factor,.7,3.2);
@@ -124,7 +141,8 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
   function navigate(node:GraphNode){
     if(node.kind==="folder")actions.openFolder(node.folder);
     else if(node.kind==="file"&&node.fileId)actions.openFile(node.fileId);
-    else if(node.kind==="tag"){
+    else if(node.kind==="tag"||node.kind==="topic"||node.kind==="person"||
+      node.kind==="organization"||node.kind==="date"||node.kind==="project"){
       query=node.name.slice(1);search.value=query;updateSearch();
     }
   }
@@ -132,6 +150,7 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
     selected=node.id;hovered=node.id;
     status.textContent=node.name+(node.kind==="file"?" · "+human(node.size):"");
     highlightFileCards(node);
+    renderInspector(node);
     draw();
   }
   function highlightFileCards(node:GraphNode|null){
@@ -147,13 +166,14 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
     const node=scene.nodes.find(n=>n.fileId===id);
     if(id&&!node)return;
     selected=node?.id||null;
-    hovered=selected;highlightFileCards(node||null);draw();
+    hovered=selected;highlightFileCards(node||null);renderInspector(node||null);draw();
   }
   function rebuild(){
     const limit=expanded?(localStorage.getItem(SPATIAL_DENSITY_KEY)==="detailed"?200:150):
       (localStorage.getItem(SPATIAL_DENSITY_KEY)==="detailed"?80:54);
     scene=graphFromCatalog(files,folders,current,{depth,limit,
-      includeTags:tagsEnabled,includeDuplicates:duplicatesEnabled});
+      includeTags:tagsEnabled,includeDuplicates:duplicatesEnabled,
+      semantic,viewMode:graphMode});
     const updated=new Map<string,GraphPoint>();
     for(const n of scene.nodes)updated.set(n.id,coords.get(n.id)||graphInitial(n));
     coords=updated;
@@ -166,7 +186,76 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
     canvas.dataset.focus=current;
     drawBreadcrumb();
     renderAccessibleList();
+    renderInspector(scene.nodes.find(n=>n.id===selected)||null);
     schedule();
+  }
+
+  /** Read a small visible sample only after an explicit click, using the
+   * existing local text endpoint and no persistent cache or cloud LLM.
+   * Stale results are discarded if the user changes folders or the catalog.
+   */
+  async function analyzeDocuments(){
+    const generation=++analyzeToken;
+    const eligible=scene.nodes.filter(n=>n.kind==="file"&&n.fileId)
+      .slice(0,24);
+    const catalog=new Map(files.map(f=>[f.id,f]));
+    const names=eligible.map(n=>n.name);
+    const records:SemanticRecord[]=[];
+    let unreadable=0,truncated=0;
+    analyze.disabled=true;
+    for(const [i,n] of eligible.entries()){
+      if(generation!==analyzeToken)break;
+      const file=n.fileId&&catalog.get(n.fileId);
+      if(!file||file.deletedAt)continue;
+      status.textContent="Анализ текста "+(i+1)+" / "+eligible.length;
+      const answer=await api.diskText(file.id);
+      if(generation!==analyzeToken)break;
+      if(!answer.ok||!answer.value.text?.trim()){
+        unreadable++;continue;
+      }
+      if(answer.value.truncated)truncated++;
+      records.push(extractDocument(file,answer.value.text,names));
+    }
+    if(generation!==analyzeToken){analyze.disabled=false;return;}
+    semantic=semanticFromRecords(records);
+    semantic.unreadable=unreadable;
+    semantic.truncated=truncated;
+    analyze.disabled=false;
+    status.textContent="Изучено "+semantic.processed+" документов · "+
+      semantic.links.length+" текстовых связей"+
+      (unreadable?" · недоступно "+unreadable:"")+
+      (truncated?" · усечено "+truncated:"");
+    rebuild();
+  }
+  function renderInspector(node:GraphNode|null){
+    inspect.replaceChildren();
+    if(!node){
+      inspect.append(el("strong",{textContent:"Выберите точку графа"}),
+        el("small",{textContent:"Покажу основание каждой связи. Для анализа содержимого нажмите «Изучить»."}));
+      return;
+    }
+    const kind=node.kind==="folder"?"Папка":node.kind==="file"?"Документ":
+      node.kind==="revision"?"Текущая редакция":"Связанный объект";
+    inspect.append(el("strong",{textContent:node.name}),
+      el("small",{textContent:kind+(node.kind==="file"?" · "+human(node.size):"")}));
+    const record=node.fileId&&semantic?.records[node.fileId];
+    if(record){
+      if(record.preview)inspect.append(el("p",{cls:"dk-graph-summary",textContent:record.preview}));
+      if(record.keywords.length)inspect.append(el("small",{
+        textContent:"Ключевые слова: "+record.keywords.slice(0,7).join(", ")}));
+    }
+    const links=scene.links.filter(e=>e.source===node.id||e.target===node.id);
+    if(!links.length)inspect.append(el("small",{textContent:"Связи не обнаружены в выбранном режиме"}));
+    for(const edge of links.slice(0,12)){
+      const other=scene.nodes.find(n=>n.id===(edge.source===node.id?edge.target:edge.source));
+      if(!other)continue;
+      const proof=edge.evidence||(edge.kind==="contains"?"Подтверждённая вложенность":
+        edge.kind==="duplicate"?"Совпадает SHA-256":edge.kind==="tag"?"Метка из каталога":
+        edge.kind==="revision"?"Номер редакции из каталога":"Подтверждённая связь");
+      inspect.append(el("div",{cls:"dk-graph-inspect-link"},
+        el("span",{textContent:other.name}),
+        el("small",{textContent:proof})));
+    }
   }
   function drawBreadcrumb(){
     breadcrumb.replaceChildren();
@@ -381,6 +470,9 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
     resizeObserver.observe(frame);
   }
   return {root,highlightFile,update(newFiles,newFolders,folder){
+    // Invalidate the in-memory text analysis on any catalogue refresh; no
+    // stale evidence can survive file revisions, renames or deletions.
+    if(files!==newFiles){semantic=null;analyzeToken++;}
     files=newFiles;folders=newFolders;
     if(folder!==current){
       current=folder;hovered=null;selected=null;panX=0;panY=0;
