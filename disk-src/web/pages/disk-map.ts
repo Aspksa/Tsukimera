@@ -208,8 +208,8 @@ export function openLiveDiskMap(files:DiskFile[],folders:string[],
       tooltip.textContent=details(node);
       tooltip.hidden=!p;
       if(p){
-        tooltip.style.left=clamp(p.x+12,8,Math.max(8,width-220))+"px";
-        tooltip.style.top=clamp(p.y-12,8,Math.max(8,height-46))+"px";
+        tooltip.style.left=clamp(p.x+12,8,Math.max(8,width-330))+"px";
+        tooltip.style.top=clamp(p.y-12,8,Math.max(8,height-78))+"px";
       }
     }
     paint();
