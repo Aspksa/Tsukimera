@@ -5,7 +5,7 @@ import type {DiskFile} from "../api";
 
 export type MapNode={
   id:string;kind:"root"|"folder"|"file";name:string;folder:string;
-  x:number;y:number;size:number;sha?:string;tags?:string[];
+  x:number;y:number;size:number;count:number;sha?:string;tags?:string[];
 };
 export type MapEdge={from:string;to:string;kind:"contains"|"duplicate"|"tag"};
 export type DiskGraph={nodes:MapNode[];edges:MapEdge[];shownFiles:number;totalFiles:number;
@@ -23,12 +23,14 @@ export function graphFromFiles(files:DiskFile[],folderNames:string[],
   for(const folder of folderNames)addPath(folder);
   for(const file of active)addPath(file.folder);
   const sizes=new Map<string,number>();
+  const counts=new Map<string,number>();
   for(const file of active){
     if(!file.folder)continue;
     const parts=file.folder.split("/");
     for(let i=1;i<=parts.length;i++){
       const key=parts.slice(0,i).join("/");
       sizes.set(key,(sizes.get(key)||0)+file.size);
+      counts.set(key,(counts.get(key)||0)+1);
     }
   }
   const totalFolders=folderSet.size;
@@ -50,7 +52,7 @@ export function graphFromFiles(files:DiskFile[],folderNames:string[],
   const selectedFolders=[...picked].sort((a,b)=>
     a.split("/").length-b.split("/").length || a.localeCompare(b,"ru"));
   const bytes=active.reduce((sum,f)=>sum+f.size,0);
-  const nodes:MapNode[]=[{id:"root",kind:"root",name:"Диск",folder:"",x:0,y:0,size:bytes}];
+  const nodes:MapNode[]=[{id:"root",kind:"root",name:"Диск",folder:"",x:0,y:0,size:bytes,count:active.length}];
   const edges:MapEdge[]=[];
   const byFolder=new Map<string,MapNode>();
   const byId=new Map(nodes.map(n=>[n.id,n]));
@@ -61,7 +63,8 @@ export function graphFromFiles(files:DiskFile[],folderNames:string[],
     const radius=115+Math.sqrt(i)*38+depth*48;
     const parent=name.includes("/")?name.slice(0,name.lastIndexOf("/")):"";
     const n:MapNode={id:"folder:"+name,kind:"folder",name:name.split("/").pop()||name,
-      folder:name,x:Math.cos(angle)*radius,y:Math.sin(angle)*radius,size:sizes.get(name)||0};
+      folder:name,x:Math.cos(angle)*radius,y:Math.sin(angle)*radius,size:sizes.get(name)||0,
+      count:counts.get(name)||0};
     nodes.push(n);byId.set(n.id,n);byFolder.set(name,n);
     edges.push({from:byFolder.has(parent)?"folder:"+parent:"root",to:n.id,kind:"contains"});
   }
@@ -78,7 +81,7 @@ export function graphFromFiles(files:DiskFile[],folderNames:string[],
     const radius=43+Math.sqrt(count)*21;
     const n:MapNode={id:"file:"+file.id,kind:"file",name:file.name,folder:file.folder,
       x:parent.x+Math.cos(angle)*radius,y:parent.y+Math.sin(angle)*radius,
-      size:file.size,sha:file.sha256,tags:file.tags};
+      size:file.size,count:1,sha:file.sha256,tags:file.tags};
     nodes.push(n);byId.set(n.id,n);
     edges.push({from:parent.id,to:n.id,kind:"contains"});
     if(file.sha256){
@@ -97,4 +100,17 @@ export function graphFromFiles(files:DiskFile[],folderNames:string[],
   }
   return {nodes,edges,shownFiles:selected.length,totalFiles:active.length,
     shownFolders:selectedFolders.length,totalFolders,bytes};
+}
+
+
+/** Data-backed visual size: proportional to verified file count/bytes, clamped
+ * for legibility. A folder containing 1000 files is larger than one with 1.
+ * Never infer importance, creation dates or other undocumented properties. */
+export function mapNodeRadius(node:MapNode,totalBytes:number):number{
+  if(node.kind==="root")return 15;
+  const proportion=totalBytes>0?Math.min(1,node.size/totalBytes):0;
+  const volume=Math.sqrt(Math.max(0,proportion));
+  if(node.kind==="folder")
+    return Math.min(19,Math.max(6.5,6.5+Math.sqrt(node.count)*1.35+volume*4));
+  return Math.min(9,Math.max(3.25,3.25+volume*5));
 }
