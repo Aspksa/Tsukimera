@@ -384,6 +384,18 @@ try{
 
   assert.equal(home.categories,6,"Settings 4.0 must show six clear navigation categories");
   assert.equal(home.visible,2,"Only one selected category should be visible at a time");
+  const spatialSetting=await evaluate("(()=>({look:document.querySelector('#set-look')?.textContent?.includes('Плотность Живой карты Диска'),options:[...document.querySelectorAll('#set-look .choice-card')].map(b=>b.textContent)}))()");
+  assert.ok(spatialSetting.look&&spatialSetting.options.includes('Просторная')&&
+    spatialSetting.options.includes('Больше объектов'),"Spatial density must be configurable in Settings");
+  await evaluate("([...document.querySelectorAll('#set-look .choice-card')].find(b=>b.textContent==='Больше объектов')).click()");
+  let densitySaved=false;
+  for(let n=0;n<24;n++){
+    await pause(120);
+    const prefs=(await(await fetch(origin+"/api/preferences")).json()).preferences||{};
+    if(prefs['tsukimera.disk.spatial.density.v1']==='detailed'){densitySaved=true;break;}
+  }
+  assert.ok(densitySaved,"Spatial density must be persisted in SQLite");
+  await evaluate("([...document.querySelectorAll('#set-look .choice-card')].find(b=>b.textContent==='Просторная')).click()");
   await evaluate("document.querySelector('[data-settings-group=\"cloud\"]').click()");
   const cloudPanel=await evaluate("(()=>({category:document.querySelector('.set-toc-link.active')?.dataset.settingsGroup,visible:[...document.querySelectorAll('.set-card:not([hidden])')].map(x=>x.id),browsers:document.querySelectorAll('.set-model-browser').length,search:document.querySelectorAll('.set-model-search').length}))()");
   assert.equal(cloudPanel.category,"cloud");
