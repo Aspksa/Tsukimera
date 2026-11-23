@@ -173,6 +173,10 @@ try{
   await evaluate("(()=>{const c=document.querySelector('.dk-mini-map-canvas');for(let i=0;i<6;i++)c.dispatchEvent(new WheelEvent('wheel',{bubbles:true,cancelable:true,deltaY:-110,clientX:c.getBoundingClientRect().left+c.clientWidth/2,clientY:c.getBoundingClientRect().top+c.clientHeight/2}));})()");
   await pause(400);
   const zoomedMap=await evaluate("(()=>({layer:document.querySelector('.dk-mini-map-canvas').dataset.layer,saved:JSON.parse(localStorage.getItem('tsukimera.disk.minimap.view.v1')||'null')}))()");
+
+  const orbitVisual=await evaluate("(()=>{const c=document.querySelector('.dk-mini-map-canvas');return {transition:c.dataset.transition,pulse:c.dataset.pulse,trail:c.dataset.trail}})()");
+  assert.equal(orbitVisual.transition,"idle","Zoom reveal should stop after a short animation");
+
   assert.equal(zoomedMap.layer,"detail","Zooming must reveal the more detailed source-backed graph");
   assert.ok(zoomedMap.saved?.zoom>2.1&&zoomedMap.saved?.zoom<=9,
     "Wheel viewport should be persistently saved: "+JSON.stringify(zoomedMap));
@@ -202,6 +206,19 @@ try{
   assert.match(hierarchy.mapTitle,/папок/);
   assert.match(await evaluate("document.querySelector('.dk-mini-map-status')?.textContent"),/2026/,
     "Tree selection must synchronize with the selected Canvas folder");
+
+  await pause(460);
+  const orbital=await evaluate("(()=>{const c=document.querySelector('.dk-mini-map-canvas');const p=document.querySelector('.dk-mini-map');return {trail:c.dataset.trail,center:Number(c.dataset.centerError),nodes:Number(c.dataset.nodes),painted:Number(c.dataset.paintedNodes),weight:p.style.getPropertyValue('--dk9-map-weight'),pulse:c.dataset.pulse,transition:c.dataset.transition}})()");
+  assert.match(orbital.trail,/root>folder:Работа>folder:Работа\/2026/,
+    "Selected folder must highlight the full factual root-to-target trail: "+JSON.stringify(orbital));
+  assert.ok(orbital.center<=5,"Selected folder should be auto-centered: "+JSON.stringify(orbital));
+  assert.ok(orbital.nodes>=orbital.painted&&orbital.painted>0,
+    "Canvas culling must keep a bounded number of painted nodes");
+  assert.ok(Number(orbital.weight)>.1&&Number(orbital.weight)<.34,
+    "Tree/map height must be driven by actual folder density");
+  assert.equal(orbital.pulse,"idle","Selection pulse must end rather than run continuously");
+  assert.equal(orbital.transition,"idle","Reveal animation must stop after a bounded duration");
+
   await evaluate("document.querySelector('.dk-tree-all[aria-label=\"Свернуть все папки\"]').click()");
   assert.equal(await evaluate("document.querySelector('.dk-node[data-folder=\"Работа/2026\"]')===null"),true,
     "Collapse all should hide descendants without deleting folder data");
