@@ -1151,7 +1151,8 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
     const content=el("div",{cls:"dk-sections-dialog"},
       el("p",{cls:"muted",textContent:"Категории и умные папки доступны здесь. Скрытие раздела не удаляет документы."}),
       sectionsRegion,
-      btn("Настроить разделы",()=>configureSections(),{small:true,icon:"settings"}));
+      btn("Настроить разделы",()=>configureSections(),{small:true,icon:"settings"}),
+      btn("Изменить умные папки",()=>editSmartFolders(),{small:true,icon:"folder"}));
     openSheet({title:"Разделы и умные папки",icon:"drawer",content,
       onClose:()=>{sectionsRegion.hidden=sidebarPrefs.collapsed;}});
   };
