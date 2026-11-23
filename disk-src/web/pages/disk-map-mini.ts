@@ -276,7 +276,7 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
       const button=clickItem(text,()=>{dismissMenu();callback();});
       context.append(button);
     };
-    option("Изучить тексты документов",()=>{void analyzeDocuments();});
+    option("Диагностика: перепроверить видимые тексты",()=>{void analyzeDocuments();});
     option("Все реальные связи",()=>{mode="all";rebuild();});
     option("Связи по содержанию",()=>{mode="meaning";rebuild();});
     option("Дубликаты и редакции",()=>{mode="versions";rebuild();});
