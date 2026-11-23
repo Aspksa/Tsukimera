@@ -3,18 +3,21 @@
  * The graph never infers a semantic relation from a similar name or folder.
  */
 import type {DiskFile} from "../api";
-export type GraphKind="folder"|"file"|"tag";
-export type LinkKind="contains"|"duplicate"|"tag";
+import type {SemanticIndex} from "./disk-map-semantic";
+import {spatialFileType} from "./disk-map-spatial";
+export type GraphKind="folder"|"file"|"tag"|"topic"|"person"|"organization"|"date"|"project"|"revision";
+export type LinkKind="contains"|"duplicate"|"tag"|"lexical"|"entity"|"reference"|"revision";
 export type GraphNode={
   id:string;kind:GraphKind;name:string;folder:string;size:number;depth:number;
-  fileId?:string;sha256?:string;count?:number;
+  fileId?:string;sha256?:string;count?:number;revision?:number;fileType?:string;
 };
-export type GraphLink={source:string;target:string;kind:LinkKind};
+export type GraphLink={source:string;target:string;kind:LinkKind;weight?:number;evidence?:string;confidence?:number};
 export type GraphScene={
   nodes:GraphNode[];links:GraphLink[];focus:string;
   totalCandidates:number;hidden:number;folders:number;files:number;duplicates:number;
 };
-export type GraphOptions={depth?:number;limit?:number;includeTags?:boolean;includeDuplicates?:boolean};
+export type GraphOptions={depth?:number;limit?:number;includeTags?:boolean;includeDuplicates?:boolean;
+ semantic?:SemanticIndex|null;viewMode?:"all"|"meaning"|"versions"|"entities";};
 export type GraphPoint={x:number;y:number;vx:number;vy:number;pinned?:boolean};
 
 const compare=(a:string,b:string)=>a.localeCompare(b,"ru",{numeric:true,sensitivity:"base"});
@@ -71,7 +74,8 @@ export function graphFromCatalog(
     const parentId="folder:"+f.folder;
     if(!byId.has(parentId))continue;
     add({id:"file:"+f.id,kind:"file",fileId:f.id,name:f.name,folder:f.folder,
-      size:f.size,sha256:f.sha256,depth:depthOf(f.folder)+1});
+      size:f.size,sha256:f.sha256,revision:f.revision,
+      fileType:spatialFileType(f.name),depth:depthOf(f.folder)+1});
   }
   // Add only verified exact-hash matches to already shown files. Links are
   // optional and never imply content similarity from a shared extension.
@@ -86,7 +90,8 @@ export function graphFromCatalog(
       for(const f of hashes.slice(0,8)){
         if(f.id===item.fileId||byId.has("file:"+f.id))continue;
         add({id:"file:"+f.id,kind:"file",fileId:f.id,name:f.name,folder:f.folder,
-          size:f.size,sha256:f.sha256,depth:Math.min(depth+1,item.depth+1)});
+          size:f.size,sha256:f.sha256,revision:f.revision,
+          fileType:spatialFileType(f.name),depth:Math.min(depth+1,item.depth+1)});
       }
     }
   }
@@ -106,11 +111,11 @@ export function graphFromCatalog(
       add({id:"tag:"+tag,kind:"tag",name:"#"+tag,folder:"",size:0,depth:1});
   }
   const links:GraphLink[]=[],seen=new Set<string>();
-  const edge=(source:string,target:string,kind:LinkKind)=>{
+  const edge=(source:string,target:string,kind:LinkKind,weight=1,evidence="",confidence=1)=>{
     if(source===target||!byId.has(source)||!byId.has(target))return;
     const key=kind+":"+[source,target].sort().join("|");
     if(seen.has(key))return;
-    seen.add(key);links.push({source,target,kind});
+    seen.add(key);links.push({source,target,kind,weight,evidence,confidence});
   };
   for(const node of byId.values()){
     if(node.kind==="folder"&&node.id!==focusId){
@@ -131,11 +136,42 @@ export function graphFromCatalog(
     for(const [tag,ids] of tagged)
       if(byId.has("tag:"+tag))
         for(const id of ids)edge("tag:"+tag,id,"tag");
+
+  // Only source-backed semantic nodes whose actual file endpoints are visible.
+  // The extraction is opt-in and ephemeral; this model never reads file text.
+  const evidence=options.semantic;
+  if(evidence&&options.viewMode!=="versions"){
+    for(const n of evidence.nodes){
+      if(!evidence.links.some(l=>l.source===n.id&&byId.has(l.target)))continue;
+      if(!byId.has(n.id))add({id:n.id,kind:n.kind,name:n.name,folder:"",size:0,
+        depth:2,count:n.count});
+    }
+    for(const relation of evidence.links){
+      if(!byId.has(relation.source)||!byId.has(relation.target))continue;
+      edge(relation.source,relation.target,relation.kind,relation.weight,
+        relation.evidence,relation.confidence);
+    }
+  }
+  // The last known revision number is not a full revision history. Show a
+  // metadata node only if the server catalogue explicitly reports revision >1.
+  if(options.viewMode==="versions"||options.viewMode==="all"){
+    for(const file of [...byId.values()].filter(n=>n.kind==="file"&&Number(n.revision)>1)){
+      const nid="revision:"+file.id;
+      add({id:nid,kind:"revision",name:"Редакция №"+file.revision,
+        folder:file.folder,size:0,depth:file.depth+1,count:file.revision});
+      edge(file.id,nid,"revision",.8,"Текущая редакция в каталоге: "+file.revision,1);
+    }
+  }
   const folderCount=[...byId.values()].filter(n=>n.kind==="folder").length;
   const fileCount=[...byId.values()].filter(n=>n.kind==="file").length;
   // Exclude metadata-only tag hubs from hidden source-object count.
   return {
-    nodes:[...byId.values()],links,focus:focusId,
+    nodes:[...byId.values()],links:links.filter(l=>{
+      if(options.viewMode==="meaning")return ["lexical","entity","reference"].includes(l.kind);
+      if(options.viewMode==="versions")return ["duplicate","revision"].includes(l.kind);
+      if(options.viewMode==="entities")return l.kind==="entity";
+      return true;
+    }),focus:focusId,
     totalCandidates:fullCandidates,
     hidden:Math.max(0,fullCandidates-(folderCount+fileCount)),
     folders:folderCount,files:fileCount,
@@ -186,8 +222,9 @@ export function graphForceStep(
     if(!a||!b)continue;
     const dx=b.x-a.x,dy=b.y-a.y;
     const length=Math.max(1,Math.hypot(dx,dy));
-    const target=link.kind==="contains"?100:link.kind==="duplicate"?85:105;
-    const power=(length-target)*.013*strength;
+    const target=link.kind==="contains"?100:link.kind==="duplicate"?85:
+      link.kind==="lexical"?125:105;
+    const power=(length-target)*.013*strength*Math.max(.35,Math.min(1.5,link.weight??1));
     const fx=dx/length*power,fy=dy/length*power;
     if(!a.pinned){a.vx+=fx;a.vy+=fy;}
     if(!b.pinned){b.vx-=fx;b.vy-=fy;}
