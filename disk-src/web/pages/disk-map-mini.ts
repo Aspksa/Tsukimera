@@ -16,6 +16,7 @@ import {normalizeMiniView,MINI_VIEW_KEY,clampView} from "./disk-map-mini-model";
 import {SPATIAL_DENSITY_KEY} from "./disk-map-spatial";
 import {graphRoute,graphNeighbors,graphEdgeAt,graphEdgeExplanation,type GraphRoute}
   from "./disk-map-explore";
+import {graphDocumentChain,graphEntryPoint} from "./disk-map-chain";
 import {graphArtLayout,artCommunityColor,artRgb,artDepth,artImportance,
   artBundleEdges,artCurve,artCurvePoint,artCurveHit,artClouds,artClusterStep,
   artEase,artLerp,artInertia,type ArtLayout,type ArtBundle}
@@ -79,7 +80,7 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
   let bounds:GraphBounds=graphBounds([]),screen:GraphScreen=graphScreen(320,280);
   let lastScreenKey="",highlightTimer=0,pointerInsideGraph=false;
   let fading:Array<{point:GraphPoint;node:GraphNode;until:number}>=[];
-  let hovered:string|null=null,selected:string|null=null;
+  let hovered:string|null=null,selected:string|null=null,linkedFolder:string|null=null;
   let expanded=false,anchor:Node|null=null,nextSibling:Node|null=null,homePage:HTMLElement|null=null;
   let pointerDown=false,pointMoved=false,dragId:string|null=null;
   let lastX=0,lastY=0,originX=0,originY=0,prevMoveX=0,prevMoveY=0;
@@ -137,6 +138,14 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
     if(id&&!node)return;
     selected=node?.id||null;hovered=selected;
     fileHighlight(node||null);draw();
+  }
+  // Folder rows highlight the corresponding real graph community. This is
+  // visual-only: never switches the user's folder or changes file selection.
+  function highlightFolder(folder:string|null){
+    linkedFolder=folder===null?null:"folder:"+folder;
+    if(linkedFolder&&!scene.nodes.some(n=>n.id===linkedFolder))
+      linkedFolder=null;
+    draw();
   }
   function cancelCamera(){
     if(cameraRaf)cancelAnimationFrame(cameraRaf);cameraRaf=0;
@@ -381,8 +390,15 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
       }
       fading=fading.filter(f=>f.until>currentTime).slice(-40);
     }else fading=[];
+    // Preserve all existing coordinates; each genuinely new file/entity is
+    // introduced by an already placed factual neighbour, rather than
+    // regenerating the entire layout on every SQLite knowledge update.
     for(const n of scene.nodes){
-      next.set(n.id,oldPositions.get(n.id)||graphInitial(n));
+      if(oldPositions.has(n.id))next.set(n.id,oldPositions.get(n.id)!);
+    }
+    for(const n of scene.nodes){
+      if(!next.has(n.id))next.set(n.id,
+        graphEntryPoint(n,scene.links,next,graphInitial(n)));
       if(!reduced()&&!oldNodes.has(n.id))entering.set(n.id,currentTime);
       else if(appearing.has(n.id))entering.set(n.id,appearing.get(n.id)!);
     }
@@ -473,7 +489,12 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
         ctx.ellipse(x,y,radius,radius*.75,0,0,Math.PI*2);ctx.fill();
       }
     }
-    const active=hovered||selected;
+    const active=hovered||selected||linkedFolder;
+    // A sequence only exists if contract->document steps are all backed by
+    // literal references to the same contract. Only REAL links are painted.
+    const chain=!route&&active?graphDocumentChain(scene,active):null;
+    const chainEdges=chain?new Set(chain.links):null;
+    const chainNodes=chain?new Set(chain.nodes):null;
     const routeNodes=route?new Set(route.nodes):null;
     const routeEdges=route?new Set(route.links):null;
     const focusNodes=focusId?graphNeighbors(scene,focusId,2):null;
@@ -494,7 +515,7 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
     // Visual bundles select real representative source-target pairs. Route,
     // hover and root-path evidence always remain individually visible.
     const forced=new Set(scene.links.filter(e=>
-      routeEdges?.has(e)||e===hoverEdge||rootPath.has(e.source+"|"+e.target)||
+      routeEdges?.has(e)||chainEdges?.has(e)||e===hoverEdge||rootPath.has(e.source+"|"+e.target)||
       !!active&&(e.source===active||e.target===active)));
     renderBundles=artBundleEdges(scene.links,art,zoom,forced);
     const nodeColor=new Map(scene.nodes.map(n=>[n.id,tint(n)]));
@@ -507,17 +528,18 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
         Math.max(sy,ty,curve.cy)<-margin||Math.min(sy,ty,curve.cy)>h+margin)continue;
       const onRoute=routeEdges?.has(e)||false;
       const onFocus=focusNodes?focusNodes.has(e.source)&&focusNodes.has(e.target):false;
-      const highlighted=onRoute||e===hoverEdge||
+      const onChain=chainEdges?.has(e)||false;
+      const highlighted=onRoute||onChain||e===hoverEdge||
         !!active&&(e.source===active||e.target===active);
       const partOfPath=rootPath.has(e.source+"|"+e.target);
       const fade=routeNodes?!onRoute:focusNodes?!onFocus:
         !!active&&!highlighted&&!partOfPath;
       const rgb=relationColors[e.kind]||relationColors.contains;
       const pulse=highlighted&&!reduced()?.06*Math.sin(now/230):0;
-      const opacity=fade?.045:onRoute?.94:highlighted?.72+pulse:
+      const opacity=fade?.045:onRoute?.94:onChain?.82:highlighted?.72+pulse:
         partOfPath?.66:e.kind==="contains"?.16:.27;
       const strength=clamp(e.weight??1,.25,1.6);
-      const thickness=clamp(((onRoute?2.25:highlighted?1.25:.38)+
+      const thickness=clamp(((onRoute?2.25:onChain?1.85:highlighted?1.25:.38)+
         strength*(highlighted?.9:.44)+Math.log2(bundle.count)*.28)*lineScale,.45,4.3);
       const startRgb=artRgb(nodeColor.get(e.source)||"#a0b7d9");
       const endRgb=artRgb(nodeColor.get(e.target)||"#e1b879");
@@ -564,6 +586,7 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
       if(x<-20||x>w+20||y<-20||y>h+20)continue;
       const isActive=n.id===active;
       const dim=routeNodes?!routeNodes.has(n.id):
+        chainNodes?!chainNodes.has(n.id):
         focusNodes?!focusNodes.has(n.id):
         !!active&&!neighbor.has(n.id);
       const entered=appearing.get(n.id);
@@ -636,13 +659,31 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
         ctx.fillText(name,clamp(x+8,6,w-160),clamp(y-7,12,h-8));
       }
     }
+    // The document chain is a temporary caption drawn directly in Canvas.
+    // It lists only the actual types of source-backed connected documents.
+    if(chain&&chain.nodes.length>2){
+      const types=chain.nodes.filter(id=>id.startsWith("file:"))
+        .map(id=>scene.nodes.find(n=>n.id===id)?.name||"")
+        .map(name=>/договор|контракт/i.test(name)?"Договор":
+          /соглашен|приложен/i.test(name)?"Приложение":
+          /акт/i.test(name)?"Акт":/сч[её]т|invoice/i.test(name)?"Счёт":"Документ");
+      const label=[...new Set(types)].slice(0,5).join(" → ");
+      if(label){
+        ctx.save();ctx.font="500 "+Math.round(Math.max(10,labelSize-1))+"px system-ui,sans-serif";
+        ctx.fillStyle="rgba(221,190,147,.9)";
+        ctx.fillText(label,12,Math.max(18,Math.min(30,h-10)));ctx.restore();
+      }
+    }
     // Evidence appears ONLY while hovering the actual line. The explanation
     // always says what was observed, never infers personal acquaintance.
     if(hoverEdge&&!hovered){
       const raw=graphEdgeExplanation(hoverEdge,scene.nodes)+
+        (typeof hoverEdge.confidence==="number"&&
+        ["reference","entity","lexical","co_mention"].includes(hoverEdge.kind)?
+          " · Надёжность извлечения "+Math.round(hoverEdge.confidence*100)+"%":"")+
         (hoverBundle&&hoverBundle.count>1?
           " · "+hoverBundle.count+" реальных линий объединены визуально":"");
-      const message=raw.length>170?raw.slice(0,169)+"…":raw;
+      const message=raw.length>265?raw.slice(0,264)+"…":raw;
       const maxWidth=Math.max(110,Math.min(360,w-24));
       ctx.font="500 "+Math.round(Math.max(10,labelSize-1))+"px system-ui,sans-serif";
       const words=message.split(/\s+/),lines:string[]=[];
@@ -900,7 +941,7 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
     });
     observer.observe(frame);
   }
-  return {root,highlightFile,update(newFiles,newFolders,folder){
+  return {root,highlightFile,highlightFolder,update(newFiles,newFolders,folder){
     if(files!==newFiles){
       analysisGeneration++;semantic=null;analysisBusy=false;
       persistedSemantic=null;knowledgeSignature="";
@@ -914,6 +955,8 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
       clearTimeout(highlightTimer);
     }
     rebuild();
+    if(!linkedFolder)linkedFolder="folder:"+current;
+    if(!scene.nodes.some(n=>n.id===linkedFolder))linkedFolder=null;
     scheduleKnowledge();
   }};
 }
