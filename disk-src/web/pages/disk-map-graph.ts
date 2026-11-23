@@ -154,8 +154,14 @@ export function graphFromCatalog(
     }
     for(const relation of evidence.links){
       if(!byId.has(relation.source)||!byId.has(relation.target))continue;
-      edge(relation.source,relation.target,relation.kind,relation.weight,
-        relation.evidence,relation.confidence);
+      // A shared folder only reinforces a demonstrated textual overlap.
+      // Being in the same folder alone is never enough to imply similarity.
+      const source=byId.get(relation.source),target=byId.get(relation.target);
+      const sameFolder=relation.kind==="lexical"&&source?.kind==="file"&&
+        target?.kind==="file"&&source.folder===target.folder;
+      edge(relation.source,relation.target,relation.kind,
+        relation.weight*(sameFolder?1.2:1),
+        relation.evidence+(sameFolder?" · общая папка":""),relation.confidence);
     }
   }
   // The last known revision number is not a full revision history. Show a
