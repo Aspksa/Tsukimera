@@ -1175,7 +1175,7 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
       row.append(toggle, label, ...(folder ? [more] : []));
       dropFiles(row, folder);
       const wrap = el("div", { cls: "dk-branch" }, row);
-      wrap.style.setProperty("--branch-depth",String(depth));
+      wrap.style.setProperty("--branch-line",(20+depth*14)+"px");
       if (open && children.length) {
         const sub = el("div", { cls: "dk-branch-kids", attrs: { role: "group" } });
         for (const c of children) { const n = node(c, depth + 1); if (n) sub.append(n); }
