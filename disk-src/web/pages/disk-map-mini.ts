@@ -306,8 +306,27 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
     }
     return best;
   }
+
+  const typeColors:Record<string,string>={
+    image:"#71bde6",document:"#e8c99e",archive:"#b99be5",
+    video:"#d7a5c4",audio:"#92d8c5",code:"#91b9e1",
+    other:"#bdc3d0"
+  };
+  const edgeColors:Record<string,string>={
+    contains:"177,181,192",duplicate:"225,147,96",tag:"184,147,224",
+    entity:"102,192,167",lexical:"112,172,228",reference:"242,194,114",
+    revision:"201,183,147"
+  };
   function color(node:GraphNode):string{
-    return node.kind==="folder"?rgb.folder:node.kind==="tag"?rgb.tag:rgb.file;
+    if(node.kind==="folder")return rgb.folder;
+    if(node.kind==="tag")return rgb.tag;
+    if(node.kind==="topic")return "#e4b66b";
+    if(node.kind==="person")return "#e4a6c3";
+    if(node.kind==="organization")return "#7ec9c3";
+    if(node.kind==="date")return "#bba6d8";
+    if(node.kind==="project")return "#9fd3a0";
+    if(node.kind==="revision")return "#a1adb8";
+    return typeColors[node.fileType||"other"]||rgb.file;
   }
   function draw(){
     if(!root.isConnected)return;
@@ -324,51 +343,111 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
       if(e.source===active)neighborhood.add(e.target);
       if(e.target===active)neighborhood.add(e.source);
     }
-    const searchMatches=new Set(query?scene.nodes.filter(n=>n.name.toLocaleLowerCase("ru").includes(query)).map(n=>n.id):[]);
+    const searchMatches=new Set(query?scene.nodes.filter(n=>
+      n.name.toLocaleLowerCase("ru").includes(query)).map(n=>n.id):[]);
+    // A cluster is an actual folder containing >=3 graph files, not a guessed
+    // semantic community. Inset contours avoid covering the whole small panel.
+    if(expanded&&scale>.2){
+      const groups=new Map<string,GraphNode[]>();
+      for(const n of scene.nodes)if(n.kind==="file"){
+        const collection=groups.get(n.folder)||[];collection.push(n);groups.set(n.folder,collection);
+      }
+      let painted=0;
+      for(const [folder,nodes] of groups){
+        if(nodes.length<3||painted>=10)continue;
+        const spots=nodes.map(n=>coords.get(n.id)).filter((v):v is GraphPoint=>!!v)
+          .map(p=>({x:cx+p.x*scale,y:cy+p.y*scale}));
+        if(spots.length<3)continue;
+        const midX=spots.reduce((sum,p)=>sum+p.x,0)/spots.length;
+        const midY=spots.reduce((sum,p)=>sum+p.y,0)/spots.length;
+        const radiusX=Math.min(w*.45,Math.max(42,...spots.map(p=>Math.abs(p.x-midX)+24)));
+        const radiusY=Math.min(h*.4,Math.max(34,...spots.map(p=>Math.abs(p.y-midY)+22)));
+        const gradient=ctx.createRadialGradient(midX,midY,2,midX,midY,Math.max(radiusX,radiusY));
+        gradient.addColorStop(0,"rgba(188,150,93,.09)");
+        gradient.addColorStop(1,"rgba(188,150,93,0)");
+        ctx.beginPath();ctx.ellipse(midX,midY,radiusX,radiusY,0,0,2*Math.PI);
+        ctx.fillStyle=gradient;ctx.fill();
+        ctx.beginPath();ctx.ellipse(midX,midY,radiusX,radiusY,0,0,2*Math.PI);
+        ctx.strokeStyle="rgba(209,169,108,.13)";ctx.lineWidth=.7;
+        ctx.setLineDash([4,7]);ctx.stroke();ctx.setLineDash([]);
+        ctx.font="10px system-ui,sans-serif";ctx.fillStyle="rgba(210,178,123,.48)";
+        ctx.fillText((folder.split("/").pop()||"Корень").slice(0,22),
+          Math.min(w-80,Math.max(12,midX-radiusX+8)),
+          Math.max(13,midY-radiusY+15));
+        painted++;
+      }
+    }
+    // The selected path towards the actual root is determined exclusively by
+    // concrete "contains" edges and is never invented across unrelated files.
+    const highlightedPath=new Set<string>();
+    if(active){
+      let child=active;
+      const parentEdges=scene.links.filter(l=>l.kind==="contains");
+      for(let i=0;i<12;i++){
+        const next=parentEdges.find(l=>l.target===child);
+        if(!next)break;
+        highlightedPath.add(next.source+"|"+next.target);child=next.source;
+      }
+    }
     for(const edge of scene.links){
       const a=coords.get(edge.source),b=coords.get(edge.target);if(!a||!b)continue;
       const isActive=!!active&&(edge.source===active||edge.target===active);
-      const dim=!!active&&!isActive||!!query&&!searchMatches.has(edge.source)&&!searchMatches.has(edge.target);
-      ctx.beginPath();ctx.moveTo(cx+a.x*scale,cy+a.y*scale);ctx.lineTo(cx+b.x*scale,cy+b.y*scale);
-      ctx.strokeStyle=dim?"rgba(141,151,166,.065)":
-        isActive?(edge.kind==="duplicate"?"rgba(232,151,100,.92)":"rgba(230,185,112,.74)"):
-        edge.kind==="duplicate"?"rgba(216,142,94,.43)":
-        edge.kind==="tag"?"rgba(164,139,200,.32)":"rgba(164,171,190,.22)";
-      ctx.lineWidth=isActive?1.7:edge.kind==="contains"?.8:1;
-      ctx.stroke();
+      const onPath=highlightedPath.has(edge.source+"|"+edge.target);
+      const dim=!!active&&!isActive&&!onPath||
+        !!query&&!searchMatches.has(edge.source)&&!searchMatches.has(edge.target);
+      ctx.beginPath();ctx.moveTo(cx+a.x*scale,cy+a.y*scale);
+      ctx.lineTo(cx+b.x*scale,cy+b.y*scale);
+      const components=edgeColors[edge.kind]||"177,181,192";
+      const alpha=dim?.055:isActive?.95:onPath?.74:edge.kind==="contains"?.22:.36;
+      ctx.strokeStyle="rgba("+components+","+alpha+")";
+      const strength=Math.max(.4,Math.min(1.8,edge.weight??1));
+      ctx.lineWidth=(isActive?1.5:onPath?1.2:.65)+strength*(isActive?.9:.55);
+      if(edge.kind==="lexical"||edge.kind==="entity")ctx.setLineDash([3,5]);
+      else ctx.setLineDash([]);
+      if(onPath||isActive){
+        ctx.save();ctx.shadowColor="rgba("+components+",.6)";
+        ctx.shadowBlur=expanded?8:3;ctx.stroke();ctx.restore();
+      }else ctx.stroke();
     }
+    ctx.setLineDash([]);
     const drawLabels=new Set<string>();
     if(active)for(const id of neighborhood)drawLabels.add(id);
     else if(expanded){
-      for(const node of scene.nodes)if(node.kind==="folder"&&node.depth<=1)drawLabels.add(node.id);
+      for(const n of scene.nodes)if((n.kind==="folder"&&n.depth<=1)||n.kind==="topic")
+        drawLabels.add(n.id);
     }else drawLabels.add(scene.focus);
     if(query)for(const id of searchMatches)drawLabels.add(id);
+    const breathe=expanded&&!reduced()?Math.sin(performance.now()/850)*.32:0;
     for(const node of scene.nodes){
       const p=coords.get(node.id);if(!p)continue;
       const x=cx+p.x*scale,y=cy+p.y*scale;
       if(x<-32||x>w+32||y<-32||y>h+32)continue;
       const chosen=node.id===active,match=searchMatches.has(node.id);
-      const faded=active&&!neighborhood.has(node.id)||query&&!match;
-      const size=node.id===scene.focus?6.5:node.kind==="folder"?5.2:node.kind==="tag"?4.1:3.1;
-      const radius=Math.max(2.2,Math.min(12,size*Math.sqrt(Math.max(.55,scale))));
-      ctx.globalAlpha=faded?.17:1;
+      const faded=active&&!neighborhood.has(node.id)||!!query&&!match;
+      const radiusBase=node.id===scene.focus?6.2:
+        node.kind==="folder"?5.2:node.kind==="file"?
+        2.9+Math.min(2,Math.log10(1+Math.max(0,node.size))/5):4;
+      const radius=Math.max(2.1,Math.min(12,radiusBase*Math.sqrt(Math.max(.55,scale))+
+        (chosen?breathe:0)));
+      ctx.globalAlpha=faded?.14:1;
       if(chosen||match){
-        ctx.beginPath();ctx.arc(x,y,radius+7,0,Math.PI*2);
-        ctx.fillStyle="rgba(228,180,103,.10)";ctx.fill();
+        ctx.beginPath();ctx.arc(x,y,radius+6,0,Math.PI*2);
+        ctx.fillStyle="rgba(232,180,103,.10)";ctx.fill();
         ctx.beginPath();ctx.arc(x,y,radius+3,0,Math.PI*2);
-        ctx.strokeStyle="rgba(244,200,133,.75)";ctx.lineWidth=1;ctx.stroke();
+        ctx.strokeStyle="rgba(249,201,125,.79)";ctx.lineWidth=1;ctx.stroke();
       }
       ctx.beginPath();ctx.arc(x,y,radius,0,Math.PI*2);
-      ctx.fillStyle=color(node);ctx.fill();
+      ctx.fillStyle=color(node);
+      if(chosen){ctx.shadowColor=color(node);ctx.shadowBlur=expanded?16:8;}
+      ctx.fill();ctx.shadowBlur=0;
       ctx.globalAlpha=1;
       if(drawLabels.has(node.id)&&(!faded||chosen)){
         const text=node.name.length>28?node.name.slice(0,27)+"…":node.name;
         ctx.font=(chosen?"600 ":"400 ")+(expanded?12:10)+"px system-ui,sans-serif";
-        const len=ctx.measureText(text).width;
-        const tx=Math.min(w-len-7,Math.max(5,x+radius+4));
+        const tw=ctx.measureText(text).width;
+        const tx=Math.min(w-tw-7,Math.max(5,x+radius+5));
         const ty=Math.max(14,Math.min(h-6,y-5));
-        ctx.fillStyle=chosen?"#f8dbac":"#bfc5d0";
-        ctx.fillText(text,tx,ty);
+        ctx.fillStyle=chosen?"#f8dbac":"#bfc5d0";ctx.fillText(text,tx,ty);
       }
     }
     canvas.dataset.selected=selected||"";
@@ -377,7 +456,12 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
     if(hovered){
       const n=scene.nodes.find(n=>n.id===hovered);
       if(n){
-        tooltip.textContent=n.name+" · "+(n.kind==="file"?human(n.size):n.kind==="tag"?"метка":"папка");
+        const rec=n.fileId&&semantic?.records[n.fileId];
+        const related=scene.links.filter(e=>e.source===n.id||e.target===n.id);
+        const evidence=related.find(e=>e.evidence)?.evidence;
+        tooltip.textContent=n.name+" · "+(n.kind==="file"?human(n.size):n.kind)+
+          (evidence?" · "+evidence:"")+
+          (rec?.preview?" · "+rec.preview.slice(0,95):"");
       }
     }
   }
