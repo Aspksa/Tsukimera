@@ -40,6 +40,8 @@ CREATE TABLE IF NOT EXISTS graph22_edges (
 );
 CREATE INDEX IF NOT EXISTS graph22_edge_target ON graph22_edges(target);
 CREATE INDEX IF NOT EXISTS graph22_node_kind ON graph22_nodes(kind,folder);
+CREATE INDEX IF NOT EXISTS graph22_node_folder_kind ON graph22_nodes(folder,kind,id);
+CREATE INDEX IF NOT EXISTS graph22_edge_kind_target ON graph22_edges(kind,target);
 CREATE TABLE IF NOT EXISTS graph22_journal (
  id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, file_id TEXT NOT NULL,
  action TEXT NOT NULL, previous_stamp TEXT, new_stamp TEXT
@@ -255,108 +257,18 @@ def sync(conn,batch=25):
     except Exception:
         conn.execute("ROLLBACK")
         raise
-def _edge_valid(edge,sha_by_file):
-    for node,sha in ((edge["source"],edge["source_sha"]),
-                     (edge["target"],edge["target_sha"])):
-        if node.startswith("file:") and sha and sha_by_file.get(node)!=sha:
-            return False
-    return True
 def graph(conn,*,focus="",folder="",limit=120,level="medium",offset=0):
-    limit=max(1,min(MAX_VISIBLE,int(limit)))
-    offset=max(0,min(2000000,int(offset)))
-    level=level if level in ("far","medium","near") else "medium"
-    rows=[dict(r) for r in conn.execute("SELECT id,kind,name,folder,sha,origin,confidence FROM graph22_nodes")]
-    node_by={r["id"]:r for r in rows}
-    if focus and focus not in node_by:
-        focus=""
-    # Scope: real folder descendants, source-backed neighbours of focus,
-    # deterministic ordering and pagination of visible nodes.
-    def eligible(r):
-        if not folder:
-            return True
-        return r["id"]=="folder:"+folder or r["folder"]==folder or r["folder"].startswith(folder+"/")
-    in_scope={r["id"] for r in rows if eligible(r)}
-    sha_by={r["id"]:r["sha"] for r in rows if r["kind"]=="file"}
-    # Guard against stale SHA even between queued passes.
-    edges=[dict(e) for e in conn.execute(
-        "SELECT * FROM graph22_edges ORDER BY confidence DESC,source,target LIMIT 250000")]
-    edges=[e for e in edges if _edge_valid(e,sha_by) and
-        e["source"] in node_by and e["target"] in node_by]
-    degree=collections.Counter()
-    by_node=collections.defaultdict(list)
-    for e in edges:
-        degree[e["source"]]+=1;degree[e["target"]]+=1
-        by_node[e["source"]].append(e);by_node[e["target"]].append(e)
-    if focus:
-        focus_set={focus}
-        for e in by_node.get(focus,()):
-            focus_set.add(e["target"] if e["source"]==focus else e["source"])
-        in_scope|=focus_set
-    candidates=[r for r in rows if r["id"] in in_scope]
-    candidates.sort(key=lambda r:(0 if r["id"]==focus else 1,
-        0 if r["kind"]=="folder" else 1,-degree[r["id"]],r["id"]))
-    total=len(candidates)
-    visible=candidates[offset:offset+limit]
-    ids={r["id"] for r in visible}
-    visual_edges=[e for e in edges if e["source"] in ids and e["target"] in ids]
-    if level=="far":
-        # Visual detail suppression, not invented links; return the exact
-        # omitted count and group membership for rendering.
-        visual_edges=[e for e in visual_edges if e["kind"] in ("contains","contract","duplicate")]
-    community=communities(rows,edges)
-    for r in visible:
-        r["degree"]=degree[r["id"]]
-        r["community"]=community.get(r["id"],"root")
-        r["importance"]=min(3,round(1+math.log1p(degree[r["id"]])/3,3))
-    clusters=collections.Counter(community.get(r["id"],"root") for r in candidates)
-    return {"nodes":visible,"links":[{"source":e["source"],"target":e["target"],
-        "kind":e["kind"],"weight":e["confidence"],"confidence":e["confidence"],
-        "evidence":e["evidence"],"origin":e["origin"]} for e in visual_edges],
-        "clusters":[{"id":k,"count":v} for k,v in sorted(clusters.items())],
-        "total":total,"visible":len(visible),"omitted":max(0,total-offset-len(visible)),
-        "level":level,"focus":focus,"folder":folder,"offset":offset,
-        "truncated":len(edges)>=250000,"source":"sqlite-python-22"}
-def communities(rows,edges):
-    # Root folder identity remains stable regardless of neighbour discovery.
-    where={r["id"]:r for r in rows}
-    result={}
-    for r in rows:
-        p=r["folder"]
-        result[r["id"]]=("folder:"+p.split("/")[0]) if p else "root"
-    for r in rows:
-        if r["kind"] in ("project","organization"):
-            neighbors=[e for e in edges if (e["source"]==r["id"] or e["target"]==r["id"])
-                       and e["confidence"]>=.8]
-            peers=[e["target"] if e["source"]==r["id"] else e["source"] for e in neighbors]
-            grouped=collections.Counter(result.get(p,"root") for p in peers if p in result)
-            if grouped:
-                result[r["id"]]=sorted(grouped.items(),key=lambda x:(-x[1],x[0]))[0][0]
-    return result
+    # Stage 2 SQL-backed visibility; no Python-side full table/edge scans.
+    from graph22_scale import graph_view
+    return graph_view(conn,focus=focus,folder=folder,limit=limit,
+                      level=level,offset=offset)
+
+
 def shortest(conn,source,target,max_hops=8):
-    max_hops=max(1,min(12,int(max_hops)))
-    if not source or not target or len(source)>180 or len(target)>180:
-        return {"found":False,"reason":"invalid-node"}
-    rows=[dict(r) for r in conn.execute("SELECT * FROM graph22_edges LIMIT ?",(MAX_BFS,))]
-    live={r["id"]:r["sha"] for r in conn.execute(
-        "SELECT id,sha FROM graph22_nodes WHERE kind='file'")}
-    adj=collections.defaultdict(list)
-    for e in rows:
-        if not _edge_valid(e,live):continue
-        adj[e["source"]].append((e["target"],e))
-        adj[e["target"]].append((e["source"],e))
-    queue=collections.deque([(source,[])])
-    seen={source}
-    while queue:
-        node,path=queue.popleft()
-        if node==target:
-            return {"found":True,"nodes":[source]+[p[0] for p in path],
-                "links":[{"source":e["source"],"target":e["target"],"kind":e["kind"],
-                          "evidence":e["evidence"],"confidence":e["confidence"]} for _,e in path]}
-        if len(path)>=max_hops:continue
-        for nxt,edge in sorted(adj[node],key=lambda pair:(-pair[1]["confidence"],pair[0])):
-            if nxt not in seen:
-                seen.add(nxt);queue.append((nxt,path+[(nxt,edge)]))
-    return {"found":False,"reason":"no-evidenced-path","visited":len(seen)}
+    from graph22_scale import shortest_path
+    return shortest_path(conn,source,target,max_hops)
+
+
 def diagnosis(conn):
     orphan=conn.execute("""SELECT count(*) FROM graph22_nodes n WHERE n.kind='file'
       AND NOT EXISTS(SELECT 1 FROM graph22_edges e WHERE
@@ -375,13 +287,10 @@ def timeline(conn,limit=40):
       "SELECT at,file_id,action FROM graph22_journal ORDER BY id DESC LIMIT ?",
       (max(1,min(200,int(limit))),))]
 def impact(conn,id):
-    # Impact signals are not legal dependencies. They show only directly
-    # evidenced neighbors with their exact source.
-    if not id or len(id)>180:return {"node":id,"connections":[]}
-    rows=conn.execute("""SELECT source,target,kind,evidence,confidence
-      FROM graph22_edges WHERE source=? OR target=?
-      ORDER BY confidence DESC LIMIT 80""",(id,id)).fetchall()
-    return {"node":id,"connections":[dict(r) for r in rows]}
+    from graph22_scale import direct_impact
+    return direct_impact(conn,id)
+
+
 def contradictions(conn,limit=35):
     """Review candidates only, never certified legal contradictions."""
     rows=conn.execute("""SELECT f.file_id,f.value_key,f.value,
