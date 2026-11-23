@@ -158,8 +158,6 @@ def _edges_for(conn,row,live):
         if kind not in ("contract","organization"):
             continue
         first,second=sorted((a["id"],b["id"]))
-        if row["id"]!=first:
-            continue
         label=("Одинаковый номер договора: " if kind=="contract" else
                "Совпадающее написание организации (не идентификация): ")
         insert_edge(conn,*canonical_edge(file_node(first),file_node(second),
@@ -403,7 +401,8 @@ def main():
     parser.add_argument("--target",default="")
     args=parser.parse_args()
     try:
-        result=command(args.db,args.action,**vars(args))
+        kwargs=vars(args).copy();kwargs.pop('db');kwargs.pop('action')
+        result=command(args.db,args.action,**kwargs)
         print(json_safe({"ok":True,"data":result}))
     except (OSError,sqlite3.Error,ValueError,RuntimeError) as ex:
         print(json_safe({"ok":False,"error":type(ex).__name__+": "+str(ex)[:180]}))
