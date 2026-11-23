@@ -14,6 +14,8 @@ import {graphFromCatalog,graphInitial,graphForceStep,type GraphNode,type GraphPo
   type GraphScene,type GraphLink} from "./disk-map-graph";
 import {normalizeMiniView,MINI_VIEW_KEY,clampView} from "./disk-map-mini-model";
 import {SPATIAL_DENSITY_KEY} from "./disk-map-spatial";
+import {graphRoute,graphNeighbors,graphEdgeAt,graphEdgeExplanation,type GraphRoute}
+  from "./disk-map-explore";
 import {graphScreen,graphBounds,graphCamera,anchoredZoom,graphMotionBudget,graphLerp,
   type GraphBounds,type GraphScreen} from "./disk-map-responsive";
 import {writePreference} from "../preferences";
@@ -35,7 +37,7 @@ const shades:Record<string,string>={
 const relationColors:Record<string,string>={
   contains:"183,177,160",duplicate:"221,141,91",tag:"172,145,208",
   entity:"116,199,171",lexical:"113,163,224",reference:"237,185,104",
-  revision:"173,184,190"
+  revision:"173,184,190",co_mention:"229,159,196"
 };
 const parentOf=(p:string)=>p.includes("/")?p.slice(0,p.lastIndexOf("/")):"";
 const reduced=()=>window.matchMedia("(prefers-reduced-motion:reduce)").matches;
@@ -60,6 +62,9 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
   let files:DiskFile[]=[],folders:string[]=[],current="",depth=2;
   let scene:GraphScene=graphFromCatalog([],[],"");
   let mode:Mode="all",includeTags=true,includeDuplicates=true;
+  let globalGraph=true,focusId:string|null=null;
+  let routeStart:string|null=null,routeEnd:string|null=null,route:GraphRoute|null=null;
+  let hoverEdge:GraphLink|null=null,hoverX=0,hoverY=0;
   let semantic:SemanticIndex|null=null,analysisGeneration=0;
   let coords=new Map<string,GraphPoint>(),appearing=new Map<string,number>();
   let bounds:GraphBounds=graphBounds([]),screen:GraphScreen=graphScreen(320,280);
@@ -121,6 +126,40 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
     if(id&&!node)return;
     selected=node?.id||null;hovered=selected;
     fileHighlight(node||null);draw();
+  }
+  function centerNode(id:string,changeScale=true){
+    const p=coords.get(id);if(!p)return;
+    if(changeScale&&zoom<1.35){
+      zoom=1.35;
+      const next=measure();
+      if(next.detail!==screen.detail)rebuild();
+    }
+    const point=coords.get(id);if(!point)return;
+    const v=viewport();
+    panX=clamp(panX+v.w/2-(v.cx+point.x*v.scale),-1800,1800);
+    panY=clamp(panY+v.h/2-(v.cy+point.y*v.scale),-1800,1800);
+    persist();draw();
+  }
+  function focusOnNode(id:string|null){
+    if(id&&!scene.nodes.some(n=>n.id===id))return;
+    focusId=id;route=null;routeStart=null;routeEnd=null;
+    canvas.dataset.focusNode=focusId||"";
+    selected=id;hovered=id;
+    if(id)centerNode(id);else draw();
+  }
+  function startRoute(id:string|null){
+    if(!id||!scene.nodes.some(n=>n.id===id))return;
+    routeStart=id;routeEnd=null;route=null;focusId=null;
+    selected=id;hovered=id;
+    centerNode(id,false);
+  }
+  function finishRoute(id:string){
+    if(!routeStart||!scene.nodes.some(n=>n.id===id))return;
+    routeEnd=id;
+    route=graphRoute(scene,routeStart,id);
+    selected=id;hovered=id;
+    if(route)centerNode(id,false);else draw();
+    canvas.dataset.route=route?String(route.links.length):"unavailable";
   }
   function activate(n:GraphNode){
     if(n.kind==="folder")actions.openFolder(n.folder);
@@ -195,11 +234,36 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
     option("Дубликаты и редакции",()=>{mode="versions";rebuild();});
     option("Общие сущности",()=>{mode="entities";rebuild();});
     option("Глубина "+(depth===3?1:depth+1),()=>{depth=depth===3?1:depth+1;rebuild();});
+    option("Весь Диск: глобальный граф",()=>{
+      globalGraph=true;focusId=null;route=null;routeStart=null;routeEnd=null;rebuild();
+    });
+    option("Только текущая папка",()=>{
+      globalGraph=false;focusId=null;route=null;routeStart=null;routeEnd=null;rebuild();
+    });
+    const hit=pointerHit(event.clientX,event.clientY);
+    if(hit){selected=hit.id;hovered=hit.id;}
+    if(hit){
+      option("Фокус на этом узле",()=>focusOnNode(hit.id));
+      if(hit.kind==="file"){
+        option("Начать путь от этого файла",()=>startRoute(hit.id));
+        if(routeStart&&routeStart!==hit.id)
+          option("Показать путь от выбранного файла",()=>finishRoute(hit.id));
+      }
+    }
+    if(focusId)option("Сбросить фокус",()=>focusOnNode(null));
+    if(routeStart)option("Очистить маршрут",()=>{
+      routeStart=null;routeEnd=null;route=null;canvas.dataset.route="";draw();
+    });
     option("Развернуть / свернуть",()=>setExpanded(!expanded));
     const rect=frame.getBoundingClientRect();
-    context.style.left=clamp(event.clientX-rect.left,3,Math.max(3,rect.width-205))+"px";
-    context.style.top=clamp(event.clientY-rect.top,3,Math.max(3,rect.height-240))+"px";
+    context.style.maxHeight=Math.max(135,rect.height-8)+"px";
     frame.append(context);menu=context;
+    // Keep the complete contextual action list scrollable and accessible
+    // inside small laptop-sized graph areas, never clipped off-screen.
+    const menuHeight=context.getBoundingClientRect().height;
+    context.style.left=clamp(event.clientX-rect.left,3,Math.max(3,rect.width-205))+"px";
+    context.style.top=clamp(event.clientY-rect.top,3,
+      Math.max(3,rect.height-menuHeight-4))+"px";
   }
   async function analyzeDocuments(){
     const gen=++analysisGeneration;
@@ -234,7 +298,7 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
     scene=graphFromCatalog(files,folders,current,{
       depth:detail==="detail"?3:detail==="overview"?Math.min(depth,2):depth,
       limit,perFolder:screen.perFolder,detailLevel:detail,
-      includeTags,includeDuplicates,semantic,viewMode:mode
+      includeTags,includeDuplicates,semantic,viewMode:mode,global:globalGraph
     });
     const currentTime=performance.now();
     const next=new Map<string,GraphPoint>(),entering=new Map<string,number>();
@@ -252,6 +316,15 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
       else if(appearing.has(n.id))entering.set(n.id,appearing.get(n.id)!);
     }
     coords=next;appearing=entering;physicsFrame=0;
+    if(focusId&&!next.has(focusId))focusId=null;
+    if(selected&&!next.has(selected))selected=null;
+    if(routeStart&&routeEnd){
+      route=graphRoute(scene,routeStart,routeEnd);
+      canvas.dataset.route=route?String(route.links.length):"unavailable";
+    }else if(routeStart&&!next.has(routeStart)){
+      routeStart=null;routeEnd=null;route=null;canvas.dataset.route="";
+    }
+    hoverEdge=null;
     // Freeze camera extents for each physics burst. Continual re-fitting
     // during every force tick would produce a nauseating zoom wobble.
     bounds=graphBounds(coords.values());
@@ -264,6 +337,8 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
     canvas.dataset.links=String(scene.links.length);
     canvas.dataset.focus=current;
     canvas.dataset.mode=mode;
+    canvas.dataset.scope=globalGraph?"global":"folder";
+    canvas.dataset.focusNode=focusId||"";
     schedule();
   }
   // Rich glow and grouping are painted INSIDE the Canvas: never DOM cards.
@@ -299,6 +374,9 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
       ctx.fillStyle=grad;ctx.beginPath();ctx.arc(x,y,radius,0,Math.PI*2);ctx.fill();
     }
     const active=hovered||selected;
+    const routeNodes=route?new Set(route.nodes):null;
+    const routeEdges=route?new Set(route.links):null;
+    const focusNodes=focusId?graphNeighbors(scene,focusId,2):null;
     const neighbor=new Set<string>(active?[active]:[]);
     if(active)for(const e of scene.links){
       if(e.source===active)neighbor.add(e.target);
@@ -320,19 +398,25 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
       const sx=cx+p.x*scale,sy=cy+p.y*scale;
       const tx=cx+q.x*scale,ty=cy+q.y*scale;
       if((sx<0&&tx<0)||(sx>w&&tx>w)||(sy<0&&ty<0)||(sy>h&&ty>h))continue;
-      const highlighted=!!active&&(e.source===active||e.target===active);
+      const onRoute=routeEdges?.has(e)||false;
+      const onFocus=focusNodes?focusNodes.has(e.source)&&focusNodes.has(e.target):false;
+      const highlighted=onRoute||e===hoverEdge||
+        !!active&&(e.source===active||e.target===active);
       const partOfPath=rootPath.has(e.source+"|"+e.target);
-      const fade=!!active&&!highlighted&&!partOfPath;
+      const fade=routeNodes?!onRoute:
+        focusNodes?!onFocus:
+        !!active&&!highlighted&&!partOfPath;
       const rgb=relationColors[e.kind]||relationColors.contains;
       const activePulse=highlighted&&!reduced()?
         .08*Math.sin(now/230):0;
-      const opacity=fade?.055:highlighted?.82+activePulse:partOfPath?.69:
-        e.kind==="contains"?.18:.31;
+      const opacity=fade?.048:onRoute?.97:highlighted?.82+activePulse:
+        partOfPath?.69:e.kind==="contains"?.18:.31;
       const strength=clamp(e.weight??1,.25,1.6);
       ctx.save();
       ctx.beginPath();ctx.moveTo(sx,sy);ctx.lineTo(tx,ty);
       ctx.strokeStyle="rgba("+rgb+","+opacity+")";
-      ctx.lineWidth=((highlighted?1.25:.45)+strength*(highlighted?1.1:.5))*lineScale;
+      ctx.lineWidth=((onRoute?2.3:highlighted?1.25:.45)+
+        strength*(highlighted?1.1:.5))*lineScale;
       if(e.kind==="lexical"||e.kind==="entity")ctx.setLineDash([3.2,5.1]);
       if(highlighted||partOfPath){
         ctx.shadowColor="rgba("+rgb+",.75)";
@@ -353,7 +437,9 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
       const x=cx+p.x*scale,y=cy+p.y*scale;
       if(x<-20||x>w+20||y<-20||y>h+20)continue;
       const isActive=n.id===active;
-      const dim=!!active&&!neighbor.has(n.id);
+      const dim=routeNodes?!routeNodes.has(n.id):
+        focusNodes?!focusNodes.has(n.id):
+        !!active&&!neighbor.has(n.id);
       const entered=appearing.get(n.id);
       const shown=entered===undefined||reduced()?1:clamp((now-entered)/350,0,1);
       const importance=n.id===scene.focus?6.3:
@@ -374,7 +460,7 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
       }
       ctx.globalAlpha=(dim?.19:1)*shown;
       ctx.fillStyle=tint(n);ctx.beginPath();ctx.arc(x,y,radius,0,Math.PI*2);
-      if(isActive||n.id===scene.focus){
+      if(isActive||n.id===scene.focus||routeNodes?.has(n.id)){
         ctx.shadowBlur=isActive?16:7;ctx.shadowColor=tint(n);
       }
       ctx.fill();ctx.shadowBlur=0;ctx.globalAlpha=1;
@@ -394,6 +480,49 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
       ctx.fillStyle="rgba(8,10,16,.80)";
       ctx.beginPath();ctx.roundRect(px,py,tw+pad*2,23,7);ctx.fill();
       ctx.fillStyle="#e9dcc8";ctx.fillText(text,px+pad,py+15);
+    }
+    // The chosen path is temporarily legible on the Canvas itself: never a
+    // duplicate document list or a persistent overlay panel.
+    if(route&&route.nodes.length>1){
+      const count=Math.min(route.nodes.length,9);
+      for(const id of route.nodes.slice(0,count)){
+        const n=scene.nodes.find(node=>node.id===id),p=coords.get(id);
+        if(!n||!p||n.id===active)continue;
+        const x=cx+p.x*scale,y=cy+p.y*scale;
+        if(x<12||x>w-12||y<12||y>h-12)continue;
+        const name=n.name.length>26?n.name.slice(0,25)+"…":n.name;
+        ctx.font="500 "+Math.round(Math.max(10,labelSize-1))+"px system-ui,sans-serif";
+        ctx.fillStyle="rgba(236,215,181,.87)";
+        ctx.fillText(name,clamp(x+8,6,w-160),clamp(y-7,12,h-8));
+      }
+    }
+    // Evidence appears ONLY while hovering the actual line. The explanation
+    // always says what was observed, never infers personal acquaintance.
+    if(hoverEdge&&!hovered){
+      const raw=graphEdgeExplanation(hoverEdge,scene.nodes);
+      const message=raw.length>170?raw.slice(0,169)+"…":raw;
+      const maxWidth=Math.max(110,Math.min(360,w-24));
+      ctx.font="500 "+Math.round(Math.max(10,labelSize-1))+"px system-ui,sans-serif";
+      const words=message.split(/\s+/),lines:string[]=[];
+      let current="";
+      for(const word of words){
+        const joined=current?current+" "+word:word;
+        if(ctx.measureText(joined).width>maxWidth-20&&current){
+          lines.push(current);current=word;
+          if(lines.length===3)break;
+        }else current=joined;
+      }
+      if(current&&lines.length<3)lines.push(current);
+      const boxWidth=Math.min(maxWidth,Math.max(110,
+        ...lines.map(line=>ctx.measureText(line).width+20)));
+      const boxHeight=lines.length*17+12;
+      const x=clamp(hoverX+11,4,Math.max(4,w-boxWidth-4));
+      const y=clamp(hoverY+11,4,Math.max(4,h-boxHeight-4));
+      ctx.fillStyle="rgba(9,11,17,.94)";
+      ctx.beginPath();ctx.roundRect(x,y,boxWidth,boxHeight,8);ctx.fill();
+      ctx.strokeStyle="rgba(214,174,111,.44)";ctx.lineWidth=.7;ctx.stroke();
+      ctx.fillStyle="#f0ddc2";
+      for(let i=0;i<lines.length;i++)ctx.fillText(lines[i]!,x+10,y+19+i*17);
     }
     if(analysisBusy){
       const x=w-16,y=16;
@@ -438,7 +567,7 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
   // graph. No perpetual idle animation and no extra Canvas/DOM.
   function highlightPulse(){
     clearTimeout(highlightTimer);
-    if(!pointerInsideGraph||!hovered||reduced()||
+    if(!pointerInsideGraph||(!hovered&&!hoverEdge)||reduced()||
       document.visibilityState!=="visible"||!root.isConnected)return;
     highlightTimer=window.setTimeout(()=>{
       repaint();highlightPulse();
@@ -462,8 +591,13 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
     if(!pointerDown){
       const hit=pointerHit(e.clientX,e.clientY);
       const next=hit?.id||null;
-      if(next!==hovered){
-        hovered=next;canvas.style.cursor=next?"pointer":"grab";
+      const rect=canvas.getBoundingClientRect();
+      hoverX=e.clientX-rect.left;hoverY=e.clientY-rect.top;
+      const camera=viewport();
+      const line=hit?null:graphEdgeAt(scene,coords,camera,hoverX,hoverY,8);
+      if(next!==hovered||line!==hoverEdge){
+        hovered=next;hoverEdge=line;
+        canvas.style.cursor=next?"pointer":line?"help":"grab";
         repaint();highlightPulse();
       }
       return;
@@ -493,9 +627,13 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
     if(wasMoved){persist();return;}
     if(hit){
       const n=scene.nodes.find(n=>n.id===hit);
-      if(n){focus(n);activate(n);}
+      if(n){
+        if(e.shiftKey&&routeStart&&n.kind==="file")finishRoute(n.id);
+        else if(e.altKey&&n.kind==="file")startRoute(n.id);
+        else {focus(n);activate(n);}
+      }
     }else{
-      selected=null;hovered=null;draw();
+      selected=null;hovered=null;hoverEdge=null;draw();
       if(e.pointerType==="touch"){
         const now=Date.now();
         if(now-lastTap<370)setExpanded(!expanded);
@@ -508,7 +646,7 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
   });
   canvas.addEventListener("pointerleave",()=>{
     pointerInsideGraph=false;clearTimeout(highlightTimer);
-    if(!pointerDown){hovered=null;draw();}
+    if(!pointerDown){hovered=null;hoverEdge=null;draw();}
   });
   canvas.addEventListener("dblclick",e=>{
     if(!pointerHit(e.clientX,e.clientY))setExpanded(!expanded);
@@ -553,6 +691,15 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
       setExpanded(!expanded);e.preventDefault();
     }else if(e.key==="Backspace"||e.key==="ArrowUp"&&e.altKey){
       if(current)actions.openFolder(parentOf(current));e.preventDefault();
+    }else if(e.key.toLowerCase()==="g"){
+      globalGraph=!globalGraph;focusId=null;route=null;routeStart=null;routeEnd=null;
+      rebuild();e.preventDefault();
+    }else if(e.key.toLowerCase()==="f"){
+      focusOnNode(focusId?null:selected);e.preventDefault();
+    }else if(e.key.toLowerCase()==="p"){
+      if(routeStart&&selected&&selected!==routeStart)finishRoute(selected);
+      else startRoute(selected);
+      e.preventDefault();
     }else if(e.key.toLowerCase()==="a"){
       void analyzeDocuments();e.preventDefault();
     }else if(e.key.toLowerCase()==="m"){
@@ -586,7 +733,9 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
     }
     files=newFiles;folders=newFolders;
     if(folder!==current){
-      current=folder;selected=null;hovered=null;panX=0;panY=0;
+      current=folder;
+      if(!globalGraph){selected=null;panX=0;panY=0;focusId=null;}
+      hovered=null;hoverEdge=null;
       clearTimeout(highlightTimer);
     }
     rebuild();

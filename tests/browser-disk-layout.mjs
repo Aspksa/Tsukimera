@@ -198,6 +198,29 @@ try{
   assert.equal(graphOnly.background,"rgba(0, 0, 0, 0)","Graph stage should be transparent");
   assert.equal(graphOnly.clutter,false,"All static controls, panels and legends must be absent");
 
+  // Disk 17: the entire Disk is the default graph scope; no permanent UI
+  // appears when a user toggles scope or focuses a selected real node.
+  assert.equal(await evaluate("document.querySelector('.dk-graph-canvas')?.dataset.scope"),
+    "global","Graph should cover the whole Disk by default");
+  await evaluate("document.querySelector('.dk-graph-canvas').dispatchEvent(new KeyboardEvent('keydown',{key:'g',bubbles:true,cancelable:true}))");
+  await pause(90);
+  assert.equal(await evaluate("document.querySelector('.dk-graph-canvas')?.dataset.scope"),
+    "folder","G should restrict the view to the real current folder");
+  await evaluate("document.querySelector('.dk-graph-canvas').dispatchEvent(new KeyboardEvent('keydown',{key:'g',bubbles:true,cancelable:true}))");
+  await pause(90);
+  assert.equal(await evaluate("document.querySelector('.dk-graph-canvas')?.dataset.scope"),
+    "global","G should restore the full Disk graph");
+  await evaluate("document.querySelector('.dk-graph-canvas').dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowRight',bubbles:true,cancelable:true}))");
+  await evaluate("document.querySelector('.dk-graph-canvas').dispatchEvent(new KeyboardEvent('keydown',{key:'f',bubbles:true,cancelable:true}))");
+  await pause(100);
+  const focusedGraph=await evaluate("(()=>({selected:document.querySelector('.dk-graph-canvas')?.dataset.selected,focus:document.querySelector('.dk-graph-canvas')?.dataset.focusNode,children:document.querySelector('.dk-graph-only')?.children.length}))()");
+  assert.ok(focusedGraph.focus&&focusedGraph.selected===focusedGraph.focus&&focusedGraph.children===1,
+    "F should focus the selected real graph node without panels: "+JSON.stringify(focusedGraph));
+  await evaluate("document.querySelector('.dk-graph-canvas').dispatchEvent(new KeyboardEvent('keydown',{key:'f',bubbles:true,cancelable:true}))");
+  assert.equal(await evaluate("document.querySelector('.dk-graph-canvas')?.dataset.focusNode"),"",
+    "Repeating F should leave document focus without another widget");
+
+
   // Disk 16: real layout tests across laptop, 4K and 21:9 workspaces.
   // CDP changes monitor resolution; graph adapts without remounting itself.
   await device(1366,768);

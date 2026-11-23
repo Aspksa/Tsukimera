@@ -526,3 +526,133 @@ test("Disk 16 screen policy and resize support do not add graph UI chrome",async
  assert.ok(graphOnly.includes("dk-graph-only"));
  assert.ok(!graphOnly.includes("dk-graph-head"),"No permanent graph toolbar");
 });
+
+
+test("Disk 17 global graph includes distant real folder branches while local scope stays intact",async()=>{
+ const built=await prepareDisk(root);
+ const m=await import(pathToFileURL(join(built.outputRoot,"web/pages/disk-map-graph.js")).href);
+ const data=[
+  {id:"1",name:"Договор.docx",folder:"Работа/Проекты/Объект А",size:100,sha256:"",tags:[]},
+  {id:"2",name:"Счёт.pdf",folder:"Бухгалтерия/2026",size:200,sha256:"",tags:[]},
+  {id:"3",name:"Заявка.txt",folder:"Архив/Старые/Проекты",size:300,sha256:"",tags:[]},
+  {id:"4",name:"Акт.docx",folder:"Работа",size:400,sha256:"",tags:[]}
+ ];
+ const folders=["Работа/Проекты/Объект А","Бухгалтерия/2026","Архив/Старые/Проекты"];
+ const local=m.graphFromCatalog(data,folders,"Работа",{depth:2,limit:120});
+ assert.ok(!local.nodes.some(n=>n.id==="file:2"));
+ assert.ok(!local.nodes.some(n=>n.id==="file:3"));
+ const global=m.graphFromCatalog(data,folders,"Работа",{
+  global:true,depth:1,limit:120,perFolder:25
+ });
+ assert.equal(global.focus,"folder:","Global root should be a real Disk root");
+ assert.ok(global.nodes.some(n=>n.id==="file:1"),"Global graph must reach deeply nested files");
+ assert.ok(global.nodes.some(n=>n.id==="file:2"),"Global graph must include бухгалтерия");
+ assert.ok(global.nodes.some(n=>n.id==="file:3"),"Global graph must include remote archive");
+ assert.ok(global.nodes.some(n=>n.id==="folder:Работа/Проекты/Объект А"));
+ assert.ok(global.links.some(e=>e.source==="folder:Архив/Старые/Проекты"&&
+  e.target==="file:3"&&e.kind==="contains"));
+ assert.ok(global.nodes.length<=120);
+ assert.ok(global.links.every(e=>global.nodes.some(n=>n.id===e.source)&&
+  global.nodes.some(n=>n.id===e.target)));
+ const huge=Array.from({length:4000},(_,i)=>({
+  id:"large-"+i,name:"Файл"+i+".txt",folder:"Группа"+(i%80)+"/Год2026",size:i,
+  sha256:"",tags:[]
+ }));
+ const bounded=m.graphFromCatalog(huge,[], "",{global:true,depth:3,limit:96,perFolder:6});
+ assert.ok(bounded.nodes.length<=96,"Global graph must respect Canvas budget");
+ assert.ok(bounded.hidden>0,"Unrendered real files remain counted");
+});
+
+test("Disk 17 weighted path finds evidence rather than inventing connections",async()=>{
+ const built=await prepareDisk(root);
+ const explore=await import(pathToFileURL(join(built.outputRoot,"web/pages/disk-map-explore.js")).href);
+ const nodes=[
+  {id:"file:a",kind:"file",name:"Договор",folder:"Работа"},
+  {id:"file:b",kind:"file",name:"Акт",folder:"Работа"},
+  {id:"file:c",kind:"file",name:"Счёт",folder:"Архив"},
+  {id:"folder:",kind:"folder",name:"Мой Диск",folder:""},
+  {id:"folder:Работа",kind:"folder",name:"Работа",folder:"Работа"},
+  {id:"folder:Архив",kind:"folder",name:"Архив",folder:"Архив"},
+  {id:"file:isolated",kind:"file",name:"Изолированный",folder:""}
+ ];
+ const edges=[
+  {source:"folder:",target:"folder:Работа",kind:"contains"},
+  {source:"folder:",target:"folder:Архив",kind:"contains"},
+  {source:"folder:Работа",target:"file:a",kind:"contains"},
+  {source:"folder:Работа",target:"file:b",kind:"contains"},
+  {source:"folder:Архив",target:"file:c",kind:"contains"},
+  {source:"file:a",target:"file:b",kind:"reference",weight:.95,evidence:"Ссылка на Акт"},
+  {source:"file:b",target:"file:c",kind:"lexical",weight:.5,evidence:"Общие слова"}
+ ];
+ const scene={nodes,links:edges};
+ const route=explore.graphRoute(scene,"file:a","file:c");
+ assert.deepEqual(route?.nodes,["file:a","file:b","file:c"],
+  "Actual text links should outrank a long path through unrelated folders");
+ assert.equal(route?.links.length,2);
+ assert.equal(route?.links[0].kind,"reference");
+ assert.deepEqual(explore.graphRoute(scene,"file:c","file:a")?.nodes,
+  ["file:c","file:b","file:a"]);
+ assert.equal(explore.graphRoute(scene,"file:a","file:isolated"),null,
+  "No graph path may be invented");
+ assert.equal(explore.graphRoute(scene,"file:a","unknown"),null);
+ assert.deepEqual([...explore.graphNeighbors(scene,"file:a",1)].sort(),
+  ["file:a","file:b","folder:Работа"].sort());
+ assert.match(explore.graphEdgeExplanation(edges[5],nodes),/Ссылка на Акт/);
+ assert.match(explore.graphEdgeExplanation(edges[3],nodes),/Расположение на Диске/);
+ const points=new Map([
+  ["file:a",{x:0,y:0}],["file:b",{x:100,y:0}],["file:c",{x:200,y:0}]
+ ]);
+ const near=explore.graphEdgeAt(scene,points,{cx:0,cy:0,scale:1},50,3);
+ assert.equal(near?.kind,"reference");
+ assert.equal(explore.graphEdgeAt(scene,points,{cx:0,cy:0,scale:1},50,55),null);
+});
+
+test("Disk 17 person graph links only actual co-mentions in one readable document",async()=>{
+ const built=await prepareDisk(root);
+ const sem=await import(pathToFileURL(join(built.outputRoot,"web/pages/disk-map-semantic.js")).href);
+ const m=await import(pathToFileURL(join(built.outputRoot,"web/pages/disk-map-graph.js")).href);
+ const files=[
+  {id:"doc1",name:"Совещание.txt",folder:"Работа",size:70,sha256:"",tags:[]},
+  {id:"doc2",name:"Другое.txt",folder:"Архив",size:90,sha256:"",tags:[]}
+ ];
+ const one=sem.extractDocument(files[0],
+  "Иванов Иван Иванович подписал акт. Петров Петр Петрович ознакомлен.",[]);
+ const two=sem.extractDocument(files[1],
+  "Сидоров Сергей Сергеевич направил другое письмо.",[]);
+ assert.equal(one.people.length,2);
+ const index=sem.semanticFromRecords([one,two]);
+ const pairs=index.links.filter(e=>e.kind==="co_mention");
+ assert.equal(pairs.length,1,"Only one evidenced co-mention pair is expected");
+ assert.ok(pairs[0].evidence.includes("Совещание.txt"));
+ assert.ok(pairs[0].evidence.includes("не установлена"));
+ assert.ok(pairs[0].confidence<.5,"A co-mention must never be treated as verified identity");
+ assert.ok(!pairs.some(e=>e.source.includes("сидоров")||e.target.includes("сидоров")));
+ const graph=m.graphFromCatalog(files,["Работа","Архив"],"",{
+  global:true,semantic:index,viewMode:"entities",limit:120,perFolder:30
+ });
+ assert.ok(graph.nodes.filter(n=>n.kind==="person").length>=2);
+ assert.ok(graph.links.some(e=>e.kind==="co_mention"));
+ assert.ok(graph.links.some(e=>e.kind==="entity"));
+ assert.ok(graph.links.every(e=>e.kind==="co_mention"||e.kind==="entity"));
+ const explanation=(await import(pathToFileURL(join(built.outputRoot,"web/pages/disk-map-explore.js")).href))
+  .graphEdgeExplanation(graph.links.find(e=>e.kind==="co_mention"),graph.nodes);
+ assert.match(explanation,/Совещание/);
+ assert.match(explanation,/не установлена/);
+});
+
+test("Disk 17 keeps the graph chrome-free while exposing global, route and edge evidence gestures",async()=>{
+ const source=await readFile(join(root,"disk-src/web/pages/disk-map-mini.ts"),"utf8");
+ const markup=source.match(/const root=el\("section"[\s\S]*?,frame\);/)?.[0]||"";
+ assert.ok(markup.includes("dk-graph-only"));
+ for(const forbidden of ["dk-graph-head","dk-graph-controls","dk-graph-inspect",
+  "dk-graph-list-panel","dk-graph-count","dk-graph-search"])
+  assert.ok(!markup.includes(forbidden));
+ for(const needle of ["globalGraph=true","global:globalGraph","focusOnNode(",
+  "startRoute(","finishRoute(","graphRoute(scene,routeStart,id)",
+  "graphNeighbors(","graphEdgeAt(","graphEdgeExplanation(",
+  "option(\"Весь Диск: глобальный граф\"",
+  "option(\"Начать путь от этого файла\"",
+  "canvas.dataset.scope=globalGraph?\"global\":\"folder\"",
+  "canvas.dataset.focusNode=focusId||\"\""])
+  assert.ok(source.includes(needle),"Missing Disk 17 gesture: "+needle);
+});

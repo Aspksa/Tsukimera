@@ -2273,6 +2273,7 @@ button.dk-crumb:hover{background:var(--hover);color:var(--fg)}
 .dk-graph-popover{
   position:absolute;z-index:3;
   display:grid;gap:2px;width:min(202px,85%);
+  overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin;
   padding:5px;border:1px solid rgba(214,173,101,.24);
   background:rgba(15,17,23,.97);backdrop-filter:blur(12px);
   border-radius:10px;box-shadow:0 12px 30px rgba(0,0,0,.36);
