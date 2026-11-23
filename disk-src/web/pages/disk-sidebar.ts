@@ -11,7 +11,7 @@ export const SIDEBAR_KEY="tsukimera.disk.sections.v1";
 const set=new Set<string>(SECTION_IDS);
 
 export function sanitizeSidebarPrefs(raw:unknown):SidebarPrefs{
-  const source=raw&&typeof raw==="object"?raw as Partial<SidebarPrefs>:{};
+  const source:Partial<SidebarPrefs>=raw&&typeof raw==="object"?raw as Partial<SidebarPrefs>:{};
   const order=Array.isArray(source.order)?source.order.filter((id):id is SectionId=>typeof id==="string"&&set.has(id)):[];
   const unique=[...new Set(order)];
   for(const id of SECTION_IDS)if(!unique.includes(id))unique.push(id);
