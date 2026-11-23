@@ -20,12 +20,7 @@
 
 /* ---------- three columns: folders as wide as their longest name (250–460 px), files, and on the right
    «Жизнь документов», which gives its place to «Сведения» while a file is open */
-.dk-layout{display:grid;grid-template-columns:fit-content(460px) minmax(0,1fr) 440px;gap:16px;align-items:start}
-.dk-layout.no-tree{grid-template-columns:minmax(0,1fr) 440px}
-.dk-layout.no-tree>.dk-side{display:none}
-.dk-layout>.dkl,.dk-layout>.dk-info{grid-column:-2/-1;grid-row:1}
-.dk-layout.with-info>.dkl{display:none}
-.dk-side{min-width:250px}
+/* Legacy fixed-width 3-pane grid removed; responsive --dk-tree-width / --dk-right-width grid below owns layout. */
 
 /* ---------- folders */
 .dk-side{position:sticky;top:12px;display:flex;flex-direction:column;gap:6px;padding:10px;border:1px solid var(--line);border-radius:var(--r-lg);background:var(--surface);max-height:calc(100vh - 32px);overflow:auto;scrollbar-width:thin}
@@ -1152,4 +1147,251 @@ button.dk-crumb:hover{background:var(--hover);color:var(--fg)}
 }
 @media(max-width:440px){
  .dkx-smart-condition{grid-template-columns:minmax(0,1fr)}
+}
+
+
+/* ==========================================================================
+   Tsukimera Disk 8.0 — one cohesive workspace. No new UI dependencies.
+   These scoped tokens replace conflicting legacy decorations for the Disk only.
+   Existing grid breakpoints, version controls and the full Life data remain.
+   ========================================================================== */
+.disk-page.dk-experience-v8{
+  --dk8-hairline:color-mix(in srgb,var(--fg) 9%,transparent);
+  --dk8-hover:color-mix(in srgb,var(--brand) 7%,var(--surface));
+  --dk8-gold-line:color-mix(in srgb,var(--brand) 29%,transparent);
+  --dk8-ease:cubic-bezier(.22,1,.36,1);
+  color:var(--fg);
+  background:transparent;
+  min-width:0;
+  gap:12px;
+}
+.disk-page.dk-experience-v8 .dk-bar{
+  gap:10px;
+  padding:9px 2px 13px;
+  border-bottom:1px solid var(--dk8-hairline);
+  align-items:center;
+}
+.disk-page.dk-experience-v8 .dk-search{
+  border:1px solid var(--dk8-hairline);
+  border-radius:12px;
+  background:color-mix(in srgb,var(--bg) 80%,var(--surface));
+  transition:border-color .18s ease,background .18s ease;
+  box-shadow:none;
+}
+.disk-page.dk-experience-v8 .dk-search:focus-within{
+  border-color:var(--dk8-gold-line);
+  background:var(--surface);
+  box-shadow:0 0 0 3px color-mix(in srgb,var(--brand) 6%,transparent);
+}
+.disk-page.dk-experience-v8 .dk-bar-actions{gap:7px}
+.disk-page.dk-experience-v8 .dk-bar-actions .btn,
+.disk-page.dk-experience-v8 .dk-more-btn{
+  border-radius:10px;min-height:40px;
+  transition:background .18s ease,border-color .18s ease,color .18s ease;
+}
+.disk-page.dk-experience-v8 .dk-focus-btn{
+  display:inline-flex;align-items:center;justify-content:center;gap:7px;
+  background:transparent;border:1px solid var(--dk8-hairline);
+  color:var(--muted);font-weight:550;white-space:nowrap;
+}
+.disk-page.dk-experience-v8 .dk-focus-btn:hover,
+.disk-page.dk-experience-v8 .dk-focus-btn[aria-pressed=true]{
+  color:var(--brand);border-color:var(--dk8-gold-line);background:var(--dk8-hover);
+}
+.disk-page.dk-experience-v8 .dk-layout,
+.disk-page.dk-experience-v8 .dk-layout.no-tree{
+  background:transparent;
+  transition:grid-template-columns .2s var(--dk8-ease);
+}
+.disk-page.dk-experience-v8 .dk-layout > .dk-side,
+.disk-page.dk-experience-v8 .dk-layout > .dk-main,
+.disk-page.dk-experience-v8 .dk-layout > .dkl{
+  background:transparent;box-shadow:none;border-radius:0;
+}
+.disk-page.dk-experience-v8 .dk-layout > .dk-side{border:0;padding-right:11px}
+.disk-page.dk-experience-v8 .dk-layout > .dk-main{padding-inline:16px}
+.disk-page.dk-experience-v8 .dk-layout > .dkl{padding-left:16px}
+.disk-page.dk-experience-v8 .dk-layout > .dk-info{
+  border:0;border-radius:0;box-shadow:none;
+  padding:12px 10px 12px 16px;
+  background:transparent;
+  border-left:1px solid var(--dk8-hairline);
+}
+.disk-page.dk-experience-v8 .dk-resize-handle > span{
+  background:var(--dk8-hairline);
+}
+.disk-page.dk-experience-v8 .dk-head{
+  position:sticky;
+  top:0;
+  z-index:28;
+  min-width:0;
+  padding:11px 9px;
+  border-bottom:1px solid var(--dk8-hairline);
+  border-radius:10px;
+  background:color-mix(in srgb,var(--bg) 94%,var(--surface));
+  backdrop-filter:blur(9px);
+}
+.disk-page.dk-experience-v8 .dk-crumbs{min-width:0;overflow-x:auto;scrollbar-width:thin}
+.disk-page.dk-experience-v8 .dk-crumb{white-space:nowrap}
+.disk-page.dk-experience-v8 .dk-file{
+  border:1px solid var(--dk8-hairline);
+  background:color-mix(in srgb,var(--surface) 73%,var(--bg));
+  border-radius:11px;
+  box-shadow:none;
+  transition:border-color .18s ease,background .18s ease,transform .22s var(--dk8-ease),box-shadow .22s ease;
+}
+.disk-page.dk-experience-v8 .dk-file:hover{
+  transform:translateY(-1px);
+  border-color:var(--dk8-gold-line);
+  background:var(--dk8-hover);
+  box-shadow:0 10px 22px -22px color-mix(in srgb,var(--brand) 45%,#000);
+}
+.disk-page.dk-experience-v8 .dk-file.picked{
+  border-color:color-mix(in srgb,var(--brand) 63%,transparent);
+  background:color-mix(in srgb,var(--brand) 11%,var(--surface));
+}
+.disk-page.dk-experience-v8 .dk-file:focus-visible,
+.disk-page.dk-experience-v8 .dk-focus-btn:focus-visible,
+.disk-page.dk-experience-v8 .dk-head button:focus-visible,
+.disk-page.dk-experience-v8 .dk-node-label:focus-visible{
+  outline:2px solid var(--brand);outline-offset:2px;
+}
+.disk-page.dk-experience-v8 .dk-file-labels{display:flex;align-items:center;gap:5px;min-width:0}
+.disk-page.dk-experience-v8 .dk-kind-label,
+.disk-page.dk-experience-v8 .dk-revision-label{
+  display:inline-block;max-width:100%;padding:2px 6px;line-height:1.35;
+  background:color-mix(in srgb,var(--k) 9%,transparent);
+  border:1px solid color-mix(in srgb,var(--k) 22%,transparent);
+  color:var(--muted);border-radius:6px;font-size:10px;
+  font-weight:700;letter-spacing:.065em;text-transform:uppercase;
+}
+.disk-page.dk-experience-v8 .dk-revision-label{
+  color:var(--brand);background:color-mix(in srgb,var(--brand) 6%,transparent);
+  border-color:var(--dk8-gold-line);text-transform:none;letter-spacing:0;
+}
+.disk-page.dk-experience-v8 .dk-meta{min-width:0}
+.disk-page.dk-experience-v8 .dk-name{min-width:0;font-weight:620;letter-spacing:-.01em}
+.disk-page.dk-experience-v8 .dk-file-sub{color:var(--muted)}
+.disk-page.dk-experience-v8 .mode-table .dk-file-labels,
+.disk-page.dk-experience-v8 .mode-list .dk-file-labels{display:none}
+.disk-page.dk-experience-v8 .mode-list .dk-file,
+.disk-page.dk-experience-v8 .mode-table .dk-file{
+  transform:none;border-radius:3px;
+}
+.disk-page.dk-experience-v8 .mode-table .dk-file{
+  background:transparent;border:0;border-bottom:1px solid var(--dk8-hairline);
+}
+.disk-page.dk-experience-v8 .dk-node.current,
+.disk-page.dk-experience-v8 .dk-section.current{
+  background:color-mix(in srgb,var(--brand) 8%,transparent);
+  border-radius:8px;
+}
+.disk-page.dk-experience-v8 .dk-node.drop,
+.disk-page.dk-experience-v8 .dk-section.drop{
+  background:color-mix(in srgb,var(--brand) 13%,var(--surface));
+  outline:2px dashed var(--brand);outline-offset:-2px;
+}
+.disk-page.dk-experience-v8 .dk-move-hint{
+  position:fixed;bottom:22px;left:50%;transform:translateX(-50%);
+  z-index:118;pointer-events:none;max-width:min(440px,90vw);
+  padding:12px 18px;border-radius:12px;
+  background:color-mix(in srgb,var(--brand) 13%,#101013);
+  color:#f9e9c9;border:1px solid var(--dk8-gold-line);
+  box-shadow:0 14px 38px #0008;font-size:var(--fs-sm);
+  text-align:center;line-height:1.5;
+}
+.disk-page.dk-experience-v8 .dk-move-hint[hidden]{display:none}
+.disk-page.dk-experience-v8 .dk-dropzone{
+  background:color-mix(in srgb,var(--brand) 6%,var(--bg));
+  border:1px dashed var(--dk8-gold-line);
+}
+.disk-page.dk-experience-v8 .dkl-compact{
+  gap:11px;
+}
+.disk-page.dk-experience-v8 .dkl-compact .dkl-areas,
+.disk-page.dk-experience-v8 .dkl-compact .dkl-tabs,
+.disk-page.dk-experience-v8 .dkl-compact .dkl-group-head,
+.disk-page.dk-experience-v8 .dkl-compact .dkl-grid{display:none}
+.disk-page.dk-experience-v8 .dkl-compact .dkl-hl{gap:7px}
+.disk-page.dk-experience-v8 .dkl-compact .dkl-hl-card{
+  min-height:84px;border-radius:10px;
+  border:1px solid var(--dk8-hairline);
+  background:color-mix(in srgb,var(--surface) 78%,var(--bg));
+  transition:border-color .18s ease,background .18s ease,transform .2s var(--dk8-ease);
+}
+.disk-page.dk-experience-v8 .dkl-compact .dkl-hl-card:hover{
+  border-color:var(--dk8-gold-line);
+  background:var(--dk8-hover);
+  transform:translateY(-1px);
+}
+.disk-page.dk-experience-v8 .dkl-compact .dkl-show-all{
+  width:100%;margin-top:8px;border-radius:9px;
+  border-color:var(--dk8-gold-line);background:transparent;
+}
+.disk-page.dk-experience-v8 .dkl-all-toggle{
+  cursor:pointer;border:1px solid var(--dk8-hairline);
+  border-radius:8px;background:transparent;color:var(--muted);
+  padding:7px 10px;font:inherit;font-size:var(--fs-xs);
+}
+.disk-page.dk-experience-v8 .dkl-all-toggle:hover,
+.disk-page.dk-experience-v8 .dkl-all-toggle[aria-pressed=true]{
+  color:var(--brand);border-color:var(--dk8-gold-line);background:var(--dk8-hover);
+}
+.disk-page.dk-experience-v8 .dkl-all-toggle[hidden]{display:none}
+.disk-page.dk-experience-v8 .dkl-expanded .dkl-hl-card,
+.disk-page.dk-experience-v8 .dkl-expanded .dkl-tile{
+  border:1px solid var(--dk8-hairline);border-radius:11px;
+  background:color-mix(in srgb,var(--surface) 82%,var(--bg));
+}
+.disk-page.dk-experience-v8.dk-focus .dk-layout,
+.disk-page.dk-experience-v8.dk-focus .dk-layout.no-tree{
+  display:grid;grid-template-columns:minmax(0,1fr)!important;gap:0;
+}
+.disk-page.dk-experience-v8.dk-focus .dk-layout > .dk-side,
+.disk-page.dk-experience-v8.dk-focus .dk-layout > .dkl,
+.disk-page.dk-experience-v8.dk-focus .dk-layout > .dk-info,
+.disk-page.dk-experience-v8.dk-focus .dk-layout > .dk-resize-handle{
+  display:none!important;
+}
+.disk-page.dk-experience-v8.dk-focus .dk-layout > .dk-main{
+  display:flex;grid-column:1;grid-row:1;width:100%;
+  padding:5px 0;min-width:0;
+}
+.dkx-live-map .dkx-map-open{min-width:115px;border-color:color-mix(in srgb,var(--brand) 35%,transparent)}
+.dkx-live-map .dkx-map-open:disabled{opacity:.42;cursor:not-allowed}
+.dkx-live-map .dkx-map-frame{border-color:color-mix(in srgb,var(--brand) 28%,transparent)}
+.dkx-live-map .dkx-map-search:focus-visible,
+.dkx-live-map .dkx-map-open:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
+@container diskspace (max-width:1180px){
+  .disk-page.dk-experience-v8 .dk-layout > .dk-info{
+    position:fixed;inset:0 0 0 auto;width:min(390px,92vw);max-height:none;
+    z-index:96;padding:16px;box-shadow:-20px 0 45px -24px #0008;
+    border-radius:12px 0 0 12px;
+    background:var(--surface);
+  }
+  .disk-page.dk-experience-v8 .dk-layout > .dkl{
+    border-top:1px solid var(--dk8-hairline);padding:18px 0 0;
+  }
+}
+@container diskspace (max-width:760px){
+  .disk-page.dk-experience-v8 .dk-layout > .dk-main{padding:4px 0}
+  .disk-page.dk-experience-v8 .dk-head{top:0;padding:9px 4px;backdrop-filter:none}
+  .disk-page.dk-experience-v8 .dk-bar{gap:6px}
+  .disk-page.dk-experience-v8 .dk-focus-btn{min-width:40px;width:40px;padding:6px}
+  .disk-page.dk-experience-v8 .dk-focus-btn span{display:none}
+  .disk-page.dk-experience-v8 .dk-layout > .dk-side{
+    padding:12px;background:var(--surface);
+    border-radius:0 12px 12px 0;
+    border-right:1px solid var(--dk8-hairline);
+  }
+  .disk-page.dk-experience-v8 .dk-move-hint{bottom:78px}
+}
+@media(prefers-reduced-motion:reduce){
+  .disk-page.dk-experience-v8 .dk-file,
+  .disk-page.dk-experience-v8 .dk-focus-btn,
+  .disk-page.dk-experience-v8 .dk-search,
+  .disk-page.dk-experience-v8 .dkl-hl-card,
+  .disk-page.dk-experience-v8 .dk-layout{animation:none!important;transition:none!important}
+  .disk-page.dk-experience-v8 .dk-file:hover,
+  .disk-page.dk-experience-v8 .dkl-hl-card:hover{transform:none!important}
 }
