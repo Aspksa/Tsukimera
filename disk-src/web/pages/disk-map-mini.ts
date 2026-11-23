@@ -255,9 +255,14 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
     });
     option("Развернуть / свернуть",()=>setExpanded(!expanded));
     const rect=frame.getBoundingClientRect();
-    context.style.left=clamp(event.clientX-rect.left,3,Math.max(3,rect.width-205))+"px";
-    context.style.top=clamp(event.clientY-rect.top,3,Math.max(3,rect.height-240))+"px";
+    context.style.maxHeight=Math.max(135,rect.height-8)+"px";
     frame.append(context);menu=context;
+    // Keep the complete contextual action list scrollable and accessible
+    // inside small laptop-sized graph areas, never clipped off-screen.
+    const menuHeight=context.getBoundingClientRect().height;
+    context.style.left=clamp(event.clientX-rect.left,3,Math.max(3,rect.width-205))+"px";
+    context.style.top=clamp(event.clientY-rect.top,3,
+      Math.max(3,rect.height-menuHeight-4))+"px";
   }
   async function analyzeDocuments(){
     const gen=++analysisGeneration;
