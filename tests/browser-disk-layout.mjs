@@ -131,12 +131,16 @@ try{
   assert.ok(mobile.scrollWidth<=mobile.width+3,"Unexpected horizontal scroll: "+JSON.stringify(mobile));
   assert.equal(mobile.sidePosition,"fixed","Folders should become a mobile drawer");
 
-  const mobileFlow=await evaluate("(()=>{const map=document.querySelector('.disk-page > .dk-mini-map'),heading=document.querySelector('.disk-page > .dk-files-section-head'),layout=document.querySelector('.disk-page > .dk-layout'),frame=map.querySelector('.dk-mini-map-frame');return {width:map.getBoundingClientRect().width,body:document.querySelector('.disk-page').getBoundingClientRect().width,frameHeight:frame.getBoundingClientRect().height,above:map.getBoundingClientRect().bottom<layout.getBoundingClientRect().top,heading:heading.getBoundingClientRect().top}})()");
-  assert.ok(mobileFlow.width>300&&mobileFlow.width<=mobileFlow.body+3&&mobileFlow.above,
-    "Mobile must show map before file explorer, without horizontal overflow: "+JSON.stringify(mobileFlow));
-  assert.ok(mobileFlow.frameHeight>=180&&mobileFlow.frameHeight<=320,
-    "Mobile map should be touch friendly and not consume the whole screen: "+JSON.stringify(mobileFlow));
-
+  // Disk 12: mobile files remain immediately visible; the map lives INSIDE
+  // the folders drawer, directly below the hierarchy, not above documents.
+  await evaluate("document.querySelector('.dk-drawer-btn').click()");
+  await pause(260);
+  const mobileFlow=await evaluate("(()=>{const side=document.querySelector('.dk-side'),tree=side.querySelector('.dk-tree-panel'),map=side.querySelector('.dk-omni-explorer'),frame=map?.querySelector('.dk-mini-map-frame');return {mapInside:!!map,topMap:!!document.querySelector('.disk-page > .dk-mini-map'),mapWidth:map?.getBoundingClientRect().width,sideWidth:side.getBoundingClientRect().width,below:map.getBoundingClientRect().top>=tree.getBoundingClientRect().top,frameHeight:frame?.getBoundingClientRect().height,drawer:document.querySelector('.disk-page').classList.contains('drawer-open')}})()");
+  assert.ok(mobileFlow.mapInside&&!mobileFlow.topMap&&mobileFlow.drawer&&mobileFlow.below,
+    "Mobile map must be accessible from the folder drawer: "+JSON.stringify(mobileFlow));
+  assert.ok(mobileFlow.mapWidth<=mobileFlow.sideWidth+3&&mobileFlow.frameHeight>=250&&mobileFlow.frameHeight<=320,
+    "Compact mobile map should fit the folder drawer: "+JSON.stringify(mobileFlow));
+  await evaluate("document.querySelector('.dk-side-close').click()");
 
   // Disk 8.0: reversible Focus mode, sticky path, real file cards and no
   // overwriting of the panel widths explicitly chosen by the user.
@@ -149,8 +153,8 @@ try{
   await pause(200);
   const focused=await evaluate("(()=>({enabled:document.querySelector('.disk-page').classList.contains('dk-focus'),button:document.querySelector('.dk-focus-btn').getAttribute('aria-pressed'),sidebar:getComputedStyle(document.querySelector('.dk-side')).display,life:getComputedStyle(document.querySelector('.dkl')).display,main:document.querySelector('.dk-main').getBoundingClientRect().width}))()");
   assert.equal(focused.enabled,true);
-  assert.equal(await evaluate("getComputedStyle(document.querySelector('.disk-page > .dk-mini-map')).display"),
-    "none","File-only Focus mode should hide the overview map");
+  assert.equal(await evaluate("document.querySelector('.disk-page > .dk-mini-map')===null"),true,
+    "The old top map must never be mounted");
   assert.equal(focused.button,"true");
   assert.equal(focused.sidebar,"none");
   assert.equal(focused.life,"none");
@@ -164,22 +168,19 @@ try{
 
   // Disk 8.1: new folder hierarchy and section configuration controls must be
   // usable in a real Chrome page and must not mutate the original Disk files.
-  const initialTree=await evaluate("(()=>({actions:document.querySelectorAll('.dk-tree-all').length,hasSidebarSections:!!document.querySelector('.dk-side .dk-sections'),hasMap:!!document.querySelector('.disk-page > .dk-mini-map'),map:document.querySelector('.dk-mini-map-canvas')?.getBoundingClientRect().width}))()");
-  assert.equal(initialTree.actions,2,"Expand/collapse hierarchy controls missing");
-  assert.equal(initialTree.hasSidebarSections,false,"Sections must be removed from the left rail");
-  assert.equal(initialTree.hasMap,true,"Live Canvas map must be shown before the file explorer, outside the folder rail");
-  assert.ok(initialTree.map>160,"Mini map should use available sidebar width: "+JSON.stringify(initialTree));
+  const initialTree=await evaluate("(()=>({actions:document.querySelectorAll('.dk-tree-all').length,hasSidebarSections:!!document.querySelector('.dk-side .dk-sections'),hasMap:!!document.querySelector('.dk-side > .dk-omni-explorer'),map:document.querySelector('.dk-side .dk-mini-map-canvas')?.getBoundingClientRect().width}))()");
+  assert.equal(initialTree.actions,2,"Expand/collapse folder hierarchy controls missing");
+  assert.equal(initialTree.hasSidebarSections,false,"Sections must stay in their separate dialog");
+  assert.equal(initialTree.hasMap,true,"Live Map must be INSIDE the left rail below the folder tree");
+  assert.ok(initialTree.map>160,"Compact map must fit the sidebar: "+JSON.stringify(initialTree));
 
-  // Disk 10.1: main page order is the live Canvas map followed by the file
-  // manager. This is checked both in DOM order and on-screen geometry.
-  const ordering=await evaluate("(()=>{const page=document.querySelector('.disk-page'),map=page.querySelector(':scope > .dk-mini-map'),heading=page.querySelector(':scope > .dk-files-section-head'),layout=page.querySelector(':scope > .dk-layout'),bar=page.querySelector(':scope > .dk-bar'),side=layout.querySelector('.dk-side');return {order:[...page.children].map(n=>n.className||n.tagName),first:bar?.compareDocumentPosition(map)&Node.DOCUMENT_POSITION_FOLLOWING,second:map?.compareDocumentPosition(heading)&Node.DOCUMENT_POSITION_FOLLOWING,third:heading?.compareDocumentPosition(layout)&Node.DOCUMENT_POSITION_FOLLOWING,above:map?.getBoundingClientRect().bottom<=layout?.getBoundingClientRect().top,width:map?.getBoundingClientRect().width,files:layout?.getBoundingClientRect().width,inSide:!!side?.querySelector('.dk-mini-map'),label:heading?.textContent}})()");
-  assert.ok(ordering.first&&ordering.second&&ordering.third&&ordering.above,
-    "Live Map must precede the document manager visually and in DOM: "+JSON.stringify(ordering));
-  assert.ok(ordering.width>900&&ordering.width<=ordering.files+8,
-    "Live Map should span the workspace width: "+JSON.stringify(ordering));
-  assert.equal(ordering.inSide,false,"There must not be a duplicate/narrow map in the folder tree");
-  assert.match(ordering.label,/Диск · файлы и папки/);
-
+  // DOM order and wide-screen position: tree, map, then the rest of the
+  // file manager on the same page. Never render a second map above files.
+  const ordering=await evaluate("(()=>{const page=document.querySelector('.disk-page'),layout=page.querySelector(':scope > .dk-layout'),side=layout.querySelector('.dk-side'),tree=side.querySelector('.dk-tree-panel'),map=side.querySelector(':scope > .dk-omni-explorer'),files=layout.querySelector('.dk-main'),heading=page.querySelector(':scope > .dk-files-section-head');return {onlyOne:page.querySelectorAll('.dk-omni-explorer').length===1,top:!!page.querySelector(':scope > .dk-mini-map'),afterTree:!!(tree.compareDocumentPosition(map)&Node.DOCUMENT_POSITION_FOLLOWING),sideWidth:side.getBoundingClientRect().width,mapWidth:map.getBoundingClientRect().width,sideX:side.getBoundingClientRect().x,filesX:files.getBoundingClientRect().x,hasFilesHeading:!!heading}})()");
+  assert.ok(ordering.onlyOne&&!ordering.top&&ordering.afterTree&&ordering.hasFilesHeading,
+    "One spatial map must follow the hierarchy in the sidebar: "+JSON.stringify(ordering));
+  assert.ok(ordering.mapWidth>150&&ordering.mapWidth<=ordering.sideWidth+3&&ordering.sideX<ordering.filesX,
+    "Live Map should not push file cards below a full-width top panel: "+JSON.stringify(ordering));
 
   // Disk 11: a real focus-centered, accessible spatial workspace, not the
   // former orbit mini-map. Canvas edges and native HTML nodes share one scene.
@@ -188,7 +189,7 @@ try{
   await pause(240);
   const spatial=await evaluate("(()=>({layer:document.querySelector('.dk-mini-map-canvas')?.dataset.layer,nodes:Number(document.querySelector('.dk-mini-map-canvas')?.dataset.nodes),height:document.querySelector('.dk-mini-map-frame')?.getBoundingClientRect().height,focus:document.querySelectorAll('.dk-omni-focus').length,list:document.querySelectorAll('.dk-omni-row').length,search:!!document.querySelector('.dk-omni-search'),back:!!document.querySelector('.dk-omni-nav'),path:!!document.querySelector('.dk-omni-trail')}))()");
   assert.equal(spatial.layer,"spatial","The old orbit map should be replaced entirely");
-  assert.ok(spatial.height>=300&&spatial.focus===1&&spatial.list>0&&spatial.search&&spatial.back&&spatial.path,
+  assert.ok(spatial.height>=250&&spatial.focus===1&&spatial.list>0&&spatial.search&&spatial.back&&spatial.path,
     "Spatial workspace did not render actual folders: "+JSON.stringify(spatial));
   await evaluate("(()=>{const c=document.querySelector('.dk-mini-map-canvas');for(let i=0;i<3;i++)c.dispatchEvent(new WheelEvent('wheel',{bubbles:true,cancelable:true,deltaY:-110}));})()");
   await pause(490);
