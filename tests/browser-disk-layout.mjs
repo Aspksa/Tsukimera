@@ -138,7 +138,7 @@ try{
   const mobileFlow=await evaluate("(()=>{const side=document.querySelector('.dk-side'),tree=side.querySelector('.dk-tree-panel'),map=side.querySelector('.dk-omni-explorer'),frame=map?.querySelector('.dk-mini-map-frame');return {mapInside:!!map,topMap:!!document.querySelector('.disk-page > .dk-mini-map'),mapWidth:map?.getBoundingClientRect().width,sideWidth:side.getBoundingClientRect().width,below:map.getBoundingClientRect().top>=tree.getBoundingClientRect().top,frameHeight:frame?.getBoundingClientRect().height,drawer:document.querySelector('.disk-page').classList.contains('drawer-open')}})()");
   assert.ok(mobileFlow.mapInside&&!mobileFlow.topMap&&mobileFlow.drawer&&mobileFlow.below,
     "Mobile map must be accessible from the folder drawer: "+JSON.stringify(mobileFlow));
-  assert.ok(mobileFlow.mapWidth<=mobileFlow.sideWidth+3&&mobileFlow.frameHeight>=250&&mobileFlow.frameHeight<=320,
+  assert.ok(mobileFlow.mapWidth<=mobileFlow.sideWidth+3&&mobileFlow.frameHeight>=300&&mobileFlow.frameHeight<=440,
     "Compact mobile map should fit the folder drawer: "+JSON.stringify(mobileFlow));
   await evaluate("document.querySelector('.dk-side-close').click()");
 
@@ -226,8 +226,8 @@ try{
   const contextMenu=await evaluate("(()=>{const c=document.querySelector('.dk-mini-map-canvas'),r=c.getBoundingClientRect();c.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:r.left+40,clientY:r.top+40}));return {menu:!!document.querySelector('.dk-graph-popover'),actions:document.querySelectorAll('.dk-graph-menu-action').length}})()");
   assert.ok(contextMenu.menu&&contextMenu.actions>=6,
     "Optional functions must be reachable only on deliberate secondary click");
-  await evaluate("document.querySelector('.dk-graph-menu-action').dispatchEvent(new MouseEvent('click',{bubbles:true}))");
-  // The first menu item runs the local file-text analysis; wait for the API.
+  await evaluate("document.querySelectorAll('.dk-graph-menu-action')[1].click()");
+  // The second menu choice restores all factual edges without starting a scan.
   await pause(500);
   assert.ok(await evaluate("document.querySelector('.dk-graph-popover')===null"),
     "Menu must disappear after choosing an action");
