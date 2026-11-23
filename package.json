@@ -8,6 +8,6 @@
   },
   "scripts": {
     "start": "node scripts/launch.mjs",
-    "test": "node --test --test-concurrency=1 tests/disk-automation.test.mjs tests/settings-3.test.mjs tests/preferences-visual.test.mjs tests/sqlite.test.mjs tests/smoke.test.mjs tests/disk.test.mjs tests/disk-enhancements.test.mjs tests/disk-ux8.test.mjs tests/disk-layout.test.mjs tests/disk-life.test.mjs"
+    "test": "node --test --test-concurrency=1 tests/disk-automation.test.mjs tests/settings-3.test.mjs tests/preferences-visual.test.mjs tests/sqlite.test.mjs tests/smoke.test.mjs tests/disk.test.mjs tests/disk-enhancements.test.mjs tests/disk-sidebar-map.test.mjs tests/disk-ux8.test.mjs tests/disk-layout.test.mjs tests/disk-life.test.mjs"
   }
 }
