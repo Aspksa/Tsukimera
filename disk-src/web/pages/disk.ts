@@ -1076,8 +1076,10 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
   const collapseAll=iconButton("minimize","Свернуть все папки",()=>{
     expanded.clear();saveOpen();renderTree();
   },"icon-btn sm dk-tree-all");
+  // «Папки» already labels the rail: no duplicate «Иерархия» heading.
+  // Expansion commands remain available with descriptive aria-labels.
   const treeCommands=el("div",{cls:"dk-tree-commands",attrs:{"aria-label":"Управление иерархией"}},
-    el("span",{cls:"dk-tree-commands-title",textContent:"Иерархия"}),expandAll,collapseAll);
+    expandAll,collapseAll);
   const sections = el("div", { cls: "dk-sections", attrs: { role: "list", "aria-label": "Разделы" } });
   const sectionsRegion=el("div",{cls:"dk-sections-region"},sections);
   sectionsRegion.hidden=sidebarPrefs.collapsed;
@@ -1228,6 +1230,7 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
       } else void moveFiles(JSON.parse(ids!) as string[], folder);
     });
   };
+  let justOpenedFolder:string|null=null;
   const renderTree = () => {
     const totals = folderTotals(all);
     const kids = folderChildren(folders);
@@ -1248,13 +1251,21 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
       const toggle = el("button", { type: "button", cls: "dk-node-toggle", tabIndex: -1, attrs: { "aria-label": open ? "Свернуть" : "Развернуть" } }, children.length && folder ? dIcon("chevronRight", 14) : null);
       if (open) toggle.classList.add("open");
       toggle.disabled = !children.length || !folder;
-      toggle.addEventListener("click", () => { if (expanded.has(folder)) expanded.delete(folder); else expanded.add(folder); saveOpen(); renderTree(); });
+      toggle.addEventListener("click", () => {
+        if(expanded.has(folder)){expanded.delete(folder);justOpenedFolder=null;}
+        else{expanded.add(folder);justOpenedFolder=folder;}
+        saveOpen();renderTree();
+      });
       const label = el("button", { type: "button", cls: "dk-node-label disk-tree-select", attrs: { "aria-current": isCur ? "page" : "false", title: folder || "Корень Диска" } },
         st?.cover && all.some((f) => f.id === st.cover) ? el("img", { cls: "dk-cover", alt: "", loading: "lazy", src: diskRawUrl(all.find((f) => f.id === st.cover)!) })
           : el("span", { cls: "dk-node-ic" }, folder ? dIcon(isCur ? "folderOpen" : "folder", 17) : dIcon("disk", 17)),
         el("span", { cls: "dk-node-name", textContent: folder ? folderName(folder) : "Диск" }),
         el("small", { cls: "dk-node-n", textContent: t ? t.count + " · " + human(t.bytes) : "пусто" }));
       if (st?.color && st.color !== "#b89cff") label.style.setProperty("--fc", st.color);
+      label.addEventListener("pointerenter",()=>miniMap.highlightFolder(folder));
+      label.addEventListener("pointerleave",()=>miniMap.highlightFolder(null));
+      label.addEventListener("focus",()=>miniMap.highlightFolder(folder));
+      label.addEventListener("blur",()=>miniMap.highlightFolder(null));
       label.addEventListener("click", () => { go({ folder }); setDrawer(false); });
       label.addEventListener("keydown", (e) => {
         const all2 = [...tree.querySelectorAll<HTMLButtonElement>(".dk-node-label")];
@@ -1285,7 +1296,7 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
       const wrap = el("div", { cls: "dk-branch" }, row);
       wrap.style.setProperty("--branch-line",(20+depth*14)+"px");
       if (open && children.length) {
-        const sub = el("div", { cls: "dk-branch-kids", attrs: { role: "group" } });
+        const sub = el("div", { cls: "dk-branch-kids"+(folder===justOpenedFolder?" dk21-enter":""), attrs: { role: "group" } });
         for (const c of children) { const n = node(c, depth + 1); if (n) sub.append(n); }
         wrap.append(sub);
       }
@@ -1293,6 +1304,7 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
     };
     treeCount.textContent = plural(folders.length, "папка", "папки", "папок");
     tree.replaceChildren(node("", 0) ?? el("span"));
+    justOpenedFolder=null;
     const counts: Record<string, number> = {
       favorites: all.filter((f) => f.favorite).length, trash: trash.length,
       recent: all.filter((f) => matchesVirtual(f, "recent")).length, images: all.filter((f) => matchesVirtual(f, "images")).length,
@@ -1330,9 +1342,10 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
       return b;
     }));
     const rules=readSmartRules();
-    const smartHeader=el("button",{type:"button",cls:"dkx-smart-head"},
-      el("span",{textContent:"Умные папки"}),el("span",{textContent:"+ · изменить"}));
-    smartHeader.addEventListener("click",editSmartFolders);
+    // Edit smart folders from the existing «Ещё > Умные папки» action.
+    // Avoid a second identical edit button inside the categories dialog.
+    const smartHeader=el("div",{cls:"dkx-smart-head"},
+      el("span",{textContent:"Умные папки"}));
     sections.append(smartHeader);
     for(const rule of rules){
       const n=all.filter(f=>matchesSmartRule(f,rule)).length;
