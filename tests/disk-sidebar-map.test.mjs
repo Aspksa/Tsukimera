@@ -81,13 +81,17 @@ test("left rail and map maintain real document data, focus, accessible controls 
 });
 
 
-test("Disk rail swaps Sections for an interactive, bounded source-backed mini Canvas",async()=>{
+test("Disk presents the interactive source-backed Live Map above the full file manager",async()=>{
   const [page,mini,styles]=await Promise.all([
     readFile(join(root,"disk-src/web/pages/disk.ts"),"utf8"),
     readFile(join(root,"disk-src/web/pages/disk-map-mini.ts"),"utf8"),
     readFile(join(root,"web/disk.css"),"utf8"),
   ]);
-  assert.match(page,/treePanel,miniMap\.root\)/);
+  assert.match(page,/const side = el\("aside",[\s\S]*?treePanel\);/);
+  assert.match(page,/bar,miniMap\.root,filesHeading,layout,/);
+  assert.match(page,/cls:"dk-files-section-head"/);
+  assert.match(page,/page\.classList\.add\("dk-experience-v8","dk-map-first"\)/);
+  assert.doesNotMatch(page,/treePanel,miniMap\.root\)/);
   assert.match(page,/label: "Разделы и умные папки"/);
   assert.match(page,/const openSections=\(\)=>/);
   assert.match(page,/sectionsRegion\.hidden=false/);
@@ -251,4 +255,23 @@ test("Disk 9.0 noncontinuous glow, finite pulse and cluster-reveal animation res
     assert.ok(source.includes(token),"Missing selected Disk 9.0 map behavior: "+token);
   assert.ok(!source.includes('modeKey="";rebuild();invalidate();save();'),
     "Zoom must not regenerate the whole orbit layout on every wheel event");
+});
+
+
+test("Disk 10.1 map-first layout preserves controls, focus and responsive file explorer",async()=>{
+  const [page,css,mini]=await Promise.all([
+    readFile(join(root,"disk-src/web/pages/disk.ts"),"utf8"),
+    readFile(join(root,"web/disk.css"),"utf8"),
+    readFile(join(root,"disk-src/web/pages/disk-map-mini.ts"),"utf8"),
+  ]);
+  assert.match(page,/page\.append\(el\("h1"[\s\S]*?bar,miniMap\.root,filesHeading,layout,/);
+  assert.match(page,/layout\.append\(side,panes\.left,main,panes\.right,life\.root,info\)/);
+  assert.match(page,/miniMap\.update\(all,folders,current\)/);
+  assert.match(page,/openFull:\(\)=>openDiskMap/);
+  assert.match(mini,/canvas\.addEventListener\("wheel"/);
+  assert.match(mini,/actions\.openFile\(node\.id\.slice\(5\)\)/);
+  assert.match(css,/\.disk-page\.dk-experience-v8\.dk-map-first > \.dk-mini-map/);
+  assert.match(css,/\.dk-map-first > \.dk-mini-map \.dk-mini-map-frame/);
+  assert.match(css,/\.dk-map-first\.dk-focus > \.dk-mini-map/);
+  assert.match(css,/@container diskspace \(max-width:760px\)/);
 });
