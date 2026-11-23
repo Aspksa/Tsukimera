@@ -81,34 +81,24 @@ test("left rail and map maintain real document data, focus, accessible controls 
 });
 
 
-test("Disk presents the interactive source-backed Live Map above the full file manager",async()=>{
-  const [page,mini,styles]=await Promise.all([
-    readFile(join(root,"disk-src/web/pages/disk.ts"),"utf8"),
-    readFile(join(root,"disk-src/web/pages/disk-map-mini.ts"),"utf8"),
-    readFile(join(root,"web/disk.css"),"utf8"),
-  ]);
-  assert.match(page,/const side = el\("aside",[\s\S]*?treePanel\);/);
-  assert.match(page,/bar,miniMap\.root,filesHeading,layout,/);
-  assert.match(page,/cls:"dk-files-section-head"/);
-  assert.match(page,/page\.classList\.add\("dk-experience-v8","dk-map-first"\)/);
-  assert.doesNotMatch(page,/treePanel,miniMap\.root\)/);
-  assert.match(page,/label: "Разделы и умные папки"/);
-  assert.match(page,/const openSections=\(\)=>/);
-  assert.match(page,/sectionsRegion\.hidden=false/);
-  assert.match(page,/miniMap\.update\(all,folders,current\)/);
-  assert.match(page,/title:"Разделы и умные папки"/);
-  for(const wanted of ["miniGraphFromCatalog(files,folders,focus,detail,current)",
-    "mapNodeRadius(n,graph.bytes)","canvas.addEventListener(\"wheel\"",
-    "canvas.addEventListener(\"pointermove\"","canvas.addEventListener(\"click\"",
-    "canvas.addEventListener(\"dblclick\"","canvas.addEventListener(\"keydown\"",
-    "actions.openFull()","actions.openFile(node.id.slice(5))",
-    "actions.openFolder(node.folder)"])
-    assert.ok(mini.includes(wanted),"Mini map must keep real data and navigable nodes: "+wanted);
-  assert.match(styles,/\.dk-mini-map-frame\{/);
-  assert.match(styles,/\.dk-sections-dialog \.dk-sections\{/);
-  assert.match(styles,/\.dk-mini-map-canvas:focus-visible/);
+test("Disk 11 keeps one spatial map above the existing file manager and connects real actions",async()=>{
+ const [page,mini,css]=await Promise.all([
+  readFile(join(root,"disk-src/web/pages/disk.ts"),"utf8"),
+  readFile(join(root,"disk-src/web/pages/disk-map-mini.ts"),"utf8"),
+  readFile(join(root,"web/disk.css"),"utf8"),
+ ]);
+ assert.match(page,/bar,miniMap\.root,filesHeading,layout,/);
+ assert.match(page,/miniMap\.update\(all,folders,current\)/);
+ assert.match(page,/createMiniDiskMap/);
+ assert.doesNotMatch(page,/openDiskMap/,"The retired graph must not be exposed as a second map");
+ for(const x of ["spatialScene(files,folders,current,page,limit,filter)",
+  "actions.openFile(item.id.slice(5))","actions.openFolder(folder)",
+  "dk-omni-trail","dk-omni-workspace","dk-omni-list","dk-omni-search",
+  "touchmove","pointermove","canvas.dataset.layer=\"spatial\""])
+   assert.ok(mini.includes(x),"Missing spatial navigation contract "+x);
+ assert.match(css,/\.dk-omni-explorer/);
+ assert.match(css,/@media\(prefers-reduced-motion:reduce\)/);
 });
-
 
 test("Disk 8.3 unclutters folder rail without losing stored folder style or controls",async()=>{
   const source=await readFile(join(root,"disk-src/web/pages/disk.ts"),"utf8");
@@ -159,7 +149,7 @@ test("Disk 8.3 mini map bounded, truthful aggregation and closer zoom reveals ad
   assert.ok(focused.nodes.filter(n=>n.kind==="cluster").reduce((n,c)=>n+c.hiddenFiles,0)===0);
 });
 
-test("Disk 8.3 saved map viewport validates corrupt data and clamps scale/pan safely",async()=>{
+test("Disk 11 retains validated SQLite viewport and browser gestures safely",async()=>{
   const built=await prepareDisk(root);
   const mod=await import(pathToFileURL(join(built.outputRoot,"web/pages/disk-map-mini-model.js")).href);
   assert.deepEqual(mod.normalizeMiniView(null),{zoom:1,panX:0,panY:0,focus:""});
@@ -169,14 +159,12 @@ test("Disk 8.3 saved map viewport validates corrupt data and clamps scale/pan sa
     {zoom:9,panX:3000,panY:-3000,focus:"A/B"});
   assert.equal(mod.MINI_VIEW_KEY,"tsukimera.disk.minimap.view.v1");
   const source=await readFile(join(root,"disk-src/web/pages/disk-map-mini.ts"),"utf8");
-  assert.match(source,/writePreference\(MINI_VIEW_KEY,JSON\.stringify\(view\)\)/);
-  assert.match(source,/ctx\.roundRect\(/);
-  assert.match(source,/for\(let k=0;k<6;k\+\+\)/);
-  assert.match(source,/ctx\.lineTo\(x\+r,y\)/);
-  assert.match(source,/if\(Math\.max\(from\.x,to\.x\)<-margin/);
-  assert.match(source,/if\(queued\|\|!root\.isConnected\)return/);
+  for(const item of ["writePreference(MINI_VIEW_KEY,JSON.stringify(view))",
+   "frame.addEventListener(\"wheel\"","frame.addEventListener(\"touchmove\"",
+   "frame.addEventListener(\"pointerdown\"","if(queued||!root.isConnected)return",
+   "ctx.ellipse(cx,cy"])
+    assert.ok(source.includes(item),"Missing viewport safety behavior "+item);
 });
-
 
 test("Disk 8.3 SQLite and backup allowlists accept both section layout and persistent mini-map view",async()=>{
   const [db,server]=await Promise.all([
@@ -230,48 +218,51 @@ test("Disk 9.0 orbit layout uses factual parents, collision spacing and determin
     "File path must consist only of real parent-child relationships");
 });
 
-test("Disk 9.0 adaptive tree/map shares height without obscuring the hierarchy",async()=>{
+test("Disk 11 spatial scene renders a bounded real folder neighborhood and searchable pages",async()=>{
   const built=await prepareDisk(root);
-  const orbits=await import(pathToFileURL(join(built.outputRoot,"web/pages/disk-map-orbits.js")).href);
-  const empty=orbits.adaptiveMapWeight(0),moderate=orbits.adaptiveMapWeight(20),
-    busy=orbits.adaptiveMapWeight(100000);
-  assert.ok(empty>moderate&&moderate>busy);
-  assert.ok(busy>=.15&&empty<=.33);
-  const [mini,style]=await Promise.all([
-    readFile(join(root,"disk-src/web/pages/disk-map-mini.ts"),"utf8"),
-    readFile(join(root,"web/disk.css"),"utf8")
-  ]);
-  assert.match(mini,/root\.style\.setProperty\("--dk9-map-weight"/);
-  assert.match(style,/height:clamp\(100px,calc\(100dvh \* var\(--dk9-map-weight\)\),260px\)/);
+  const mod=await import(pathToFileURL(join(built.outputRoot,"web/pages/disk-map-spatial.js")).href);
+  const folders=["Работа","Работа/2026","Архив",...Array.from({length:80},(_,i)=>"Каталог"+i)];
+  const files=Array.from({length:10000},(_,i)=>({
+    id:"f"+i,name:"Документ "+i+".txt",folder:i<100?"Работа/2026":"Архив",size:i+1
+  }));
+  const rootScene=mod.spatialScene(files,folders,"",0,10);
+  assert.ok(rootScene.pages>1&&rootScene.items.length<=10);
+  assert.equal(rootScene.items[0].kind,"folder");
+  assert.ok(rootScene.items.every(x=>x.folder&&x.id.startsWith("folder:")));
+  const focus=mod.spatialScene(files,folders,"Работа/2026",0,10);
+  assert.equal(focus.total,100);
+  assert.ok(focus.items.every(x=>x.kind==="file"));
+  assert.equal(focus.bytes,files.slice(0,100).reduce((n,f)=>n+f.size,0));
+  assert.equal(mod.spatialScene(files,folders,"Работа/2026",999,10).page,9);
+  assert.equal(mod.spatialScene(files,folders,"Работа/2026",0,10,"Документ 99").total,1);
+  const slots=mod.spatialSlots(10);
+  assert.equal(slots.length,10);
+  assert.deepEqual(slots,mod.spatialSlots(10));
 });
 
-test("Disk 9.0 noncontinuous glow, finite pulse and cluster-reveal animation respect reduced motion",async()=>{
-  const source=await readFile(join(root,"disk-src/web/pages/disk-map-mini.ts"),"utf8");
-  for(const token of ["containmentTrail(graph,active.id)","trailLinks.has(edge.from+\"|\"+edge.to)",
-    "centerOn(active)","revealProgress","revealFrom","ctx.createRadialGradient",
-    "ctx.shadowBlur","ctx.arc(x,y,r+5+(1-pulse)*15","reducedMotion()",
-    "canvas.dataset.transition","canvas.dataset.pulse","canvas.dataset.trail",
-    "canvas.dataset.centerError"])
-    assert.ok(source.includes(token),"Missing selected Disk 9.0 map behavior: "+token);
-  assert.ok(!source.includes('modeKey="";rebuild();invalidate();save();'),
-    "Zoom must not regenerate the whole orbit layout on every wheel event");
+test("Disk 11 replaces orbit lines with focus-centered controls, bounded painting and accessibility",async()=>{
+ const source=await readFile(join(root,"disk-src/web/pages/disk-map-mini.ts"),"utf8");
+ for(const token of ["dk-omni-focus","dk-omni-node","dk-omni-row",
+  "stepBack()","navigate(parentOf(current))","scene.items.forEach",
+  "ctx.moveTo(cx,cy)","canvas.dataset.nodes",
+  "aria-label","role:\"status\"","reduced","ResizeObserver"])
+   assert.ok(source.includes(token),"Missing spatial explorer behavior: "+token);
+ assert.ok(!source.includes("orbitLayout("),"Previous orbital layout must not render");
 });
 
-
-test("Disk 10.1 map-first layout preserves controls, focus and responsive file explorer",async()=>{
-  const [page,css,mini]=await Promise.all([
-    readFile(join(root,"disk-src/web/pages/disk.ts"),"utf8"),
-    readFile(join(root,"web/disk.css"),"utf8"),
-    readFile(join(root,"disk-src/web/pages/disk-map-mini.ts"),"utf8"),
-  ]);
-  assert.match(page,/page\.append\(el\("h1"[\s\S]*?bar,miniMap\.root,filesHeading,layout,/);
-  assert.match(page,/layout\.append\(side,panes\.left,main,panes\.right,life\.root,info\)/);
-  assert.match(page,/miniMap\.update\(all,folders,current\)/);
-  assert.match(page,/openFull:\(\)=>openDiskMap/);
-  assert.match(mini,/canvas\.addEventListener\("wheel"/);
-  assert.match(mini,/actions\.openFile\(node\.id\.slice\(5\)\)/);
-  assert.match(css,/\.disk-page\.dk-experience-v8\.dk-map-first > \.dk-mini-map/);
-  assert.match(css,/\.dk-map-first > \.dk-mini-map \.dk-mini-map-frame/);
-  assert.match(css,/\.dk-map-first\.dk-focus > \.dk-mini-map/);
-  assert.match(css,/@container diskspace \(max-width:760px\)/);
+test("Disk 11 all Disk entry points use the replacement spatial map without changing files",async()=>{
+ const [page,css,mini]=await Promise.all([
+   readFile(join(root,"disk-src/web/pages/disk.ts"),"utf8"),
+   readFile(join(root,"web/disk.css"),"utf8"),
+   readFile(join(root,"disk-src/web/pages/disk-map-mini.ts"),"utf8"),
+ ]);
+ assert.match(page,/page\.append\(el\("h1"[\s\S]*?bar,miniMap\.root,filesHeading,layout,/);
+ assert.match(page,/layout\.append\(side,panes\.left,main,panes\.right,life\.root,info\)/);
+ assert.match(page,/miniMap\.update\(all,folders,current\)/);
+ assert.doesNotMatch(page,/openDiskMap/);
+ assert.match(page,/miniMap\.root\.scrollIntoView/);
+ assert.match(mini,/actions\.openFile\(item\.id\.slice\(5\)\)/);
+ assert.match(css,/\.dk-omni-workspace\{display:grid/);
+ assert.match(css,/\.dk-map-first\.dk-focus>.dk-omni-explorer/);
+ assert.match(css,/@container diskspace \(max-width:720px\)/);
 });
