@@ -33,9 +33,9 @@ function scopeCatalog(files:DiskFile[],folders:string[],focus:string){
  * Every excluded file and folder is counted once, never fabricated.
  */
 export function miniGraphFromCatalog(files:DiskFile[],folders:string[],
-  focus="",detail=false):MiniGraph{
+  focus="",detail=false,selectedFolder=""):MiniGraph{
   const scoped=scopeCatalog(files,folders,focus);
-  const graph=graphFromFiles(scoped.files,scoped.folders,detail?190:70,detail?100:40);
+  const graph=graphFromFiles(scoped.files,scoped.folders,detail?190:70,detail?100:40,selectedFolder);
   const nodes:MiniNode[]=[...graph.nodes],edges:MapEdge[]=[...graph.edges];
   const includedFiles=new Set(graph.nodes.filter(n=>n.kind==="file").map(n=>n.id.slice(5)));
   const includedFolders=new Set(graph.nodes.filter(n=>n.kind==="folder").map(n=>n.folder));
