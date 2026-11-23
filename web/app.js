@@ -637,7 +637,7 @@ function cloudModelBrowser(primary,fallback){
   row.append(search,select,refresh);
   const actions=el("div","set-controls");actions.append(toPrimary,toFallback);
   box.append(heading,row,actions,status);
-  const reload=()=>{void refresh.click();};
+  const reload=()=>{if(cachedCloudModels.length)update();else void refresh.click();};
   document.addEventListener("tsukimera:cloud-models",reload,{signal:settingsTabAbort.signal});
   document.addEventListener("tsukimera:cloud-models-cleared",()=>{
     cachedCloudModels=[];update();
