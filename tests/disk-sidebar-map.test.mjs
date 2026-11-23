@@ -193,7 +193,7 @@ test("Disk 9.0 orbit layout uses factual parents, collision spacing and determin
   const folders=["Работа","Работа/2026","Работа/2026/Счета","Архив",...Array.from({length:70},(_,i)=>"Группа/"+i)];
   const files=Array.from({length:220},(_,i)=>({
     id:"test"+i,name:"Файл-"+i+".txt",
-    folder:i<30?"Работа/2026/Счета":folders[(i%folders.length)],size:50+i,
+    folder:i<30?"Работа/2026/Счета":folders[(i%folders.length)],size:i<30?10000+i:50+i,
     tags:i%3?[]:["учёт"],sha256:"hash"+i
   }));
   const model=base.miniGraphFromCatalog(files,folders,"",false,"Работа/2026/Счета");
