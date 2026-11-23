@@ -416,3 +416,113 @@ test("Disk 15 preserves optional evidence analysis behind contextual actions, no
  assert.match(css,/\.dk-graph-popover/);
  assert.match(css,/\.dk-graph-only\.dk-graph-expanded/);
 });
+
+
+test("Disk 16 fits the same graph to laptop, FHD, 2K, 4K and ultrawide screens",async()=>{
+  const built=await prepareDisk(root);
+  const m=await import(pathToFileURL(join(built.outputRoot,"web/pages/disk-map-responsive.js")).href);
+  const screens=[
+    m.graphScreen(360,700,2),
+    m.graphScreen(1366,768,1,1,false),
+    m.graphScreen(1920,1080,1,1,true),
+    m.graphScreen(2560,1440,1.5,1,true),
+    m.graphScreen(3840,2160,2,1,true),
+    m.graphScreen(5120,1440,1.25,1,true)
+  ];
+  assert.ok(screens.every(s=>s.maxNodes>=24&&s.maxNodes<=240));
+  assert.ok(screens[0].maxNodes<screens[2].maxNodes);
+  assert.ok(screens[2].maxNodes<screens[4].maxNodes);
+  assert.equal(screens[5].ultrawide,true);
+  assert.ok(screens[5].aspect>3.5);
+  assert.ok(screens.every(s=>s.pixelWidth*s.pixelHeight<=10_100_000),
+    "DPR allocation must be bounded for 4K and 32:9 screens");
+  assert.ok(screens[4].markerScale>screens[1].markerScale);
+  assert.ok(m.graphScreen(320,420,1,0.65).detail==="overview");
+  assert.ok(m.graphScreen(800,500,1,1).detail==="standard");
+  assert.ok(m.graphScreen(1920,1080,1,2).detail==="detail");
+  const points=[{x:-400,y:-110},{x:400,y:110},{x:230,y:30},{x:0,y:0}];
+  const bounds=m.graphBounds(points);
+  const cam=m.graphCamera(bounds,screens[5],1);
+  for(const p of points){
+    const projectedX=cam.cx+p.x*cam.scale;
+    const projectedY=cam.cy+p.y*cam.scale;
+    assert.ok(projectedX>=0&&projectedX<=screens[5].width);
+    assert.ok(projectedY>=0&&projectedY<=screens[5].height);
+  }
+  const x=1700,y=650;
+  const oldWorld={x:(x-cam.cx)/cam.scale,y:(y-cam.cy)/cam.scale};
+  const shifted=m.anchoredZoom(cam,screens[5],bounds,2,x,y);
+  const enlarged=m.graphCamera(bounds,screens[5],2,shifted.panX,shifted.panY);
+  assert.ok(Math.abs(enlarged.cx+oldWorld.x*enlarged.scale-x)<1e-7,
+    "Wheel zoom must hold exactly the same world point under cursor");
+  assert.ok(Math.abs(enlarged.cy+oldWorld.y*enlarged.scale-y)<1e-7);
+  assert.equal(m.graphMotionBudget(150,true,true),1);
+  assert.ok(m.graphMotionBudget(190,false,true)<m.graphMotionBudget(40,false,true));
+  assert.equal(m.graphLerp(0,100,.25),25);
+});
+
+test("Disk 16 local actual-folder clusters progressively expand with zoom",async()=>{
+  const built=await prepareDisk(root);
+  const m=await import(pathToFileURL(join(built.outputRoot,"web/pages/disk-map-graph.js")).href);
+  const documents=[
+    ...Array.from({length:95},(_,i)=>({
+      id:"a"+i,folder:"Работа",name:"отчет-"+i+".txt",size:200+i,sha256:"",tags:[]
+    })),
+    ...Array.from({length:42},(_,i)=>({
+      id:"b"+i,folder:"Архив",name:"документ-"+i+".txt",size:i,sha256:"",tags:[]
+    }))
+  ];
+  const folders=["Работа","Архив"];
+  const options={depth:2,limit:210};
+  const distant=m.graphFromCatalog(documents,folders,"",
+    {...options,perFolder:4,detailLevel:"overview"});
+  const normal=m.graphFromCatalog(documents,folders,"",
+    {...options,perFolder:28,detailLevel:"standard"});
+  const close=m.graphFromCatalog(documents,folders,"",
+    {...options,perFolder:72,detailLevel:"detail"});
+  assert.ok(distant.files<=8,"Zoomed-out view must fold crowded folders");
+  assert.ok(normal.files>distant.files,"Approaching a real folder reveals its files");
+  assert.ok(close.files>normal.files,"Further zoom progressively reveals more documents");
+  assert.equal(distant.nodes.find(n=>n.id==="folder:Работа").count,95);
+  assert.equal(normal.nodes.find(n=>n.id==="folder:Архив").count,42);
+  assert.ok(distant.hidden>0);
+  assert.ok(normal.nodes.some(n=>n.fileId?.startsWith("b")),
+    "One massive folder must not starve small real folders");
+  assert.deepEqual(
+    normal.nodes.filter(n=>n.kind==="file").map(n=>n.id),
+    m.graphFromCatalog(documents,folders,"",options).nodes
+      .filter(n=>n.kind==="file").map(n=>n.id),
+    "Stable standard preview must be deterministic");
+  const old=m.graphInitial(normal.nodes.find(n=>n.id==="file:a11"));
+  assert.deepEqual(old,m.graphInitial(normal.nodes.find(n=>n.id==="file:a11")));
+  const real=[{id:"a",kind:"file",folder:"Работа"},{id:"b",kind:"file",folder:"Работа"}];
+  const location=new Map([
+    ["a",{x:0,y:0,vx:0,vy:0}],["b",{x:0,y:0,vx:0,vy:0}]
+  ]);
+  for(let i=0;i<18;i++)m.graphForceStep(real,[],location);
+  const a=location.get("a"),b=location.get("b");
+  assert.ok(Number.isFinite(a.x)&&Number.isFinite(b.y));
+  assert.ok(Math.hypot(a.x-b.x,a.y-b.y)>2,"Coincident nodes must separate");
+});
+
+test("Disk 16 screen policy and resize support do not add graph UI chrome",async()=>{
+ const [mini,css]=await Promise.all([
+  readFile(join(root,"disk-src/web/pages/disk-map-mini.ts"),"utf8"),
+  readFile(join(root,"web/disk.css"),"utf8")
+ ]);
+ for(const marker of ["graphScreen(","graphCamera(","graphBounds(",
+  "anchoredZoom(","graphMotionBudget(","ResizeObserver",
+  "screen.perFolder","screen.maxNodes","perFolder:screen.perFolder",
+  "devicePixelRatio","screen.pixelWidth","graphLerp(",
+  "window.devicePixelRatio||1"]){
+    if(marker==="screen.pixelWidth")continue;
+    assert.ok(mini.includes(marker),"Missing adaptive graph capability "+marker);
+ }
+ for(const marker of ["@media (min-width:2400px)","@media (max-height:720px)",
+  "@media (max-width:620px)","@media (orientation:landscape)",
+  "clamp(210px,36dvh,560px)"])
+   assert.ok(css.includes(marker),"Missing responsive styling "+marker);
+ const graphOnly=mini.match(/const root=el\("section"[\s\S]*?,frame\);/)?.[0]||"";
+ assert.ok(graphOnly.includes("dk-graph-only"));
+ assert.ok(!graphOnly.includes("dk-graph-head"),"No permanent graph toolbar");
+});
