@@ -151,6 +151,29 @@ export function diskKnowledgeForFile(db,id){
   ).all(row.sha,id);
   for(const file of copies)suggestions.push({kind:"duplicate",fileId:file.id,label:file.name,
     reason:"Идентичный SHA-256, удаление не предлагается",automatic:false});
+  // A content-similarity proposal is never a verified duplicate; it is
+  // computed from bounded indexed word sets and requires manual review.
+  const ownTokens=new Set(JSON.parse(row.tokens||"[]"));
+  if(ownTokens.size>=6){
+    const candidates=db.prepare(
+      "SELECT k.file_id,k.tokens,f.name FROM disk_knowledge_docs k "+
+      "JOIN disk_files f ON f.id=k.file_id WHERE k.file_id<>? AND "+
+      "k.sha<>? AND f.deleted_at IS NULL AND k.type=? "+
+      "ORDER BY k.processed_at DESC LIMIT 250"
+    ).all(id,row.sha,row.type);
+    for(const item of candidates){
+      const other=new Set(JSON.parse(item.tokens||"[]"));
+      if(other.size<6)continue;
+      const matching=[...ownTokens].filter(word=>other.has(word)).length;
+      const similarity=matching/(ownTokens.size+other.size-matching);
+      if(matching>=6&&similarity>=.68)suggestions.push({
+        kind:"similar",fileId:item.file_id,label:item.name,
+        reason:"Совпадение слов из извлечённого текста: "+
+          Math.round(similarity*100)+"%. Не означает идентичность содержания",
+        confidence:Math.round(similarity*100)/100,automatic:false
+      });
+    }
+  }
   for(const f of facts.filter(x=>x.kind==="appendix")){
     const reference=db.prepare(
       "SELECT f.id,f.name FROM disk_knowledge_facts x JOIN disk_knowledge_docs d ON d.file_id=x.file_id "+
