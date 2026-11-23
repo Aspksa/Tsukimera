@@ -143,6 +143,7 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
   function focusOnNode(id:string|null){
     if(id&&!scene.nodes.some(n=>n.id===id))return;
     focusId=id;route=null;routeStart=null;routeEnd=null;
+    canvas.dataset.focusNode=focusId||"";
     selected=id;hovered=id;
     if(id)centerNode(id);else draw();
   }
