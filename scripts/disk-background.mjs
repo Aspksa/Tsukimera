@@ -23,7 +23,7 @@ export function createDiskAutomation({
 }){
   let stopped=false,running=false,timer=null;
   let lastMaintenance=Date.now(),active=null;
-  const stats={indexed:0,audited:0,failures:0,retries:0,lastError:null,lastRun:null,
+  const stats={indexed:0,knowledgeIndexed:0,audited:0,failures:0,retries:0,lastError:null,lastRun:null,
     lastOptimized:null,optimization:null};
   const stop=()=>{
     stopped=true;
@@ -63,6 +63,20 @@ export function createDiskAutomation({
       if(out.indexed)stats.indexed++;
       return true;
     }
+    // Disk 20: persistent local facts are a second, resumable queue. It
+    // only reads SHA-verified FTS text and never modifies source files.
+    const knowledge=database.pendingKnowledge(1);
+    if(knowledge.length){
+      const row=knowledge[0];
+      active={type:"knowledge-index",fileId:row.id};
+      const body=database.getTextCache(row.sha256);
+      // The FTS row may exist while cache is externally missing; keep a
+      // durable empty-result marker instead of retrying forever.
+      const out=database.putKnowledge({id:row.id,name:row.name,
+        sha:row.sha256,body:body??""});
+      if(out.indexed)stats.knowledgeIndexed++;
+      return true;
+    }
     const target=database.auditNext();
     if(target){
       active={type:"integrity-audit",fileId:target.file_id};
@@ -95,7 +109,8 @@ export function createDiskAutomation({
   };
   const status=()=>({
     running:!stopped,active,counts:{...stats},index:database.indexStats(),
-    audit:database.auditStats(),mode:"idle-cooperative",
+    audit:database.auditStats(),knowledge:database.knowledgeStats(),
+    mode:"idle-cooperative",
     note:"Задачи работают только при запущенной Tsukimera. Нет очистки или автоматического удаления оригиналов.",
   });
   return {start:()=>{if(stopped)return;schedule(initialDelayMs);},stop,wake,status,runNow:runOne};
