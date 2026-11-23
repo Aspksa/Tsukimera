@@ -298,6 +298,31 @@ try{
   assert.ok(await evaluate("!!document.querySelector('.dk-side > .dk-graph-only')"),
     "Resizing must restore the same graph under the folder hierarchy");
 
+  // Disk 18: browser-level visual geometry across 100–200% Windows scaling.
+  for(const dpr of [1,1.25,1.5,1.75,2]){
+    await device(1920,1080,dpr);
+    const layout=await assertAlignment("DPI "+dpr);
+    assert.ok(Math.abs(layout.dpr-dpr)<.03,"DPI mismatch "+dpr);
+    const pixels=await evaluate("(()=>{const c=document.querySelector('.dk-graph-canvas');return c.width*c.height})()");
+    assert.ok(pixels>0&&pixels<=10100000,
+      "Canvas DPR pixel budget overflow: "+dpr+" / "+pixels);
+  }
+  await screenshot("disk-windows-200pct");
+  await device(2560,1440,1.5);
+  const twoK=await assertAlignment("2K 150%");
+  assert.ok(twoK.filesWidth>600,"2K must leave enough file workspace");
+  await screenshot("disk-2k-2560x1440");
+  await device(3440,1440,1);
+  await assertAlignment("Ultrawide 3440");
+  await screenshot("disk-ultrawide-3440x1440");
+  await device(1920,1080,1);
+  const longName=await evaluate("(()=>{const e=document.querySelector('.dk-file .dk-name');if(!e)return null;const old=e.textContent,title=e.title;e.textContent='Сверхдлинное-название-договора-'.repeat(12)+'.docx';e.title=e.textContent;const c=getComputedStyle(e);return {old,title,hasFullTitle:e.title.length>100,overflow:c.overflow,width:e.getBoundingClientRect().width}})()");
+  assert.ok(longName?.hasFullTitle&&longName.overflow==="hidden"&&longName.width>0,
+    "Long document names must remain visually clipped with full tooltips: "+JSON.stringify(longName));
+  await screenshot("disk-long-document-name");
+  await evaluate("(()=>{const e=document.querySelector('.dk-file .dk-name');if(e){e.textContent="+JSON.stringify(longName.old)+";e.title="+JSON.stringify(longName.title)+";}})()");
+  await assertAlignment("Restored Full HD");
+
   await evaluate("(()=>{const c=document.querySelector('.dk-mini-map-canvas');for(let i=0;i<3;i++)c.dispatchEvent(new WheelEvent('wheel',{bubbles:true,cancelable:true,deltaY:-110}));})()");
   await pause(490);
   const zoomedMap=await evaluate("JSON.parse(localStorage.getItem('tsukimera.disk.minimap.view.v1')||'null')");
