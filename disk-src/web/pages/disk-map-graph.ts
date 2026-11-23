@@ -17,6 +17,7 @@ export type GraphScene={
   totalCandidates:number;hidden:number;folders:number;files:number;duplicates:number;
 };
 export type GraphOptions={depth?:number;limit?:number;includeTags?:boolean;includeDuplicates?:boolean;
+ perFolder?:number;detailLevel?:"overview"|"standard"|"detail";
  semantic?:SemanticIndex|null;viewMode?:"all"|"meaning"|"versions"|"entities";};
 export type GraphPoint={x:number;y:number;vx:number;vy:number;pinned?:boolean};
 
@@ -43,6 +44,17 @@ export function graphFromCatalog(
   for(const f of folderNames)addParents(f);
   for(const f of active)addParents(f.folder);
   if(folder)addParents(folder);
+  // Folder nodes remain factual: their relative area represents the number
+  // of real descendants, even when individual files are intentionally folded.
+  const counts=new Map<string,number>();
+  for(const f of active){
+    counts.set("",(counts.get("")||0)+1);
+    let parent=f.folder;
+    while(parent){
+      counts.set(parent,(counts.get(parent)||0)+1);
+      parent=parentOf(parent);
+    }
+  }
 
   const folderCandidates=[...allFolders].filter(f=>{
     if(!within(f,folder))return false;
@@ -57,8 +69,8 @@ export function graphFromCatalog(
   const add=(node:GraphNode)=>{
     if(!byId.has(node.id)&&byId.size<limit)byId.set(node.id,node);
   };
-  add({id:focusId,kind:"folder",name:last(folder),folder,size:0,depth:0});
-  if(folder)add({id:"folder:"+parent,kind:"folder",name:last(parent),folder:parent,size:0,depth:-1});
+  add({id:focusId,kind:"folder",name:last(folder),folder,size:0,depth:0,count:counts.get(folder)||0});
+  if(folder)add({id:"folder:"+parent,kind:"folder",name:last(parent),folder:parent,size:0,depth:-1,count:counts.get(parent)||0});
   // Reserve graph capacity for documents, even in a root with hundreds of folders.
   // Without this, folder nodes consume the whole limit before files appear.
   let shownFolderCandidates=0;
@@ -67,21 +79,44 @@ export function graphFromCatalog(
     if(shownFolderCandidates>=folderBudget)break;
     const relative=folder?path.slice(folder.length+1):path;
     const d=relative.split("/").length;
-    add({id:"folder:"+path,kind:"folder",name:last(path),folder:path,size:0,depth:d});
+    add({id:"folder:"+path,kind:"folder",name:last(path),folder:path,size:0,depth:d,count:counts.get(path)||0});
     shownFolderCandidates++;
   }
   const depthOf=(path:string)=>folder?
     (path===folder?0:path.slice(folder.length+1).split("/").length):
     (path?path.split("/").length:0);
   const visibleFiles=active.filter(f=>within(f.folder,folder)&&depthOf(f.folder)<depth)
-    .sort((a,b)=>depthOf(a.folder)-depthOf(b.folder)||compare(a.name,b.name));
+    .sort((a,b)=>depthOf(a.folder)-depthOf(b.folder)||compare(a.name,b.name)||
+      compare(a.id,b.id));
   const fullCandidates=1+(folder?1:0)+folderCandidates.length+visibleFiles.length;
+  const perFolder=Math.max(1,Math.min(96,Math.trunc(options.perFolder??
+    (options.detailLevel==="overview"?4:options.detailLevel==="detail"?72:28))));
+  // Balanced reveal by real folder: one enormous directory cannot starve
+  // all smaller groups. At distant zoom the folder node itself is an honest
+  // aggregate, with the true descendant count retained on that node.
+  const byFolder=new Map<string,DiskFile[]>();
   for(const f of visibleFiles){
-    const parentId="folder:"+f.folder;
-    if(!byId.has(parentId))continue;
-    add({id:"file:"+f.id,kind:"file",fileId:f.id,name:f.name,folder:f.folder,
-      size:f.size,sha256:f.sha256,revision:f.revision,
-      fileType:spatialFileType(f.name),depth:depthOf(f.folder)+1});
+    if(!byId.has("folder:"+f.folder))continue;
+    const group=byFolder.get(f.folder)||[];
+    group.push(f);byFolder.set(f.folder,group);
+  }
+  const paths=[...byFolder.keys()].sort((a,b)=>depthOf(a)-depthOf(b)||compare(a,b));
+  const chosen=new Map<string,number>();
+  let any=true,round=0;
+  while(any&&byId.size<limit&&round<perFolder){
+    any=false;
+    for(const path of paths){
+      const group=byFolder.get(path)!;
+      const index=chosen.get(path)||0;
+      if(index>=group.length||index>=perFolder)continue;
+      const f=group[index]!;
+      add({id:"file:"+f.id,kind:"file",fileId:f.id,name:f.name,folder:f.folder,
+        size:f.size,sha256:f.sha256,revision:f.revision,
+        fileType:spatialFileType(f.name),depth:depthOf(f.folder)+1});
+      chosen.set(path,index+1);any=true;
+      if(byId.size>=limit)break;
+    }
+    round++;
   }
   // Add only verified exact-hash matches to already shown files. Links are
   // optional and never imply content similarity from a shared extension.
@@ -199,6 +234,22 @@ export function graphSeed(id:string):number{
 }
 export function graphInitial(node:GraphNode):GraphPoint{
   if(node.depth===0&&node.kind==="folder")return {x:0,y:0,vx:0,vy:0};
+  // Real parent-folder affiliation gives new files a stable starting cluster.
+  // Existing positions remain unchanged after updates (see graph UI).
+  if(node.kind==="file"){
+    const groupSeed=graphSeed("folder:"+node.folder);
+    const fileSeed=graphSeed(node.id);
+    const groupAngle=(groupSeed%100000)/100000*Math.PI*2;
+    const localAngle=(fileSeed%100000)/100000*Math.PI*2;
+    const parentDepth=Math.max(0,node.depth-1);
+    const groupRadius=parentDepth===0?0:110+parentDepth*75;
+    const localRadius=48+((fileSeed>>>11)%53);
+    return {
+      x:Math.cos(groupAngle)*groupRadius+Math.cos(localAngle)*localRadius,
+      y:Math.sin(groupAngle)*groupRadius+Math.sin(localAngle)*localRadius,
+      vx:0,vy:0
+    };
+  }
   const hash=graphSeed(node.id);
   const angle=(hash%100000)/100000*Math.PI*2;
   const layer=node.depth<0?230:Math.max(70,Math.abs(node.depth)*115);
@@ -214,17 +265,25 @@ export function graphForceStep(
   locations:Map<string,GraphPoint>,strength=1
 ):number{
   const n=nodes.length;if(!n)return 0;
-  const repel=4000*strength;
+  // Damped collision forces prevent label/node overlap without explosive
+  // motion; the same physical positions work at every monitor resolution.
+  const repel=3350*strength;
   for(let i=0;i<n;i++){
     const ai=locations.get(nodes[i]!.id);if(!ai)continue;
     if(!ai.pinned){ai.vx-=ai.x*.0009;ai.vy-=ai.y*.0009;}
     for(let j=i+1;j<n;j++){
       const bj=locations.get(nodes[j]!.id);if(!bj)continue;
       let dx=ai.x-bj.x,dy=ai.y-bj.y;
-      const d2=Math.max(130,dx*dx+dy*dy);
-      if(d2<1e-5){dx=2;dy=1;}
-      const power=repel/d2;
-      const fx=dx/Math.sqrt(d2)*power,fy=dy/Math.sqrt(d2)*power;
+      if(Math.abs(dx)+Math.abs(dy)<.001){
+        const angle=(graphSeed(nodes[i]!.id+"|"+nodes[j]!.id)%360)*Math.PI/180;
+        dx=Math.cos(angle)*2;dy=Math.sin(angle)*2;
+      }
+      const d=Math.max(1,Math.hypot(dx,dy)),d2=Math.max(160,d*d);
+      const ra=nodes[i]!.kind==="folder"?33:nodes[i]!.kind==="file"?16:22;
+      const rb=nodes[j]!.kind==="folder"?33:nodes[j]!.kind==="file"?16:22;
+      const collision=Math.max(0,ra+rb-d)*.18*strength;
+      const power=repel/d2+collision;
+      const fx=dx/d*power,fy=dy/d*power;
       if(!ai.pinned){ai.vx+=fx;ai.vy+=fy;}
       if(!bj.pinned){bj.vx-=fx;bj.vy-=fy;}
     }
@@ -244,8 +303,8 @@ export function graphForceStep(
   let kinetic=0;
   for(const node of nodes){
     const p=locations.get(node.id);if(!p||p.pinned)continue;
-    p.vx=Math.max(-10,Math.min(10,p.vx*.77));
-    p.vy=Math.max(-10,Math.min(10,p.vy*.77));
+    p.vx=Math.max(-8,Math.min(8,p.vx*.72));
+    p.vy=Math.max(-8,Math.min(8,p.vy*.72));
     p.x=Math.max(-900,Math.min(900,p.x+p.vx));
     p.y=Math.max(-900,Math.min(900,p.y+p.vy));
     kinetic+=Math.abs(p.vx)+Math.abs(p.vy);
