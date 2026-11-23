@@ -207,6 +207,8 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
   const newFolderBtn = btn("Новая папка", () => void createFolder(uploadFolder()), {});
   newFolderBtn.classList.add("dk-newfolder-btn");
   newFolderBtn.prepend(dIcon("folderPlus", 17));
+  const moreBtn=el("button",{type:"button",cls:"icon-btn dk-more-btn",
+    attrs:{"aria-label":"Ещё","aria-haspopup":"menu","aria-expanded":"false",title:"Ещё"}},dIcon("more",19));
   // Focus is a view state, not a file operation. The three-pane layout is
   // restored unchanged, including the user's manually resized widths.
   let focus=false;
