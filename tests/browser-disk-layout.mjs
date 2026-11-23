@@ -325,6 +325,28 @@ try{
     "Opaque deep-space rendering must cover the entire graph Canvas");
   await screenshot("disk-19-constellations-2k");
 
+  // Disk 21 — real browser assertions for unified graph/tiles/tree layout.
+  await evaluate("document.querySelector('.dk-modes [data-mode=tiles]')?.click()");
+  let tiles21;
+  for(let i=0;i<24;i++){
+    tiles21=await evaluate("(()=>{const cards=[...document.querySelectorAll('.dk-files.mode-tiles .dk-file[data-file-id]')];const states=cards.filter(c=>c.querySelector('.dk21-index-state')).length;const heights=cards.slice(0,8).map(c=>Math.round(c.getBoundingClientRect().height));return {cards:cards.length,states,heights,names:cards.every(c=>getComputedStyle(c.querySelector('.dk-name')).webkitLineClamp==='2'),tree:!!document.querySelector('.dk-tree'),graph:document.querySelectorAll('.dk-graph-only canvas').length}})()");
+    if(tiles21.cards&&tiles21.states)break;
+    await pause(150);
+  }
+  assert.ok(tiles21.cards>=1&&tiles21.states>=1&&tiles21.graph===1&&tiles21.tree,
+    "Disk 21 tiles, single Canvas and folder tree must coexist: "+JSON.stringify(tiles21));
+  assert.ok(tiles21.names,"File labels must remain two-line clamped");
+  if(tiles21.heights.length>1)
+    assert.ok(Math.max(...tiles21.heights)-Math.min(...tiles21.heights)<=2,
+      "Visible tile rows have inconsistent height: "+JSON.stringify(tiles21));
+  const folderHover=await evaluate("(()=>{const label=document.querySelector('.dk-node[data-folder=\"Работа/2026\"] .dk-node-label');if(!label)return {found:false};label.dispatchEvent(new PointerEvent('pointerenter'));const graph=document.querySelector('.dk-mini-map-canvas');const linked=graph?.dataset.linkedFolder;label.dispatchEvent(new PointerEvent('pointerleave'));return {found:true,linked,cleared:graph?.dataset.linkedFolder}})()");
+  assert.ok(folderHover.found&&folderHover.linked==="folder:Работа/2026"&&
+    folderHover.cleared==="",
+    "Hovering an actual folder must temporarily illuminate its existing graph node: "+JSON.stringify(folderHover));
+  await assertAlignment("Disk 21 tiles and linked folder");
+  await screenshot("disk-21-linked-tiles-2k");
+
+
   await device(3440,1440,1);
   await assertAlignment("Ultrawide 3440");
   await screenshot("disk-ultrawide-3440x1440");
