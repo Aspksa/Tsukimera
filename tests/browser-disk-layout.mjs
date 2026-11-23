@@ -155,40 +155,50 @@ try{
 
   // Disk 8.1: new folder hierarchy and section configuration controls must be
   // usable in a real Chrome page and must not mutate the original Disk files.
-  const initialTree=await evaluate("(()=>({actions:document.querySelectorAll('.dk-tree-all').length,folderNodes:document.querySelectorAll('.dk-node').length,sections:document.querySelectorAll('.dk-section:not(.dkx-smart)').length}))()");
+  const initialTree=await evaluate("(()=>({actions:document.querySelectorAll('.dk-tree-all').length,hasSidebarSections:!!document.querySelector('.dk-side .dk-sections'),hasMap:!!document.querySelector('.dk-side .dk-mini-map'),map:document.querySelector('.dk-mini-map-canvas')?.getBoundingClientRect().width}))()");
   assert.equal(initialTree.actions,2,"Expand/collapse hierarchy controls missing");
-  assert.equal(initialTree.sections,6,"All six original navigation sections must remain initially visible");
+  assert.equal(initialTree.hasSidebarSections,false,"Sections must be removed from the left rail");
+  assert.equal(initialTree.hasMap,true,"Live Canvas map must replace sections in the left rail");
+  assert.ok(initialTree.map>160,"Mini map should use available sidebar width: "+JSON.stringify(initialTree));
   await evaluate("document.querySelector('.dk-tree-all[aria-label=\"Развернуть все папки\"]').click()");
-  const expandedTree=await evaluate("(()=>({folders:[...document.querySelectorAll('.dk-node')].map(x=>x.dataset.folder),nested:!!document.querySelector('.dk-node[data-folder=\"Работа/2026\"]')}))()");
+  const expandedTree=await evaluate("(()=>({nested:!!document.querySelector('.dk-node[data-folder=\"Работа/2026\"]')}))()");
   assert.ok(expandedTree.nested,"Expand all did not reveal nested folder: "+JSON.stringify(expandedTree));
   await evaluate("document.querySelector('.dk-node[data-folder=\"Работа/2026\"] .dk-node-label').click()");
-  const hierarchy=await evaluate("(()=>({selected:document.querySelector('.dk-node.current')?.dataset.folder,ancestors:[...document.querySelectorAll('.dk-node.dk-ancestor')].map(x=>x.dataset.folder)}))()");
+  const hierarchy=await evaluate("(()=>({selected:document.querySelector('.dk-node.current')?.dataset.folder,ancestors:[...document.querySelectorAll('.dk-node.dk-ancestor')].map(x=>x.dataset.folder),mapTitle:document.querySelector('.dk-mini-map-count')?.textContent}))()");
   assert.equal(hierarchy.selected,"Работа/2026");
   assert.ok(hierarchy.ancestors.includes("Работа")&&hierarchy.ancestors.includes("Работа/2026"),
     "Selected folder's complete parent path must be highlighted: "+JSON.stringify(hierarchy));
+  assert.match(hierarchy.mapTitle,/папок/);
   await evaluate("document.querySelector('.dk-tree-all[aria-label=\"Свернуть все папки\"]').click()");
   assert.equal(await evaluate("document.querySelector('.dk-node[data-folder=\"Работа/2026\"]')===null"),true,
     "Collapse all should hide descendants without deleting folder data");
   await evaluate("document.querySelector('.dk-node[data-folder=\"\"] .dk-node-label').click()");
-  const beforeSections=await evaluate("(()=>({collapsed:document.querySelector('.dk-sections-region').hidden,first:document.querySelector('.dk-section:not(.dkx-smart)')?.textContent}))()");
-  assert.equal(beforeSections.collapsed,false);
-  await evaluate("document.querySelector('.dk-section-toggle').click()");
-  assert.equal(await evaluate("document.querySelector('.dk-sections-region').hidden"),true);
-  await evaluate("document.querySelector('.dk-section-toggle').click()");
-  assert.equal(await evaluate("document.querySelector('.dk-sections-region').hidden"),false);
-  await evaluate("document.querySelector('.dk-section-settings').click()");
+  const openSections=async()=>await evaluate("(()=>{document.querySelector('.dk-more-btn').click();const row=[...document.querySelectorAll('.dk-menu-item')].find(x=>x.textContent.includes('Разделы и умные папки'));if(!row)return false;row.click();return !!document.querySelector('.dk-sections-dialog .dk-sections')})()");
+  assert.equal(await openSections(),true,"Sections and smart folders must be accessible through the existing More menu");
+  assert.equal(await evaluate("document.querySelectorAll('.dk-sections-dialog .dk-section:not(.dkx-smart)').length"),6,
+    "All six navigation categories should survive relocation");
+  assert.ok(await evaluate("!!document.querySelector('.dk-sections-dialog .dkx-smart-head')"),
+    "Smart folder manager must remain accessible");
+  await evaluate("document.querySelector('.dk-sections-dialog>.btn').click()");
   assert.equal(await evaluate("document.querySelectorAll('.dk-section-editor-row').length"),6);
   await evaluate("document.querySelector('.dk-section-editor-row button:last-child').click()");
   await evaluate("(()=>{const row=[...document.querySelectorAll('.dk-section-editor-row')].find(x=>x.textContent.includes('Крупные файлы'));row.querySelector('input').click();document.querySelector('.dk-section-editor .dk-form-actions .btn.primary').click()})()");
-  const configured=await evaluate("(()=>({items:[...document.querySelectorAll('.dk-section:not(.dkx-smart)')].map(x=>x.textContent),saved:JSON.parse(localStorage.getItem('tsukimera.disk.sections.v1'))}))()");
-  assert.ok(configured.items[0].includes("Недавние"),"Section drag/arrow ordering not respected: "+JSON.stringify(configured));
+  assert.equal(await openSections(),true);
+  const configured=await evaluate("(()=>({items:[...document.querySelectorAll('.dk-sections-dialog .dk-section:not(.dkx-smart)')].map(x=>x.textContent),saved:JSON.parse(localStorage.getItem('tsukimera.disk.sections.v1'))}))()");
+  assert.ok(configured.items[0].includes("Недавние"),"Section order must be retained in the relocated dialog: "+JSON.stringify(configured));
   assert.ok(!configured.items.some(x=>x.includes("Крупные файлы")),"Hidden section still rendered");
   assert.equal(configured.saved.order[0],"recent");
   assert.ok(configured.saved.hidden.includes("large"));
-  await evaluate("document.querySelector('.dk-section-settings').click()");
+  await evaluate("document.querySelector('.dk-sections-dialog>.btn').click()");
   await evaluate("(()=>{const options=[...document.querySelectorAll('.dk-section-editor .dk-form-actions button')];options.find(x=>x.textContent.includes('По умолчанию')).click();options.find(x=>x.textContent.includes('Сохранить')).click()})()");
-  assert.equal(await evaluate("document.querySelectorAll('.dk-section:not(.dkx-smart)').length"),6,
-    "Restoring default sections should make all original categories available");
+  assert.equal(await openSections(),true);
+  assert.equal(await evaluate("document.querySelectorAll('.dk-sections-dialog .dk-section:not(.dkx-smart)').length"),6,
+    "Restoring default sections should make all categories available in their new home");
+  await evaluate("document.querySelector('.mod-sheet button[aria-label=\"Закрыть\"]').click()");
+  await evaluate("document.querySelector('.dk-mini-map-open').click()");
+  assert.ok(await evaluate("!!document.querySelector('.dkx-map-canvas')"),
+    "Expand the embedded map into the preserved full Canvas view");
+  await evaluate("document.querySelector('.mod-sheet button[aria-label=\"Закрыть\"]').click()");
 
 
 
