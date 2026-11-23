@@ -1190,9 +1190,9 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
       recent: all.filter((f) => matchesVirtual(f, "recent")).length, images: all.filter((f) => matchesVirtual(f, "images")).length,
       documents: all.filter((f) => matchesVirtual(f, "documents")).length, large: all.filter((f) => matchesVirtual(f, "large")).length,
     };
-    const order=sidebarPrefs.order.map(id=>SECTIONS.find(item=>item.id===id)).filter(
+    const visibleSections=sidebarPrefs.order.map(id=>SECTIONS.find(item=>item.id===id)).filter(
       (entry):entry is (typeof SECTIONS)[number]=>!!entry&&!sidebarPrefs.hidden.includes(entry.id as SectionId));
-    sections.replaceChildren(...order.map((s) => {
+    sections.replaceChildren(...visibleSections.map((s) => {
       const on = s.id === "favorites" || s.id === "trash" ? view === s.id : view === "all" && virtual === s.id;
       const b = el("button", { type: "button", cls: "dk-section dk-section-"+s.id+(on ? " current" : ""),
         attrs: { role: "listitem", "aria-current": on ? "page" : "false","aria-label":s.label+" · "+String(counts[s.id]??0)} },
