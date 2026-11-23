@@ -6,7 +6,7 @@ import {el} from "../dom";
 import {openSheet} from "./sheet";
 import {human} from "./disk-model";
 import type {DiskFile} from "../api";
-import {graphFromFiles,type MapNode} from "./disk-map-layout";
+import {graphFromFiles,mapNodeRadius,type MapNode,type MapEdge} from "./disk-map-layout";
 
 const clamp=(value:number,low:number,high:number)=>Math.min(high,Math.max(low,value));
 const short=(name:string,max=24)=>name.length>max?name.slice(0,max-1)+"…":name;
@@ -18,7 +18,7 @@ export function openLiveDiskMap(files:DiskFile[],folders:string[],
   const byId=new Map(graph.nodes.map(node=>[node.id,node]));
   const panel=el("div",{cls:"dkx-live-map"});
   const top=el("div",{cls:"dkx-map-intro"},
-    el("p",{cls:"muted",textContent:"Живая карта реальных папок и файлов. Клик выделяет и подсвечивает связи; повторный клик или кнопка открывают объект. Колесо — масштаб."}),
+    el("p",{cls:"muted",textContent:"Живая карта реальных папок и файлов. Размер узла отражает число файлов и занимаемое место. Клик выделяет связи, повторный клик открывает папку или документ."}),
     el("strong",{textContent:graph.totalFiles+" файлов · "+graph.totalFolders+" папок · "+human(graph.bytes)}),
     el("small",{textContent:graph.shownFiles<graph.totalFiles||graph.shownFolders<graph.totalFolders
       ?"Для плавной работы показано "+graph.shownFiles+" из "+graph.totalFiles+" файлов и "+
@@ -46,7 +46,8 @@ export function openLiveDiskMap(files:DiskFile[],folders:string[],
     el("span",{cls:"dkx-legend-folder",textContent:"● Папка"}),
     el("span",{cls:"dkx-legend-file",textContent:"● Файл"}),
     el("span",{cls:"dkx-legend-copy",textContent:"┄ Совпадает SHA-256"}),
-    el("span",{cls:"dkx-legend-tag",textContent:"┄ Общая метка"}));
+    el("span",{cls:"dkx-legend-tag",textContent:"┄ Общая метка"}),
+    el("span",{cls:"dkx-legend-size",textContent:"● Размер узла: файлы и место"}));
   frame.append(canvas,tooltip);
   const fallback=el("div",{cls:"dkx-map-folders"});
   const totals=new Map<string,{bytes:number;count:number}>();
@@ -75,7 +76,23 @@ export function openLiveDiskMap(files:DiskFile[],folders:string[],
   let zoomFrame=0;
   let progress=prefersReduced()?1:0,animation=0,dragging=false,moved=false;
   let startX=0,startY=0,lastX=0,lastY=0;
-  const markerRadius=(n:MapNode)=>n.kind==="root"?13:n.kind==="folder"?8:4;
+  const markerRadius=(n:MapNode)=>mapNodeRadius(n,graph.bytes);
+  const connectedEdges=(n:MapNode)=>graph.edges.filter(e=>e.from===n.id||e.to===n.id);
+  const relationshipCounts=(edges:MapEdge[])=>{
+    const counts={contains:0,duplicate:0,tag:0};
+    for(const edge of edges)counts[edge.kind]++;
+    return counts;
+  };
+  const details=(node:MapNode)=>{
+    const edges=relationshipCounts(connectedEdges(node));
+    const where=node.kind==="root"?"Корень Диска":
+      node.kind==="folder"?node.folder:(node.folder?node.folder+"/":"")+node.name;
+    return (node.kind==="file"?"Файл":node.kind==="folder"?"Папка":"Диск")+" · "+where+
+      " · "+node.count+" "+(node.count===1?"файл":"файлов")+" · "+human(node.size)+
+      (edges.duplicate?" · совпадений SHA-256: "+edges.duplicate:"")+
+      (edges.tag?" · связей по меткам: "+edges.tag:"")+
+      (edges.contains?" · связей вложенности: "+edges.contains:"");
+  };
   const location=(n:MapNode)=>{
     const ease=1-Math.pow(1-progress,3);
     return {x:width/2+panX+n.x*scale*ease,y:height/2+panY+n.y*scale*ease};
@@ -183,12 +200,12 @@ export function openLiveDiskMap(files:DiskFile[],folders:string[],
   const showTip=(node:MapNode|null,p?:{x:number;y:number})=>{
     hover=node;
     if(!node){tooltip.hidden=true;selected.textContent=active?
-      "Выбрано: "+active.name+" · "+human(active.size):
+      details(active):
       "Выберите узел на карте или найдите его по имени";}
     else{
       selected.textContent=(node.kind==="file"?"Файл · ":node.kind==="folder"?"Папка · ":"Диск · ")+
         node.name+" · "+human(node.size);
-      tooltip.textContent=selected.textContent;
+      tooltip.textContent=details(node);
       tooltip.hidden=!p;
       if(p){
         tooltip.style.left=clamp(p.x+12,8,Math.max(8,width-220))+"px";
@@ -200,8 +217,8 @@ export function openLiveDiskMap(files:DiskFile[],folders:string[],
   const choose=(node:MapNode|null)=>{
     active=node;
     openSelected.disabled=!node;
-    selected.textContent=node?"Выбрано: "+node.name+" · "+human(node.size)+
-      " · связанные узлы подсвечены":"Выберите узел на карте";
+    selected.textContent=node?"Выбрано · "+details(node):
+      "Выберите узел на карте";
     tooltip.hidden=true;paint();
   };
   const navigate=(node:MapNode)=>{
