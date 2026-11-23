@@ -418,6 +418,9 @@ async function refreshNoteFileLinks(root) {
 }
 function renderMain() {
   if(!mainNode)return;
+  // Keep the ORIGINAL Canvas/graph state between routes. When Disk is not
+  // active the same element is parked behind the shell, never duplicated.
+  window.__tsukimeraGraph22?.park?.();
   mainNode.replaceChildren();mainNode.dataset.route=route;
   // Only Disk escapes the centered JUUNIBI page width. Other routes keep their layout.
   mainNode.classList.toggle('disk-workspace',route==='disk');
@@ -425,10 +428,20 @@ function renderMain() {
   topTitle.textContent='Tsukimera · '+(item?.label||'Настройки');
   if(route==='settings') return renderSettings();
   if(route==='disk'){
+    if(window.__tsukimeraDisk22Page){
+      mainNode.append(window.__tsukimeraDisk22Page);
+      window.__tsukimeraGraph22?.restore?.();
+      window.__tsukimeraDisk22Page.dispatchEvent(new Event('tsukimera:disk-resume'));
+      return;
+    }
     mainNode.append(el('p','muted','Открываю Диск…'));
     void import('/disk-built/web/pages/disk.js').then(({diskPage})=>{
       if(route!=='disk'||mainNode.dataset.route!=='disk')return;
-      mainNode.replaceChildren(diskPage());
+      const existing=window.__tsukimeraDisk22Page;
+      const page=existing||diskPage();
+      window.__tsukimeraDisk22Page=page;
+      mainNode.replaceChildren(page);
+      window.__tsukimeraGraph22?.restore?.();
     }).catch(error=>{
       console.error('Tsukimera Disk:',error);
       if(route==='disk')mainNode.replaceChildren(el('p','muted','Не удалось открыть Диск: '+error.message));
@@ -1188,6 +1201,16 @@ async function init() {
   await hydrateSqlitePrefs();
   applyUi();
   createShell();
+  // Gentle depth motion under scrolling; the visual layer is pointer-inert
+  // outside Disk. No extra Canvas, no timer, no interception of controls.
+  document.querySelector('.content')?.addEventListener('scroll',event=>{
+    const stage=document.getElementById('tsukimera-universe-stage');
+    if(stage){
+      const offset=Math.max(-28,Math.min(28,
+        (event.currentTarget.scrollTop||0)*.032));
+      stage.style.setProperty('--ts22-shift',offset+'px');
+    }
+  },{passive:true});
   bindKeys();
   await loadConfig();
   await loadDatabaseNotes();
