@@ -209,9 +209,9 @@ try{
   assert.equal(centered?.zoom,1,"Reset must restore 100% zoom");
   await evaluate("document.querySelector('.dk-graph-expand').click()");
   await pause(240);
-  const expanded=await evaluate("(()=>({isExpanded:document.querySelector('.dk-graph-view').classList.contains('dk-graph-expanded'),count:document.querySelectorAll('.dk-graph-view').length,width:document.querySelector('.dk-graph-stage').getBoundingClientRect().width,close:!!document.querySelector('.dk-graph-close')}))()");
-  assert.ok(expanded.isExpanded&&expanded.count===1&&expanded.width>850&&expanded.close,
-    "A single graph must expand into the main display without cloning: "+JSON.stringify(expanded));
+  const graphExpansion=await evaluate("(()=>({isExpanded:document.querySelector('.dk-graph-view').classList.contains('dk-graph-expanded'),count:document.querySelectorAll('.dk-graph-view').length,width:document.querySelector('.dk-graph-stage').getBoundingClientRect().width,close:!!document.querySelector('.dk-graph-close')}))()");
+  assert.ok(graphExpansion.isExpanded&&graphExpansion.count===1&&graphExpansion.width>850&&graphExpansion.close,
+    "A single graph must expand into the main display without cloning: "+JSON.stringify(graphExpansion));
   await evaluate("document.querySelector('.dk-graph-close').click()");
   await pause(240);
   assert.ok(await evaluate("!!document.querySelector('.dk-side > .dk-graph-view')"),
