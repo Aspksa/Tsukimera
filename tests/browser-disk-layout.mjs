@@ -187,14 +187,14 @@ try{
   const clean=await evaluate("(()=>({search:!!document.querySelector('.dk-tree-find'),sort:!!document.querySelector('.dk-tree-sort'),pinned:!!document.querySelector('.dk-tree .dk-pin'),control:document.querySelector('.dk-tree-panel')?.textContent.includes('Закреплённые')}))()");
   assert.deepEqual(clean,{search:false,sort:false,pinned:false,control:false});
   await pause(240);
-  const spatial=await evaluate("(()=>({layer:document.querySelector('.dk-mini-map-canvas')?.dataset.layer,nodes:Number(document.querySelector('.dk-mini-map-canvas')?.dataset.nodes),height:document.querySelector('.dk-mini-map-frame')?.getBoundingClientRect().height,focus:document.querySelectorAll('.dk-omni-focus').length,list:document.querySelectorAll('.dk-omni-row').length,search:!!document.querySelector('.dk-omni-search'),back:!!document.querySelector('.dk-omni-nav'),path:!!document.querySelector('.dk-omni-trail')}))()");
-  assert.equal(spatial.layer,"spatial","The old orbit map should be replaced entirely");
-  assert.ok(spatial.height>=250&&spatial.focus===1&&spatial.list>0&&spatial.search&&spatial.back&&spatial.path,
-    "Spatial workspace did not render actual folders: "+JSON.stringify(spatial));
+  const spatial=await evaluate("(()=>({layer:document.querySelector('.dk-mini-map-canvas')?.dataset.layer,nodes:Number(document.querySelector('.dk-mini-map-canvas')?.dataset.nodes),links:Number(document.querySelector('.dk-mini-map-canvas')?.dataset.links),height:document.querySelector('.dk-mini-map-frame')?.getBoundingClientRect().height,list:document.querySelectorAll('.dk-graph-row').length,search:!!document.querySelector('.dk-graph-search'),expand:!!document.querySelector('.dk-graph-expand'),path:!!document.querySelector('.dk-graph-trail')}))()");
+  assert.equal(spatial.layer,"graph","Old orbit/cards must be replaced by the real graph");
+  assert.ok(spatial.height>=250&&spatial.nodes>1&&spatial.links>0&&spatial.list>0&&spatial.search&&spatial.expand&&spatial.path,
+    "Graph view must render from actual folder/file data: "+JSON.stringify(spatial));
   await evaluate("(()=>{const c=document.querySelector('.dk-mini-map-canvas');for(let i=0;i<3;i++)c.dispatchEvent(new WheelEvent('wheel',{bubbles:true,cancelable:true,deltaY:-110}));})()");
   await pause(490);
-  const zoomedMap=await evaluate("(()=>({saved:JSON.parse(localStorage.getItem('tsukimera.disk.minimap.view.v1')||'null'),zoom:document.querySelector('.dk-omni-zoom-label').textContent}))()");
-  assert.ok(zoomedMap.saved?.zoom>1.2&&zoomedMap.saved?.zoom<=1.65,"Spatial zoom must persist: "+JSON.stringify(zoomedMap));
+  const zoomedMap=await evaluate("JSON.parse(localStorage.getItem('tsukimera.disk.minimap.view.v1')||'null')");
+  assert.ok(zoomedMap?.zoom>1.2&&zoomedMap?.zoom<=3.2,"Zoom must persist: "+JSON.stringify(zoomedMap));
   let sqliteView=null;
   for(let i=0;i<28;i++){
     const prefs=(await(await fetch(origin+"/api/preferences")).json()).preferences||{};
@@ -202,25 +202,35 @@ try{
     if(sqliteView?.zoom>1.2)break;
     await pause(120);
   }
-  assert.ok(sqliteView?.zoom>1.2,"Spatial viewport must persist to SQLite");
+  assert.ok(sqliteView?.zoom>1.2,"Graph viewport must persist to SQLite");
   await evaluate("document.querySelector('.dk-mini-map-reset').click()");
   await pause(360);
-  assert.equal(await evaluate("document.querySelector('.dk-omni-zoom-label').textContent"),"100%");
-  await evaluate("document.querySelector('.dk-tree-all[aria-label=\"Развернуть все папки\"]').click()");
+  const centered=await evaluate("JSON.parse(localStorage.getItem('tsukimera.disk.minimap.view.v1')||'null')");
+  assert.equal(centered?.zoom,1,"Reset must restore 100% zoom");
+  await evaluate("document.querySelector('.dk-graph-expand').click()");
+  await pause(240);
+  const graphExpansion=await evaluate("(()=>({isExpanded:document.querySelector('.dk-graph-view').classList.contains('dk-graph-expanded'),count:document.querySelectorAll('.dk-graph-view').length,width:document.querySelector('.dk-graph-stage').getBoundingClientRect().width,close:!!document.querySelector('.dk-graph-close')}))()");
+  assert.ok(graphExpansion.isExpanded&&graphExpansion.count===1&&graphExpansion.width>850&&graphExpansion.close,
+    "A single graph must expand into the main display without cloning: "+JSON.stringify(graphExpansion));
+  await evaluate("document.querySelector('.dk-graph-close').click()");
+  await pause(240);
+  assert.ok(await evaluate("!!document.querySelector('.dk-side > .dk-graph-view')"),
+    "Closing the enlarged graph must restore it below the folder tree");
+    await evaluate("document.querySelector('.dk-tree-all[aria-label=\"Развернуть все папки\"]').click()");
   assert.ok(await evaluate("!!document.querySelector('.dk-node[data-folder=\"Работа/2026\"]')"),
     "Full folder hierarchy must remain operable");
   await evaluate("document.querySelector('.dk-node[data-folder=\"Работа/2026\"] .dk-node-label').click()");
   await pause(300);
-  const hierarchy=await evaluate("(()=>({selected:document.querySelector('.dk-node.current')?.dataset.folder,ancestors:[...document.querySelectorAll('.dk-node.dk-ancestor')].map(x=>x.dataset.folder),title:document.querySelector('.dk-mini-map-count')?.textContent,mapFocus:document.querySelector('.dk-mini-map-canvas')?.dataset.focus,center:document.querySelector('.dk-omni-focus strong')?.textContent,trail:document.querySelector('.dk-omni-trail')?.textContent}))()");
+  const hierarchy=await evaluate("(()=>({selected:document.querySelector('.dk-node.current')?.dataset.folder,ancestors:[...document.querySelectorAll('.dk-node.dk-ancestor')].map(x=>x.dataset.folder),title:document.querySelector('.dk-graph-count')?.textContent,mapFocus:document.querySelector('.dk-mini-map-canvas')?.dataset.focus,trail:document.querySelector('.dk-graph-trail')?.textContent}))()");
   assert.equal(hierarchy.selected,"Работа/2026");
   assert.ok(hierarchy.ancestors.includes("Работа")&&hierarchy.ancestors.includes("Работа/2026"));
   assert.equal(hierarchy.mapFocus,"Работа/2026");
-  assert.ok(hierarchy.trail.includes("Работа")&&hierarchy.center.includes("2026"),
-    "The selected folder must be the central focus: "+JSON.stringify(hierarchy));
-  assert.match(hierarchy.title,/папок/);
-  const searchLocal=await evaluate("(()=>{const x=document.querySelector('.dk-omni-search');x.value='zzzzz-nonexistent';x.dispatchEvent(new Event('input',{bubbles:true}));return {empty:!!document.querySelector('.dk-omni-empty'),list:document.querySelectorAll('.dk-omni-row').length};})()");
-  assert.ok(searchLocal.empty&&searchLocal.list===0,"Local spatial search should not invent files");
-  await evaluate("(()=>{const x=document.querySelector('.dk-omni-search');x.value='';x.dispatchEvent(new Event('input',{bubbles:true}));})()");
+  assert.ok(hierarchy.trail.includes("Работа")&&hierarchy.trail.includes("2026"),
+    "Selected folder must focus the same actual graph: "+JSON.stringify(hierarchy));
+  assert.match(hierarchy.title,/узлов/);
+  const searchLocal=await evaluate("(()=>{const x=document.querySelector('.dk-graph-search');x.value='zzzzz-nonexistent';x.dispatchEvent(new Event('input',{bubbles:true}));return {status:document.querySelector('.dk-graph-status')?.textContent,count:document.querySelector('.dk-graph-canvas')?.dataset.nodes};})()");
+  assert.match(searchLocal.status,/Совпадений нет/,"Search must not invent any graph nodes");
+  await evaluate("(()=>{const x=document.querySelector('.dk-graph-search');x.value='';x.dispatchEvent(new Event('input',{bubbles:true}));})()");
   await evaluate("document.querySelector('.dk-tree-all[aria-label=\"Свернуть все папки\"]').click()");
   assert.equal(await evaluate("document.querySelector('.dk-node[data-folder=\"Работа/2026\"]')===null"),true,
     "Collapse all should hide descendants without deleting folder data");

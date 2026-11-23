@@ -1,482 +1,391 @@
 /**
- * Tsukimera Disk 12.0 — compact spatial explorer UNDER the folder hierarchy.
- * Inspired by OmniBrille / Circle Explorer interactions; original TypeScript
- * implementation using existing Canvas, DOM, SQLite preferences and Disk API.
- * Data is read-only here; file operations remain in disk.ts and the server.
+ * Tsukimera Disk 13.0 — Obsidian-style connected graph, original HTML5 Canvas.
+ * Replaces the former card/orbit scene completely. No Obsidian source code,
+ * new packages, cloud inference, background process or filesystem mutation.
  */
-import {el,icon} from "../dom";
-import {api,diskRawUrl,type DiskFile} from "../api";
+import {el} from "../dom";
 import {human} from "./disk-model";
-import {
-  spatialScene,spatialSlots,spatialChanges,spatialNeighbor,spatialFileType,
-  spatialAge,SPATIAL_DENSITY_KEY,type SpatialItem,type SpatialScene
-} from "./disk-map-spatial";
+import {graphFromCatalog,graphInitial,graphForceStep,type GraphNode,type GraphLink,
+  type GraphScene,type GraphPoint,type LinkKind} from "./disk-map-graph";
 import {normalizeMiniView,MINI_VIEW_KEY,clampView} from "./disk-map-mini-model";
+import {SPATIAL_DENSITY_KEY} from "./disk-map-spatial";
 import {writePreference} from "../preferences";
+import type {DiskFile} from "../api";
 
-type MapActions={openFolder:(folder:string)=>void;openFile:(id:string)=>void};
+type Actions={openFolder:(folder:string)=>void;openFile:(id:string)=>void};
 export interface MiniDiskMap{
-  root:HTMLElement;
-  update:(files:DiskFile[],folders:string[],current:string)=>void;
+  root:HTMLElement;update:(files:DiskFile[],folders:string[],current:string)=>void;
   highlightFile:(id:string|null)=>void;
 }
+const rgb={folder:"#dbad62",file:"#bbc6d9",tag:"#af8ce2",duplicate:"#dc9872"};
+const label=(p:string)=>p?p.split("/").pop()||p:"Мой Диск";
 const parentOf=(p:string)=>p.includes("/")?p.slice(0,p.lastIndexOf("/")):"";
-const shortName=(p:string)=>p?p.split("/").pop()||p:"Мой Диск";
-const sortRu=(a:string,b:string)=>a.localeCompare(b,"ru",{numeric:true,sensitivity:"base"});
-const getFile=(files:readonly DiskFile[],id:string)=>files.find(f=>f.id===id&&!f.deletedAt);
-const colours:Record<ReturnType<typeof spatialFileType>|"folder",string>={
-  folder:"#dfb873",image:"#76bee0",document:"#dfb873",archive:"#aa96d6",
-  video:"#d99ac4",audio:"#77c5af",code:"#91afdb",other:"#9b9eac"
-};
-const button=(content:string,label:string,run:()=>void,cls="dk-omni-tool")=>{
-  const b=el("button",{type:"button",cls,title:label,attrs:{"aria-label":label},textContent:content});
-  b.addEventListener("click",run);
-  return b;
+const reduced=()=>window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+const small=(n:number)=>Number.isFinite(n)?Math.round(n):0;
+const button=(content:string,name:string,fn:()=>void,cls="dk-graph-btn")=>{
+  const b=el("button",{type:"button",cls,title:name,attrs:{"aria-label":name},textContent:content});
+  b.addEventListener("click",fn);return b;
 };
 
-export function createMiniDiskMap(actions:MapActions):MiniDiskMap{
-  const saved=normalizeMiniView((()=>{try{return JSON.parse(localStorage.getItem(MINI_VIEW_KEY)||"null");}catch{return null;}})());
-  const view={...saved,zoom:clampView(saved.zoom,.75,1.65)};
-  const count=el("small",{cls:"dk-mini-map-count",textContent:"0 папок · 0 файлов"});
-  const canvas=el("canvas",{cls:"dk-mini-map-canvas",attrs:{
+export function createMiniDiskMap(actions:Actions):MiniDiskMap{
+  const storage=normalizeMiniView((()=>{try{return JSON.parse(localStorage.getItem(MINI_VIEW_KEY)||"null");}catch{return null;}})());
+  let zoomLevel=clampView(storage.zoom,.7,3.2),panX=storage.panX,panY=storage.panY;
+  const canvas=el("canvas",{cls:"dk-mini-map-canvas dk-graph-canvas",attrs:{
     tabindex:"0",role:"application",
-    "aria-label":"Живая карта: стрелки — выбор ближайшего объекта, Enter — открыть, клавиши + и - — масштаб, Backspace — назад, ввод имени — поиск."}});
-  const nodes=el("div",{cls:"dk-omni-nodes"});
-  const frame=el("div",{cls:"dk-mini-map-frame dk-omni-stage"},canvas,nodes);
-  const list=el("div",{cls:"dk-omni-list",attrs:{role:"group","aria-label":"Содержимое текущей папки"}});
-  const trail=el("nav",{cls:"dk-omni-trail",attrs:{"aria-label":"Путь папки"}});
-  const siblings=el("div",{cls:"dk-omni-neighbors",hidden:true,attrs:{"aria-label":"Соседние папки"}});
-  const search=el("input",{type:"search",cls:"dk-omni-search",placeholder:"Найти файл или папку",
-    attrs:{"aria-label":"Поиск внутри текущей папки"}});
-  const status=el("div",{cls:"dk-mini-map-status dk-omni-status",attrs:{role:"status","aria-live":"polite"},textContent:"Выберите папку или файл"});
-  const pageLabel=el("small",{cls:"dk-omni-page-label"});
-  const zoomLabel=el("span",{cls:"dk-omni-zoom-label",textContent:"100%"});
-  const back=button("←","Назад по истории карты",()=>backHistory());
-  const up=button("↑","На уровень выше",()=>navigate(parentOf(current)));
-  const home=button("⌂","В корень Диска",()=>navigate(""));
-  const prev=button("‹","Предыдущая группа файлов",()=>changePage(-1));
-  const next=button("›","Следующая группа файлов",()=>changePage(1));
-  const zoomOut=button("−","Уменьшить карту",()=>zoom(.88));
-  const zoomIn=button("+","Увеличить карту",()=>zoom(1.12));
-  const reset=button("Центр","Сбросить масштаб карты",()=>resetView(),"dk-mini-map-reset dk-omni-tool");
-  const preview=el("section",{cls:"dk-omni-preview",hidden:true,attrs:{"aria-label":"Закреплённый предпросмотр файла"}});
-  const previewName=el("strong");
-  const previewClose=button("×","Открепить предпросмотр",()=>{pinnedId=null;preview.hidden=true;},"dk-omni-inline-btn");
-  const previewBody=el("div",{cls:"dk-omni-preview-body"});
-  preview.append(el("div",{cls:"dk-omni-preview-head"},previewName,previewClose),previewBody);
-  const root=el("section",{cls:"dk-mini-map dk-omni-explorer",attrs:{"aria-label":"Живая карта Диска"}},
-    el("header",{cls:"dk-omni-head"},
-      el("div",{cls:"dk-omni-titles"},el("strong",{textContent:"Живая карта"}),count),
-      el("div",{cls:"dk-omni-nav"},back,up,home)),
-    el("div",{cls:"dk-omni-utility"},
-      trail,siblings,
-      el("div",{cls:"dk-omni-search-wrap"},icon("search",15),search)),
-    el("div",{cls:"dk-omni-workspace"},
-      frame,
-      el("aside",{cls:"dk-omni-panel",attrs:{"aria-label":"Список объектов карты"}},
-        el("div",{cls:"dk-omni-list-head"},el("strong",{textContent:"Рядом с папкой"}),el("small",{textContent:"Нажмите, чтобы открыть"})),
-        list,el("div",{cls:"dk-omni-pager"},prev,pageLabel,next))),
-    preview,
-    el("footer",{cls:"dk-omni-foot"},status,
-      el("div",{cls:"dk-omni-zoom"},zoomOut,zoomLabel,zoomIn,reset)));
-
-  let files:DiskFile[]=[],folders:string[]=[],current="",filter="",page=0;
-  let scene:SpatialScene=spatialScene([],[],"");
-  let history:string[]=[];
-  let pendingNav:string|null=null;
-  let selected=-1,positions:Array<{x:number;y:number}>=[];
-  let savedSnapshot:DiskFile[]|null=null;
-  let changed=new Map<string,"added"|"modified"|"removed">();
-  let peekFolder:string|null=null,pinnedId:string|null=null,previewGen=0;
-  let renderLimit=0,queued=false,raf=0,saveTimer=0,mounted=false;
-  let dragging=false,moved=false,startX=0,startY=0,startPanX=0,startPanY=0;
-  let typed="",typedAt=0;
-  const limitForWidth=()=>frame.clientWidth<560?6:frame.clientWidth<760?8:
-    (localStorage.getItem(SPATIAL_DENSITY_KEY)==="detailed"?12:8);
-  const save=()=>{
+    "aria-label":"Граф файлов как Obsidian: точки и реальные связи. Нажмите точку для открытия. Колесо — масштаб; перемещение — сдвиг или закрепление точки. Стрелки — выбор, Enter — открыть, Esc — закрыть расширенный граф."}});
+  const frame=el("div",{cls:"dk-mini-map-frame dk-omni-stage dk-graph-stage"},canvas);
+  const search=el("input",{type:"search",cls:"dk-omni-search dk-graph-search",placeholder:"Поиск узла…",attrs:{"aria-label":"Найти объект на графе"}});
+  const total=el("small",{cls:"dk-mini-map-count dk-graph-count"});
+  const status=el("div",{cls:"dk-mini-map-status dk-omni-status dk-graph-status",textContent:"Связи папок и документов",attrs:{role:"status","aria-live":"polite"}});
+  const breadcrumb=el("nav",{cls:"dk-omni-trail dk-graph-trail",attrs:{"aria-label":"Текущая папка карты"}});
+  const list=el("div",{cls:"dk-omni-list dk-graph-list",attrs:{role:"group","aria-label":"Доступный список узлов"}});
+  const listPanel=el("details",{cls:"dk-graph-list-panel"},el("summary",{textContent:"Список узлов"}),list);
+  const depthLabel=el("span",{cls:"dk-graph-depth-label",textContent:"2 уровня"});
+  const depthBtn=button("2","Глубина графа: изменить количество уровней",()=>{
+    depth=depth===3?1:depth+1;
+    depthLabel.textContent=depth+" ур.";
+    render();
+  });
+  const tagBtn=button("#","Показать или скрыть связи по меткам",()=>{
+    tagsEnabled=!tagsEnabled;tagBtn.setAttribute("aria-pressed",String(tagsEnabled));render();
+  });
+  tagBtn.setAttribute("aria-pressed","true");
+  const dupBtn=button("≡","Показать или скрыть дубликаты SHA-256",()=>{
+    duplicatesEnabled=!duplicatesEnabled;dupBtn.setAttribute("aria-pressed",String(duplicatesEnabled));render();
+  });
+  dupBtn.setAttribute("aria-pressed","true");
+  const zoomOut=button("−","Уменьшить граф",()=>changeZoom(.84));
+  const zoomIn=button("+","Увеличить граф",()=>changeZoom(1.18));
+  const reset=button("⌖","Центрировать граф",()=>{panX=0;panY=0;zoomLevel=1;saveViewport();draw();},"dk-mini-map-reset dk-graph-btn");
+  const expand=button("⤢","Развернуть граф связей",()=>setExpanded(!expanded),"dk-graph-expand dk-graph-btn");
+  const close=button("×","Закрыть большой граф",()=>setExpanded(false),"dk-graph-close dk-graph-btn");
+  const up=button("↑","На уровень выше",()=>{if(current)actions.openFolder(parentOf(current));});
+  const root=el("section",{cls:"dk-mini-map dk-omni-explorer dk-graph-view",attrs:{"aria-label":"Живая карта связей файлов"}},
+    el("header",{cls:"dk-graph-head"},
+      el("div",{cls:"dk-graph-title"},el("strong",{textContent:"Граф связей"}),total),
+      el("div",{cls:"dk-graph-actions"},up,expand,close)),
+    el("div",{cls:"dk-graph-utility"},
+      breadcrumb,
+      el("div",{cls:"dk-graph-search-wrap"},search)),
+    el("div",{cls:"dk-graph-controls"},depthBtn,depthLabel,tagBtn,dupBtn,
+      el("span",{cls:"dk-graph-zoom"},zoomOut,zoomIn,reset)),
+    frame,
+    el("footer",{cls:"dk-graph-footer"},status,
+      el("div",{cls:"dk-graph-legend"},
+        el("span",{textContent:"● Папки",cls:"dk-graph-legend-folder"}),
+        el("span",{textContent:"● Файлы",cls:"dk-graph-legend-file"}),
+        el("span",{textContent:"● Метки",cls:"dk-graph-legend-tag"}))),
+    listPanel);
+  let files:DiskFile[]=[],folders:string[]=[],current="",depth=2;
+  let tagsEnabled=true,duplicatesEnabled=true;
+  let scene:GraphScene=graphFromCatalog([],[],"");
+  let coords=new Map<string,GraphPoint>();
+  let frameNumber=0,raf=0,resizeObserver:ResizeObserver|null=null;
+  let hovered:string|null=null,selected:string|null=null,query="";
+  let expanded=false,originalParent:Node|null=null,originalNext:Node|null=null;
+  let saveTimer=0,dragTarget:string|null=null,dragStarted=false,moveTarget=false;
+  let startX=0,startY=0,startPanX=0,startPanY=0;
+  let homePage:HTMLElement|null=null;
+  let lastFocusFolder="";
+  let tooltip=el("div",{cls:"dk-graph-tooltip",hidden:true});
+  frame.append(tooltip);
+  function saveViewport(){
     clearTimeout(saveTimer);
-    saveTimer=window.setTimeout(()=>writePreference(MINI_VIEW_KEY,JSON.stringify(view)),250);
-  };
-  function navigate(folder:string,record=true){
-    if(folder===current)return;
-    if(record)history.push(current);
-    history=history.slice(-32);
-    pendingNav=folder;
-    actions.openFolder(folder);
+    saveTimer=window.setTimeout(()=>writePreference(MINI_VIEW_KEY,JSON.stringify({
+      zoom:zoomLevel,panX,panY,focus:""
+    })),280);
   }
-  function backHistory(){
-    const destination=history.pop();
-    if(destination!==undefined)navigate(destination,false);
+  function setExpanded(value:boolean){
+    if(value===expanded)return;
+    expanded=value;
+    if(value){
+      originalParent=root.parentNode;originalNext=root.nextSibling;
+      homePage=root.closest<HTMLElement>(".disk-page");
+      document.body.append(root);
+      root.classList.add("dk-graph-expanded");
+      expand.textContent="⤡";expand.setAttribute("aria-label","Свернуть граф связей");
+      canvas.focus({preventScroll:true});
+    }else{
+      root.classList.remove("dk-graph-expanded");
+      expand.textContent="⤢";expand.setAttribute("aria-label","Развернуть граф связей");
+      if(originalParent){
+        if(originalNext&&originalNext.parentNode===originalParent)
+          originalParent.insertBefore(root,originalNext);
+        else originalParent.appendChild(root);
+      }
+      canvas.focus({preventScroll:true});
+    }
+    requestAnimationFrame(()=>{render();});
   }
-  function changePage(delta:number){
-    page=Math.max(0,Math.min(scene.pages-1,page+delta));
-    selected=-1;peekFolder=null;render();
+  function changeZoom(factor:number){
+    zoomLevel=clampView(zoomLevel*factor,.7,3.2);
+    saveViewport();draw();
   }
-  function zoom(multiplier:number){
-    view.zoom=clampView(view.zoom*multiplier,.75,1.65);
-    save();schedulePaint();
+  function navigate(node:GraphNode){
+    if(node.kind==="folder")actions.openFolder(node.folder);
+    else if(node.kind==="file"&&node.fileId)actions.openFile(node.fileId);
+    else if(node.kind==="tag"){
+      query=node.name.slice(1);search.value=query;updateSearch();
+    }
   }
-  function resetView(){
-    view.zoom=1;view.panX=0;view.panY=0;view.focus="";
-    save();schedulePaint();
+  function moveTo(node:GraphNode){
+    selected=node.id;hovered=node.id;
+    status.textContent=node.name+(node.kind==="file"?" · "+human(node.size):"");
+    highlightFileCards(node);
+    draw();
   }
-  function markFileCards(id:string|null){
-    const pageRoot=root.closest(".disk-page");
-    if(!pageRoot)return;
-    for(const element of pageRoot.querySelectorAll<HTMLElement>(".dk-file.dk-map-linked"))
-      element.classList.remove("dk-map-linked");
-    if(!id)return;
-    for(const element of pageRoot.querySelectorAll<HTMLElement>(".dk-file[data-file-id]"))
-      if(element.dataset.fileId===id)element.classList.add("dk-map-linked");
+  function highlightFileCards(node:GraphNode|null){
+    const page=homePage||root.closest<HTMLElement>(".disk-page");
+    if(!page)return;
+    for(const e of page.querySelectorAll<HTMLElement>(".dk-file.dk-map-linked"))
+      e.classList.remove("dk-map-linked");
+    if(node?.fileId)
+      for(const e of page.querySelectorAll<HTMLElement>(".dk-file[data-file-id]"))
+        if(e.dataset.fileId===node.fileId)e.classList.add("dk-map-linked");
   }
   function highlightFile(id:string|null){
-    const index=id===null?-1:scene.items.findIndex(it=>it.id==="file:"+id);
-    if(index===selected)return;
-    selected=index;
-    highlight();
+    const node=scene.nodes.find(n=>n.fileId===id);
+    if(id&&!node)return;
+    selected=node?.id||null;
+    hovered=selected;highlightFileCards(node||null);draw();
   }
-  function selectItem(item:SpatialItem,index:number){
-    selected=index;
-    status.textContent=(item.kind==="folder"?"Папка · ":"Файл · ")+item.name+
-      " · "+human(item.size)+(item.duplicates?" · совпадений SHA-256: "+item.duplicates:"");
-    highlight();
-  }
-  function highlight(){
-    for(const element of root.querySelectorAll<HTMLElement>("[data-index]"))
-      element.classList.toggle("is-selected",Number(element.dataset.index)===selected);
-    const item=scene.items[selected];
-    markFileCards(item?.kind==="file"?item.id.slice(5):null);
-    canvas.dataset.selected=item?.id||"";
-    schedulePaint();
-  }
-  function activate(item:SpatialItem){
-    if(item.kind==="folder")navigate(item.folder);
-    else actions.openFile(item.id.slice(5));
-  }
-  function settingsFor(item:SpatialItem):{kind:string;type:string;age:string;color:string}{
-    const type=item.kind==="folder"?"folder":spatialFileType(item.name);
-    return {kind:item.kind,type,age:spatialAge(item.uploadedAt),color:colours[type]};
-  }
-  function makeItem(item:SpatialItem,index:number,graphic:boolean):HTMLButtonElement{
-    const style=settingsFor(item);
-    const b=el("button",{type:"button",cls:(graphic?"dk-omni-node":"dk-omni-row")+
-      " kind-"+item.kind,attrs:{"data-index":String(index),"data-id":item.id,
-      "data-type":style.type,
-      "data-age":style.age,
-      "data-changed":item.kind==="file"?(changed.get(item.id.slice(5))||""):"",
-      "aria-label":(item.kind==="folder"?"Открыть папку ":"Открыть файл ")+item.name}});
-    b.style.setProperty("--dk-type",style.color);
-    b.style.setProperty("--dk-age",style.age==="today"?"#77c5af":style.age==="week"?"#7eaed7":"transparent");
-    const name=el("span",{cls:"dk-omni-item-name",textContent:item.name,title:item.name});
-    const meta=el("small",{cls:"dk-omni-item-meta",textContent:item.kind==="folder"?
-      item.count+" файлов":human(item.size)+(item.duplicates?" · SHA ×"+(item.duplicates+1):"")});
-    const track=el("div",{cls:"dk-omni-size-track",attrs:{"aria-hidden":"true"}},
-      el("div",{cls:"dk-omni-size-bar"}));
-    const fraction=scene.items.reduce((largest,it)=>Math.max(largest,it.size),0);
-    (track.firstElementChild as HTMLElement).style.width=
-      Math.round(item.size/Math.max(1,fraction)*100)+"%";
-    b.append(el("span",{cls:"dk-omni-glyph",attrs:{"aria-hidden":"true"}},
-        icon(item.kind==="folder"?"folder":style.type==="image"?"image":
-          style.type==="code"?"file-code":"file",graphic?17:16)),
-      el("span",{cls:"dk-omni-item-copy"},name,meta,track),
-      el("span",{cls:"dk-omni-age",title:"Добавлено: "+(item.uploadedAt||"неизвестно"),attrs:{"aria-hidden":"true"}}));
-    if(item.kind==="file"&&item.duplicates)
-      b.title=item.name+" · подтверждено SHA-256: "+item.duplicates+" других файлов";
-    else b.title=item.name;
-    b.addEventListener("pointerenter",()=>{if(!dragging)selectItem(item,index);});
-    b.addEventListener("focus",()=>selectItem(item,index));
-    b.addEventListener("click",()=>activate(item));
-    return b;
-  }
-  function renderPeek(host:HTMLElement,item:SpatialItem){
-    if(peekFolder!==item.folder)return;
-    const near=spatialScene(files,folders,item.folder,0,4);
-    const body=el("div",{cls:"dk-omni-folder-peek",attrs:{"aria-label":"Предпросмотр папки "+item.name}});
-    body.append(el("small",{textContent:near.total+" объектов внутри"}));
-    for(const child of near.items){
-      const open=button((child.kind==="folder"?"▸ ":"· ")+child.name,
-        "Открыть "+child.name,()=>activate(child),"dk-omni-peek-item");
-      body.append(el("div",{cls:"dk-omni-peek-row"},open));
-    }
-    if(near.total>near.items.length)body.append(el("small",{textContent:"Ещё "+(near.total-near.items.length)}));
-    host.append(body);
-  }
-  function renderListItem(item:SpatialItem,index:number){
-    const unit=el("div",{cls:"dk-omni-list-unit"});
-    const actionsRow=el("div",{cls:"dk-omni-list-actions"});
-    actionsRow.append(makeItem(item,index,false));
-    if(item.kind==="folder"){
-      const peek=button(peekFolder===item.folder?"−":"▸","Показать содержимое папки "+item.name,()=>{
-        peekFolder=peekFolder===item.folder?null:item.folder;
-        render();
-      },"dk-omni-inline-btn");
-      peek.setAttribute("aria-expanded",String(peekFolder===item.folder));
-      actionsRow.append(peek);
-    }else{
-      const pin=button(pinnedId===item.id.slice(5)?"★":"☆",
-        "Закрепить предпросмотр "+item.name,()=>{
-          pinnedId=pinnedId===item.id.slice(5)?null:item.id.slice(5);
-          void updatePreview();render();
-        },"dk-omni-inline-btn");
-      pin.setAttribute("aria-pressed",String(pinnedId===item.id.slice(5)));
-      actionsRow.append(pin);
-    }
-    unit.append(actionsRow);
-    if(item.kind==="folder")renderPeek(unit,item);
-    return unit;
-  }
-  async function updatePreview(){
-    const id=pinnedId;
-    const file=id?getFile(files,id):undefined;
-    const generation=++previewGen;
-    if(!file){preview.hidden=true;pinnedId=null;return;}
-    preview.hidden=false;previewName.textContent=file.name;previewName.title=file.name;
-    const extension=file.name.split(".").pop()?.toLowerCase()||"";
-    const previewNode=el("div",{textContent:"Предпросмотр загружается…"});
-    previewBody.replaceChildren(previewNode);
-    if(["png","jpg","jpeg","gif","webp","bmp","svg"].includes(extension)){
-      previewBody.replaceChildren(el("img",{src:diskRawUrl(file),alt:file.name,loading:"lazy"}));
-    }else if(extension==="pdf"){
-      const iframe=el("iframe",{src:diskRawUrl(file),title:"PDF: "+file.name,
-        attrs:{"sandbox":"","referrerpolicy":"no-referrer"}});
-      previewBody.replaceChildren(iframe);
-    }else if(["txt","md","csv","json","ts","js","css","html","py","log"].includes(extension)){
-      const response=await api.diskText(file.id);
-      if(generation!==previewGen||pinnedId!==id)return;
-      previewBody.replaceChildren(response.ok?
-        el("pre",{textContent:response.value.text.slice(0,3600)}):
-        el("p",{textContent:"Не удалось прочитать файл: "+response.error.message}));
-    }else{
-      previewBody.replaceChildren(el("p",{textContent:"Для этого формата используйте основную панель сведений."}));
-    }
-  }
-  function renderTrail(){
-    trail.replaceChildren();
-    const parts=current?current.split("/"):[];
-    const parents=["",...parts.map((_,i)=>parts.slice(0,i+1).join("/"))].slice(-4);
-    for(let i=0;i<parents.length;i++){
-      const folder=parents[i]!;
-      if(i)trail.append(el("span",{cls:"dk-omni-slash",textContent:"/"}));
-      const crumb=button(shortName(folder),"Перейти: "+(folder||"Корень"),()=>navigate(folder),"dk-omni-crumb"+(folder===current?" is-current":""));
-      crumb.title=folder||"Мой Диск";
-      if(folder===current)crumb.setAttribute("aria-current","page");
-      trail.append(crumb);
-      if(folder===current){
-        const switcher=button("⌄","Показать соседние папки",()=>renderSiblings(),"dk-omni-inline-btn");
-        trail.append(switcher);
-      }
-    }
-  }
-  function renderSiblings(){
-    siblings.hidden=!siblings.hidden;
-    if(siblings.hidden)return;
-    const peerFolder=parentOf(current);
-    const names=new Set<string>(folders);
-    for(const file of files){
-      if(!file.deletedAt&&file.folder)names.add(file.folder);
-    }
-    const peerNames=[...names].filter(name=>parentOf(name)===peerFolder).sort(sortRu);
-    siblings.replaceChildren();
-    if(!peerNames.length){siblings.textContent="Нет соседних папок";return;}
-    for(const folder of peerNames.slice(0,40)){
-      const item=button(shortName(folder),"Перейти к "+folder,()=>{
-        siblings.hidden=true;navigate(folder);
-      });
-      if(folder===current)item.setAttribute("aria-current","page");
-      siblings.append(item);
-    }
-    if(peerNames.length>40)siblings.append(el("small",{textContent:"Показаны первые 40 из "+peerNames.length}));
-  }
-  function render(){
-    const limit=limitForWidth();
-    renderLimit=limit;
-    scene=spatialScene(files,folders,current,page,limit,filter);
-    page=scene.page;
-    selected=-1;
-    const numChanged=[...changed.values()].filter(x=>x!=="removed").length;
-    const numRemoved=[...changed.values()].filter(x=>x==="removed").length;
-    count.textContent=scene.folders+" папок · "+scene.files+" файлов"+
-      (numChanged?" · "+numChanged+" нов./изм.":"")+
-      (numRemoved?" · "+numRemoved+" удал.":"");
-    back.disabled=history.length===0;up.disabled=!current;home.disabled=!current;
-    prev.disabled=page===0;next.disabled=page===scene.pages-1;
-    pageLabel.textContent=scene.total?((page+1)+" / "+scene.pages):"Пусто";
-    status.textContent=filter?"Найдено: "+scene.total:(current||"Корень")+" · "+scene.total+" объектов";
-    renderTrail();
-    siblings.hidden=true;
-    nodes.replaceChildren();list.replaceChildren();
-    if(!scene.items.length){
-      nodes.append(el("p",{cls:"dk-omni-empty",textContent:filter?"Ничего не найдено":"Папка пустая"}));
-      list.append(el("p",{cls:"dk-omni-list-empty",textContent:"Нет элементов"}));
-    }else{
-      scene.items.forEach((item,i)=>{
-        nodes.append(makeItem(item,i,true));
-        list.append(renderListItem(item,i));
-      });
-    }
-    const remaining=scene.total-(page+1)*limit;
-    if(remaining>0){
-      const more=button("Ещё "+remaining+" элементов","Показать следующую группу",()=>changePage(1),"dk-omni-overflow");
-      nodes.append(more);
-    }
-    ensureFocus();
-    schedulePaint();
-  }
-  function ensureFocus(){
-    let focus=nodes.querySelector<HTMLElement>(".dk-omni-focus");
-    if(focus)return;
-    focus=el("button",{type:"button",cls:"dk-omni-focus",
-      title:current?"Открыть родительскую папку":"Корень Диска",
-      attrs:{"aria-label":current?"Подняться из "+current+" на уровень выше":"Корень Диска"}},
-      el("span",{cls:"dk-omni-focus-symbol",attrs:{"aria-hidden":"true"}},icon("folder-open",23)),
-      el("strong",{textContent:shortName(current),title:current||"Корень"}),
-      el("small",{textContent:current?"Нажмите: вверх":"Текущая папка"}));
-    focus.addEventListener("click",()=>{if(current)navigate(parentOf(current));else canvas.focus();});
-    nodes.append(focus);
-  }
-  function paint(){
-    queued=false;raf=0;
-    if(!root.isConnected)return;
-    const rect=frame.getBoundingClientRect();
-    const w=Math.max(1,rect.width),h=Math.max(1,rect.height);
-    const dpr=Math.min(2,window.devicePixelRatio||1);
-    if(canvas.width!==Math.round(w*dpr)||canvas.height!==Math.round(h*dpr)){
-      canvas.width=Math.round(w*dpr);canvas.height=Math.round(h*dpr);
-    }
-    const ctx=canvas.getContext("2d");
-    if(!ctx)return;
-    ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,w,h);
-    const compact=w<560;
-    const cx=w/2+(compact?0:view.panX),cy=compact?43:h/2+view.panY;
-    const radiusX=Math.max(55,w/2-100)*view.zoom;
-    const radiusY=Math.max(65,h/2-65)*view.zoom;
-    positions=compact?scene.items.map((_,i)=>({
-      x:Math.max(48,Math.min(w-48,w*(i%2?.74:.26))),
-      y:126+Math.floor(i/2)*51
-    })):spatialSlots(scene.items.length).map(p=>({
-      x:cx+(p.x-50)/38*radiusX,y:cy+(p.y-50)/39*radiusY
-    }));
-    ctx.save();ctx.lineCap="round";
-    if(!compact){
-      ctx.beginPath();ctx.ellipse(cx,cy,Math.min(radiusX,w*.49),Math.min(radiusY,h*.49),0,0,2*Math.PI);
-      ctx.strokeStyle="rgba(203,161,86,.12)";ctx.lineWidth=1;ctx.stroke();
-    }
-    positions.forEach((p,i)=>{
-      const picked=i===selected;
-      ctx.beginPath();ctx.moveTo(cx,cy);ctx.lineTo(p.x,p.y);
-      ctx.strokeStyle=picked?"rgba(241,190,104,.9)":"rgba(197,168,119,.22)";
-      ctx.lineWidth=picked?2.2:1;ctx.stroke();
-      const node=nodes.querySelector<HTMLElement>('[data-index="'+i+'"]');
-      if(node){
-        node.style.left=p.x+"px";node.style.top=p.y+"px";
-        // Even in a narrow rail, zoom changes the actual glyph size without
-        // allowing labels to overlap or disappear outside the map.
-        if(compact)node.style.transform="translate(-50%,-50%) scale("+
-          Math.min(1.08,Math.max(.88,view.zoom))+")";
-      }
-    });
-    ctx.beginPath();ctx.arc(cx,cy,compact?43:64,0,2*Math.PI);
-    ctx.strokeStyle="rgba(218,170,89,.28)";ctx.lineWidth=1;ctx.stroke();ctx.restore();
-    const focus=nodes.querySelector<HTMLElement>(".dk-omni-focus");
-    if(focus){
-      focus.style.left=cx+"px";focus.style.top=cy+"px";
-      focus.style.transform="translate(-50%,-50%) scale("+
-        Math.min(1.14,Math.max(.87,view.zoom))+")";
-    }
-    zoomLabel.textContent=Math.round(view.zoom*100)+"%";
-    canvas.dataset.layer="spatial";
-    canvas.dataset.nodes=String(scene.items.length+1);
-    canvas.dataset.paintedNodes=String(scene.items.length+1);
+  function rebuild(){
+    const limit=expanded?(localStorage.getItem(SPATIAL_DENSITY_KEY)==="detailed"?200:150):
+      (localStorage.getItem(SPATIAL_DENSITY_KEY)==="detailed"?80:54);
+    scene=graphFromCatalog(files,folders,current,{depth,limit,
+      includeTags:tagsEnabled,includeDuplicates:duplicatesEnabled});
+    const updated=new Map<string,GraphPoint>();
+    for(const n of scene.nodes)updated.set(n.id,coords.get(n.id)||graphInitial(n));
+    coords=updated;
+    frameNumber=0;
+    total.textContent=scene.nodes.length+" узлов · "+scene.links.length+" связей"+
+      (scene.hidden?" · +"+scene.hidden:"");
+    canvas.dataset.layer="graph";
+    canvas.dataset.nodes=String(scene.nodes.length);
+    canvas.dataset.links=String(scene.links.length);
     canvas.dataset.focus=current;
-    canvas.dataset.page=String(scene.page);
+    drawBreadcrumb();
+    renderAccessibleList();
+    schedule();
   }
-  function schedulePaint(){
-    ensureFocus();
-    if(queued||!root.isConnected)return;
-    queued=true;raf=requestAnimationFrame(paint);
+  function drawBreadcrumb(){
+    breadcrumb.replaceChildren();
+    breadcrumb.append(button("⌂","Корень Диска",()=>actions.openFolder(""),"dk-graph-crumb"));
+    const parts=current?current.split("/"):[];
+    for(let i=0;i<parts.length;i++){
+      const p=parts.slice(0,i+1).join("/");
+      breadcrumb.append(el("span",{textContent:"/"}));
+      breadcrumb.append(button(parts[i]!,"Перейти к "+p,()=>actions.openFolder(p),"dk-graph-crumb"));
+    }
   }
-  search.addEventListener("input",()=>{
-    filter=search.value;page=0;peekFolder=null;render();
-  });
-  frame.addEventListener("wheel",event=>{event.preventDefault();zoom(event.deltaY>0?.9:1.11);},{passive:false});
-  frame.addEventListener("pointerdown",event=>{
-    if(event.button!==0||event.target!==canvas)return;
-    dragging=true;moved=false;startX=event.clientX;startY=event.clientY;
-    startPanX=view.panX;startPanY=view.panY;
+  function renderAccessibleList(){
+    list.replaceChildren();
+    for(const n of scene.nodes){
+      const b=button((n.kind==="folder"?"▸ ":n.kind==="tag"?"# ":"• ")+n.name,
+        "Открыть "+n.name,()=>navigate(n),"dk-omni-row dk-graph-row");
+      b.dataset.nodeId=n.id;
+      b.addEventListener("focus",()=>moveTo(n));
+      b.addEventListener("pointerenter",()=>moveTo(n));
+      list.append(b);
+    }
+  }
+  function updateSearch(){
+    query=search.value.trim().toLocaleLowerCase("ru");
+    const matching=scene.nodes.filter(n=>n.name.toLocaleLowerCase("ru").includes(query));
+    if(query&&matching.length){
+      moveTo(matching[0]!);
+      status.textContent="Найдено "+matching.length+": "+matching[0]!.name;
+    }else if(query)status.textContent="Совпадений нет";
+    else status.textContent=scene.nodes.length+" реальных узлов";
+    draw();
+  }
+  search.addEventListener("input",updateSearch);
+  function projection(){
+    const bounds=frame.getBoundingClientRect(),w=Math.max(1,bounds.width),h=Math.max(1,bounds.height);
+    const fit=Math.min(w/(expanded?1150:650),h/(expanded?850:700));
+    const scale=fit*zoomLevel;
+    return {w,h,scale,cx:w/2+panX,cy:h/2+panY};
+  }
+  function nodeAt(clientX:number,clientY:number):GraphNode|null{
+    const rect=canvas.getBoundingClientRect(),x=clientX-rect.left,y=clientY-rect.top;
+    const {cx,cy,scale}=projection();
+    let best:GraphNode|null=null,bd=Infinity;
+    for(const node of scene.nodes){
+      const p=coords.get(node.id);if(!p)continue;
+      const d=Math.hypot(x-(cx+p.x*scale),y-(cy+p.y*scale));
+      if(d<Math.max(10,(node.kind==="folder"?6:4)*Math.max(1,scale)+5)&&d<bd){best=node;bd=d;}
+    }
+    return best;
+  }
+  function color(node:GraphNode):string{
+    return node.kind==="folder"?rgb.folder:node.kind==="tag"?rgb.tag:rgb.file;
+  }
+  function draw(){
+    if(!root.isConnected)return;
+    const {w,h,cx,cy,scale}=projection();
+    const dpr=Math.min(2,window.devicePixelRatio||1);
+    const pw=Math.round(w*dpr),ph=Math.round(h*dpr);
+    if(canvas.width!==pw||canvas.height!==ph){canvas.width=pw;canvas.height=ph;}
+    const ctx=canvas.getContext("2d");if(!ctx)return;
+    ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,w,h);
+    ctx.fillStyle="#08090e";ctx.fillRect(0,0,w,h);
+    const active=hovered||selected;
+    const neighborhood=new Set<string>(active?[active]:[]);
+    if(active)for(const e of scene.links){
+      if(e.source===active)neighborhood.add(e.target);
+      if(e.target===active)neighborhood.add(e.source);
+    }
+    const searchMatches=new Set(query?scene.nodes.filter(n=>n.name.toLocaleLowerCase("ru").includes(query)).map(n=>n.id):[]);
+    for(const edge of scene.links){
+      const a=coords.get(edge.source),b=coords.get(edge.target);if(!a||!b)continue;
+      const isActive=!!active&&(edge.source===active||edge.target===active);
+      const dim=!!active&&!isActive||!!query&&!searchMatches.has(edge.source)&&!searchMatches.has(edge.target);
+      ctx.beginPath();ctx.moveTo(cx+a.x*scale,cy+a.y*scale);ctx.lineTo(cx+b.x*scale,cy+b.y*scale);
+      ctx.strokeStyle=dim?"rgba(141,151,166,.065)":
+        isActive?(edge.kind==="duplicate"?"rgba(232,151,100,.92)":"rgba(230,185,112,.74)"):
+        edge.kind==="duplicate"?"rgba(216,142,94,.43)":
+        edge.kind==="tag"?"rgba(164,139,200,.32)":"rgba(164,171,190,.22)";
+      ctx.lineWidth=isActive?1.7:edge.kind==="contains"?.8:1;
+      ctx.stroke();
+    }
+    const drawLabels=new Set<string>();
+    if(active)for(const id of neighborhood)drawLabels.add(id);
+    else if(expanded){
+      for(const node of scene.nodes)if(node.kind==="folder"&&node.depth<=1)drawLabels.add(node.id);
+    }else drawLabels.add(scene.focus);
+    if(query)for(const id of searchMatches)drawLabels.add(id);
+    for(const node of scene.nodes){
+      const p=coords.get(node.id);if(!p)continue;
+      const x=cx+p.x*scale,y=cy+p.y*scale;
+      if(x<-32||x>w+32||y<-32||y>h+32)continue;
+      const chosen=node.id===active,match=searchMatches.has(node.id);
+      const faded=active&&!neighborhood.has(node.id)||query&&!match;
+      const size=node.id===scene.focus?6.5:node.kind==="folder"?5.2:node.kind==="tag"?4.1:3.1;
+      const radius=Math.max(2.2,Math.min(12,size*Math.sqrt(Math.max(.55,scale))));
+      ctx.globalAlpha=faded?.17:1;
+      if(chosen||match){
+        ctx.beginPath();ctx.arc(x,y,radius+7,0,Math.PI*2);
+        ctx.fillStyle="rgba(228,180,103,.10)";ctx.fill();
+        ctx.beginPath();ctx.arc(x,y,radius+3,0,Math.PI*2);
+        ctx.strokeStyle="rgba(244,200,133,.75)";ctx.lineWidth=1;ctx.stroke();
+      }
+      ctx.beginPath();ctx.arc(x,y,radius,0,Math.PI*2);
+      ctx.fillStyle=color(node);ctx.fill();
+      ctx.globalAlpha=1;
+      if(drawLabels.has(node.id)&&(!faded||chosen)){
+        const text=node.name.length>28?node.name.slice(0,27)+"…":node.name;
+        ctx.font=(chosen?"600 ":"400 ")+(expanded?12:10)+"px system-ui,sans-serif";
+        const len=ctx.measureText(text).width;
+        const tx=Math.min(w-len-7,Math.max(5,x+radius+4));
+        const ty=Math.max(14,Math.min(h-6,y-5));
+        ctx.fillStyle=chosen?"#f8dbac":"#bfc5d0";
+        ctx.fillText(text,tx,ty);
+      }
+    }
+    canvas.dataset.selected=selected||"";
+    canvas.dataset.paintedNodes=String(scene.nodes.length);
+    tooltip.hidden=!hovered;
+    if(hovered){
+      const n=scene.nodes.find(n=>n.id===hovered);
+      if(n){
+        tooltip.textContent=n.name+" · "+(n.kind==="file"?human(n.size):n.kind==="tag"?"метка":"папка");
+      }
+    }
+  }
+  function schedule(){
+    if(raf)cancelAnimationFrame(raf);
+    const budget=reduced()?1:Math.min(120,scene.nodes.length>140?50:100);
+    const step=()=>{
+      raf=0;if(!root.isConnected)return;
+      if(frameNumber<budget){
+        const energy=graphForceStep(scene.nodes,scene.links,coords,Math.max(.28,1-frameNumber/budget*.65));
+        frameNumber++;draw();
+        if(energy>.035&&frameNumber<budget){raf=requestAnimationFrame(step);return;}
+      }
+      draw();
+    };
+    raf=requestAnimationFrame(step);
+  }
+  // Mouse and touch: drag nodes without dragging files or mutating their position on disk.
+  canvas.addEventListener("pointerdown",event=>{
+    if(event.button!==0)return;
+    const hit=nodeAt(event.clientX,event.clientY);
+    dragTarget=hit?.id||null;dragStarted=true;moveTarget=false;
+    startX=event.clientX;startY=event.clientY;startPanX=panX;startPanY=panY;
+    if(raf)cancelAnimationFrame(raf);
     canvas.setPointerCapture(event.pointerId);
   });
-  frame.addEventListener("pointermove",event=>{
-    if(!dragging)return;
-    if(Math.hypot(event.clientX-startX,event.clientY-startY)>4)moved=true;
-    if(moved){
-      view.panX=clampView(startPanX+event.clientX-startX,-120,120);
-      view.panY=clampView(startPanY+event.clientY-startY,-100,100);
-      schedulePaint();
+  canvas.addEventListener("pointermove",event=>{
+    const hit=nodeAt(event.clientX,event.clientY);
+    if(!dragStarted){
+      const next=hit?.id||null;
+      if(hovered!==next){hovered=next;status.textContent=hit?.name||"Связи файлов и папок";draw();}
+      return;
     }
-  });
-  frame.addEventListener("pointerup",()=>{if(dragging&&moved)save();dragging=false;});
-  frame.addEventListener("pointercancel",()=>{dragging=false;});
-  let pinchDistance=0;
-  frame.addEventListener("touchmove",event=>{
-    if(event.touches.length!==2){pinchDistance=0;return;}
-    const a=event.touches[0]!,b=event.touches[1]!;
-    const distance=Math.hypot(a.clientX-b.clientX,a.clientY-b.clientY);
-    if(pinchDistance>0&&distance>0)zoom(distance/pinchDistance);
-    pinchDistance=distance;event.preventDefault();
-  },{passive:false});
-  frame.addEventListener("touchend",()=>{pinchDistance=0;});
-  canvas.addEventListener("keydown",event=>{
-    if(event.key==="+"||event.key==="="){event.preventDefault();zoom(1.12);}
-    else if(event.key==="-"){event.preventDefault();zoom(.88);}
-    else if(event.key==="0"){event.preventDefault();resetView();}
-    else if(event.key==="Backspace"&&filter){event.preventDefault();search.value="";filter="";render();}
-    else if(event.key==="Backspace"||(event.key==="ArrowLeft"&&event.altKey)){
-      event.preventDefault();backHistory();
-    }else if(event.key==="ArrowUp"&&event.altKey){event.preventDefault();navigate(parentOf(current));}
-    else if(["ArrowUp","ArrowDown","ArrowLeft","ArrowRight"].includes(event.key)){
-      event.preventDefault();
-      const direction=event.key==="ArrowUp"?"up":event.key==="ArrowDown"?"down":
-        event.key==="ArrowLeft"?"left":"right";
-      const nearest=spatialNeighbor(positions,selected,direction);
-      if(nearest>=0){selected=nearest;highlight();
-        status.textContent=scene.items[nearest]!.name;}
-    }else if(event.key==="Enter"&&scene.items[selected]){
-      event.preventDefault();activate(scene.items[selected]!);
-    }else if(event.key==="Escape"&&filter){
-      search.value="";filter="";render();
-    }else if(!event.ctrlKey&&!event.altKey&&!event.metaKey&&event.key.length===1&&/\S/.test(event.key)){
-      event.preventDefault();
-      if(Date.now()-typedAt>1200)typed="";
-      typed+=event.key;typedAt=Date.now();
-      search.value=typed;filter=typed;page=0;render();
-      search.focus();
-    }
-  });
-  let everMounted=false;
-  if(typeof ResizeObserver!=="undefined"){
-    const observer=new ResizeObserver(()=>{
-      if(root.isConnected){
-        if(!mounted){mounted=true;render();}
-        else if(limitForWidth()!==renderLimit)render();
-        else schedulePaint();
-        everMounted=true;
-      }else if(everMounted){
-        observer.disconnect();if(raf)cancelAnimationFrame(raf);
+    const dx=event.clientX-startX,dy=event.clientY-startY;
+    if(Math.hypot(dx,dy)>4)moveTarget=true;
+    if(!moveTarget)return;
+    if(dragTarget){
+      const p=coords.get(dragTarget);
+      if(p){
+        const k=Math.max(.02,projection().scale);
+        p.x+=event.movementX/k;p.y+=event.movementY/k;p.vx=0;p.vy=0;p.pinned=true;
       }
-    });
-    observer.observe(frame);
-  }
-  return {root,highlightFile,update(nextFiles,nextFolders,folder){
-    changed=spatialChanges(savedSnapshot,nextFiles);
-    savedSnapshot=nextFiles.slice();
-    files=nextFiles;folders=nextFolders;
-    if(folder!==current){
-      if(pendingNav!==folder)history.push(current);
-      pendingNav=null;history=history.slice(-32);
-      current=folder;filter="";search.value="";page=0;peekFolder=null;
-      view.panX=0;view.panY=0;
+    }else{
+      panX=Math.max(-1800,Math.min(1800,startPanX+dx));
+      panY=Math.max(-1800,Math.min(1800,startPanY+dy));
     }
-    render();
-    if(pinnedId&&!getFile(files,pinnedId)){pinnedId=null;preview.hidden=true;}
+    draw();
+  });
+  canvas.addEventListener("pointerup",event=>{
+    if(!dragStarted)return;
+    const target=dragTarget;const moved=moveTarget;
+    dragStarted=false;moveTarget=false;dragTarget=null;
+    if(moved){saveViewport();return;}
+    const node=target?scene.nodes.find(n=>n.id===target):undefined;
+    if(node){moveTo(node);navigate(node);}
+    else {selected=null;hovered=null;draw();}
+  });
+  canvas.addEventListener("pointercancel",()=>{dragStarted=false;dragTarget=null;moveTarget=false;});
+  canvas.addEventListener("pointerleave",()=>{if(!dragStarted){hovered=null;draw();}});
+  frame.addEventListener("wheel",e=>{e.preventDefault();changeZoom(e.deltaY>0?.89:1.12);},{passive:false});
+  let pinch=0;
+  frame.addEventListener("touchmove",e=>{
+    if(e.touches.length!==2){pinch=0;return;}
+    const a=e.touches[0]!,b=e.touches[1]!;
+    const distance=Math.hypot(a.clientX-b.clientX,a.clientY-b.clientY);
+    if(pinch>0&&distance)changeZoom(distance/pinch);
+    pinch=distance;e.preventDefault();
+  },{passive:false});
+  frame.addEventListener("touchend",()=>{pinch=0;});
+  canvas.addEventListener("keydown",event=>{
+    if(event.key==="Escape"&&expanded){setExpanded(false);event.preventDefault();}
+    else if(event.key==="+"||event.key==="="){changeZoom(1.16);event.preventDefault();}
+    else if(event.key==="-"){changeZoom(.86);event.preventDefault();}
+    else if(event.key==="0"){panX=0;panY=0;zoomLevel=1;draw();event.preventDefault();}
+    else if(event.key==="Backspace"){if(current)actions.openFolder(parentOf(current));event.preventDefault();}
+    else if(event.key==="Enter"&&selected){
+      const n=scene.nodes.find(n=>n.id===selected);if(n)navigate(n);event.preventDefault();
+    }else if(["ArrowRight","ArrowDown","ArrowLeft","ArrowUp"].includes(event.key)){
+      const here=scene.nodes.findIndex(n=>n.id===selected);
+      const next=(here+(event.key==="ArrowRight"||event.key==="ArrowDown"?1:-1)+scene.nodes.length)%Math.max(1,scene.nodes.length);
+      if(scene.nodes[next])moveTo(scene.nodes[next]!);event.preventDefault();
+    }
+  });
+  document.addEventListener("keydown",event=>{
+    if(event.key==="Escape"&&expanded&&root.isConnected){setExpanded(false);}
+  });
+  // A single ResizeObserver is shared by the compact and expanded form.
+  if(typeof ResizeObserver!=="undefined"){
+    resizeObserver=new ResizeObserver(()=>{if(root.isConnected)draw();});
+    resizeObserver.observe(frame);
+  }
+  return {root,highlightFile,update(newFiles,newFolders,folder){
+    files=newFiles;folders=newFolders;
+    if(folder!==current){
+      current=folder;hovered=null;selected=null;panX=0;panY=0;
+      lastFocusFolder=folder;
+    }
+    rebuild();
   }};
 }

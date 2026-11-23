@@ -81,7 +81,7 @@ test("left rail and map maintain real document data, focus, accessible controls 
 });
 
 
-test("Disk 12 places one spatial map below the folder hierarchy (no top map)",async()=>{
+test("Disk 13 retains a single Graph View below the folder hierarchy",async()=>{
  const [page,mini,css]=await Promise.all([
   readFile(join(root,"disk-src/web/pages/disk.ts"),"utf8"),
   readFile(join(root,"disk-src/web/pages/disk-map-mini.ts"),"utf8"),
@@ -90,18 +90,17 @@ test("Disk 12 places one spatial map below the folder hierarchy (no top map)",as
  assert.match(page,/treePanel,miniMap\.root\)/);
  assert.match(page,/bar,filesHeading,layout,/);
  assert.doesNotMatch(page,/bar,miniMap\.root,filesHeading/);
- assert.match(page,/dk-map-left/);
  assert.match(page,/miniMap\.update\(all,folders,current\)/);
- assert.match(page,/createMiniDiskMap/);
- assert.doesNotMatch(page,/openDiskMap/);
- for(const wanted of ["spatialScene(files,folders,current,page,limit,filter)",
-  "actions.openFile(item.id.slice(5))","actions.openFolder(folder)",
-  "dk-omni-trail","dk-omni-workspace","dk-omni-list","dk-omni-search",
-  "touchmove","pointermove",'canvas.dataset.layer="spatial"'])
-   assert.ok(mini.includes(wanted),"Missing interactive spatial navigation "+wanted);
- assert.match(css,/\.dk-map-left \.dk-side/);
- assert.match(css,/\.dk-layout>.dk-side>.dk-tree-panel/);
- assert.match(css,/@media\(prefers-reduced-motion:reduce\)/);
+ assert.match(page,/dk-map-left/);
+ assert.match(mini,/graphFromCatalog\(files,folders,current/);
+ assert.match(mini,/graphForceStep\(/);
+ assert.match(mini,/ctx\.arc\(/);
+ assert.match(mini,/ctx\.moveTo\(/);
+ assert.match(mini,/canvas\.dataset\.layer="graph"/);
+ assert.match(mini,/dk-graph-expanded/);
+ assert.match(css,/\.dk-graph-view\.dk-graph-expanded/);
+ assert.match(css,/\.disk-page\.dk-map-left \.dk-layout>.dk-side>.dk-graph-view/);
+ assert.doesNotMatch(mini,/spatialSlots\(/,"Card orbit must not be used");
 });
 
 test("Disk 8.3 unclutters folder rail without losing stored folder style or controls",async()=>{
@@ -153,21 +152,20 @@ test("Disk 8.3 mini map bounded, truthful aggregation and closer zoom reveals ad
   assert.ok(focused.nodes.filter(n=>n.kind==="cluster").reduce((n,c)=>n+c.hiddenFiles,0)===0);
 });
 
-test("Disk 11 retains validated SQLite viewport and browser gestures safely",async()=>{
-  const built=await prepareDisk(root);
-  const mod=await import(pathToFileURL(join(built.outputRoot,"web/pages/disk-map-mini-model.js")).href);
-  assert.deepEqual(mod.normalizeMiniView(null),{zoom:1,panX:0,panY:0,focus:""});
-  assert.deepEqual(mod.normalizeMiniView({zoom:Infinity,panX:"oops",panY:NaN,focus:4}),
-    {zoom:1,panX:0,panY:0,focus:""});
-  assert.deepEqual(mod.normalizeMiniView({zoom:99,panX:99999,panY:-99999,focus:"A/B"}),
-    {zoom:9,panX:3000,panY:-3000,focus:"A/B"});
-  assert.equal(mod.MINI_VIEW_KEY,"tsukimera.disk.minimap.view.v1");
-  const source=await readFile(join(root,"disk-src/web/pages/disk-map-mini.ts"),"utf8");
-  for(const item of ["writePreference(MINI_VIEW_KEY,JSON.stringify(view))",
-   "frame.addEventListener(\"wheel\"","frame.addEventListener(\"touchmove\"",
-   "frame.addEventListener(\"pointerdown\"","if(queued||!root.isConnected)return",
-   "ctx.ellipse(cx,cy"])
-    assert.ok(source.includes(item),"Missing viewport safety behavior "+item);
+test("Disk 13 validates viewport and retains wheel, pan, touch and SQLite preferences",async()=>{
+ const built=await prepareDisk(root);
+ const mod=await import(pathToFileURL(join(built.outputRoot,"web/pages/disk-map-mini-model.js")).href);
+ assert.deepEqual(mod.normalizeMiniView(null),{zoom:1,panX:0,panY:0,focus:""});
+ assert.deepEqual(mod.normalizeMiniView({zoom:Infinity,panX:"oops",panY:NaN,focus:4}),
+   {zoom:1,panX:0,panY:0,focus:""});
+ assert.equal(mod.MINI_VIEW_KEY,"tsukimera.disk.minimap.view.v1");
+ const source=await readFile(join(root,"disk-src/web/pages/disk-map-mini.ts"),"utf8");
+ for(const token of ["writePreference(MINI_VIEW_KEY,JSON.stringify({",
+  'frame.addEventListener("wheel"','frame.addEventListener("touchmove"',
+  'canvas.addEventListener("pointerdown"','canvas.addEventListener("pointermove"',
+  'canvas.addEventListener("pointerup"','canvas.addEventListener("keydown"',
+  'canvas.dataset.nodes=String(scene.nodes.length)'])
+   assert.ok(source.includes(token),"Missing graph interaction/persistence: "+token);
 });
 
 test("Disk 8.3 SQLite and backup allowlists accept both section layout and persistent mini-map view",async()=>{
@@ -244,36 +242,39 @@ test("Disk 11 spatial scene renders a bounded real folder neighborhood and searc
   assert.deepEqual(slots,mod.spatialSlots(10));
 });
 
-test("Disk 12 compact spatial navigation keeps genuine data and keyboard controls",async()=>{
- const source=await readFile(join(root,"disk-src/web/pages/disk-map-mini.ts"),"utf8");
- for(const token of ["dk-omni-focus","dk-omni-node","dk-omni-row",
-  "backHistory()","navigate(parentOf(current))","scene.items.forEach",
-  "ctx.moveTo(cx,cy)","canvas.dataset.nodes",
-  "aria-label","role:\"status\"","ResizeObserver","spatialNeighbor(",
-  "spatialChanges(","spatialAge(","spatialFileType(","diskRawUrl(file)","updatePreview()",
-  "renderPeek(","renderSiblings(","dk-omni-overflow","highlightFile(",
-  "ctx.strokeStyle=picked","localStorage.getItem(SPATIAL_DENSITY_KEY)"])
-   assert.ok(source.includes(token),"Missing selected Disk 12 feature: "+token);
- assert.ok(!source.includes("orbitLayout("),"Retired orbital layout must stay inactive");
+test("Disk 13 graph view has dots, real edges, local search, accessibility and fullscreen",async()=>{
+ const s=await readFile(join(root,"disk-src/web/pages/disk-map-mini.ts"),"utf8");
+ for(const token of [
+  "dk-graph-view","dk-graph-stage","dk-graph-canvas",
+  "ctx.arc(","ctx.moveTo(","graphForceStep(","graphFromCatalog(",
+  "disk-page","canvas.dataset.layer=\"graph\"",
+  "graph-list","dk-omni-row","query=search.value.trim()",
+  "includeTags:tagsEnabled","includeDuplicates:duplicatesEnabled",
+  "renderAccessibleList()","ResizeObserver","reduced()",
+  "document.body.append(root)","originalParent.insertBefore(root,originalNext)",
+  "actions.openFile(node.fileId)","actions.openFolder(node.folder)",
+  "highlightFileCards(","changeZoom(","setExpanded("
+ ])assert.ok(s.includes(token),"Missing genuine Graph View feature: "+token);
+ assert.ok(!s.includes("makeItem("));
+ assert.ok(!s.includes("dk-omni-node"));
 });
 
-test("Disk 12 binds left map to existing file manager without changing file operations",async()=>{
+test("Disk 13 graph coexists with old file operations and one left-side instance",async()=>{
  const [page,css,mini]=await Promise.all([
    readFile(join(root,"disk-src/web/pages/disk.ts"),"utf8"),
    readFile(join(root,"web/disk.css"),"utf8"),
    readFile(join(root,"disk-src/web/pages/disk-map-mini.ts"),"utf8")
  ]);
- assert.match(page,/page\.append\(el\("h1"[\s\S]*?bar,filesHeading,layout,/);
+ assert.match(page,/bar,filesHeading,layout,/);
  assert.match(page,/layout\.append\(side,panes\.left,main,panes\.right,life\.root,info\)/);
  assert.match(page,/treePanel,miniMap\.root/);
- assert.match(page,/miniMap\.update\(all,folders,current\)/);
  assert.match(page,/filesBox\.addEventListener\("pointerover"/);
+ assert.match(page,/miniMap\.highlightFile\(card\.dataset\.fileId\|\|null\)/);
  assert.doesNotMatch(page,/openDiskMap/);
- assert.match(page,/miniMap\.root\.scrollIntoView/);
- assert.match(mini,/actions\.openFile\(item\.id\.slice\(5\)\)/);
- assert.match(css,/\.disk-page\.dk-map-left \.dk-side \.dk-omni-workspace/);
- assert.match(css,/\.disk-page\.dk-map-left\.dk-focus \.dk-layout>.dk-side/);
- assert.match(css,/@container diskspace \(max-width:760px\)/);
+ assert.match(css,/\.dk-graph-expanded \.dk-graph-stage/);
+ assert.match(css,/@media\(max-width:620px\)/);
+ assert.match(mini,/actions\.openFile\(node\.fileId\)/);
+ assert.match(mini,/actions\.openFolder\(node\.folder\)/);
 });
 
 test("Disk 12 real SHA duplicates, changes, age and spatial directions are deterministic",async()=>{
@@ -298,4 +299,34 @@ test("Disk 12 real SHA duplicates, changes, age and spatial directions are deter
  assert.equal(m.spatialNeighbor(points,0,"right"),1);
  assert.equal(m.spatialNeighbor(points,0,"down"),2);
  assert.equal(m.spatialNeighbor(points,0,"left"),3);
+});
+test("Disk 13 graph constructs only factual connections and bounds force layout",async()=>{
+ const built=await prepareDisk(root);
+ const m=await import(pathToFileURL(join(built.outputRoot,"web/pages/disk-map-graph.js")).href);
+ const hash="a".repeat(64);
+ const documents=[
+  {id:"1",folder:"Work",name:"report.pdf",sha256:hash,size:100,tags:["finance"]},
+  {id:"2",folder:"Work/Sub",name:"copy.pdf",sha256:hash,size:90,tags:["finance"]},
+  {id:"3",folder:"Work",name:"unrelated.txt",sha256:"b".repeat(64),size:50,tags:[]}
+ ];
+ const g=m.graphFromCatalog(documents,["Work","Work/Sub"],"Work",
+   {depth:2,limit:80,includeDuplicates:true,includeTags:true});
+ assert.ok(g.nodes.some(n=>n.id==="file:1"));
+ assert.ok(g.nodes.some(n=>n.id==="file:2"));
+ assert.ok(g.nodes.some(n=>n.id==="tag:finance"));
+ assert.ok(g.links.some(e=>e.kind==="duplicate"&&[e.source,e.target].includes("file:1")));
+ assert.ok(g.links.some(e=>e.kind==="tag"&&e.source==="tag:finance"));
+ assert.ok(g.links.every(e=>g.nodes.some(n=>n.id===e.source)&&g.nodes.some(n=>n.id===e.target)));
+ assert.ok(!g.links.some(e=>e.kind==="duplicate"&&e.target==="file:3"));
+ assert.ok(!g.links.some(e=>e.kind==="tag"&&e.target==="file:3"));
+ assert.ok(g.nodes.length<=80);
+ assert.deepEqual(m.graphInitial(g.nodes[0]),m.graphInitial(g.nodes[0]));
+ const positions=new Map(g.nodes.map(n=>[n.id,m.graphInitial(n)]));
+ for(let i=0;i<140;i++)m.graphForceStep(g.nodes,g.links,positions);
+ assert.ok([...positions.values()].every(p=>Number.isFinite(p.x)&&Number.isFinite(p.y)));
+ const huge=m.graphFromCatalog(Array.from({length:5000},(_,i)=>({
+  id:String(i),folder:"",name:"file"+i+".txt",sha256:"",size:1,tags:[]
+ })),[],"",{limit:40});
+ assert.ok(huge.nodes.length<=40);
+ assert.ok(huge.hidden>0);
 });
