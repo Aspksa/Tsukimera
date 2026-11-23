@@ -176,6 +176,17 @@ try{
   assert.equal(zoomedMap.layer,"detail","Zooming must reveal the more detailed source-backed graph");
   assert.ok(zoomedMap.saved?.zoom>2.1&&zoomedMap.saved?.zoom<=9,
     "Wheel viewport should be persistently saved: "+JSON.stringify(zoomedMap));
+
+  let sqliteView=null;
+  for(let i=0;i<28;i++){
+    const prefs=(await(await fetch(origin+"/api/preferences")).json()).preferences||{};
+    try{sqliteView=JSON.parse(prefs["tsukimera.disk.minimap.view.v1"]||"null");}catch{}
+    if(sqliteView?.zoom>2.1)break;
+    await pause(120);
+  }
+  assert.ok(sqliteView?.zoom>2.1,
+    "Mini-map viewport must persist in SQLite, not only localStorage: "+JSON.stringify(sqliteView));
+
   await evaluate("document.querySelector('.dk-mini-map-reset').click()");
   await pause(400);
   assert.equal(await evaluate("document.querySelector('.dk-mini-map-canvas').dataset.layer"),"overview");
