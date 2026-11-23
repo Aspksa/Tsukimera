@@ -35,7 +35,8 @@ test("Disk smart folders, rename preview, column preferences and safe file links
   assert.equal(module.matchesSmartRule(files[0],{...rule,field:"name",pattern:"A.TXT"}),true);
   const view=await readFile(join(root,"disk-src/web/pages/disk.ts"),"utf8");
   assert.match(view,/openDiskCommands/);
-  assert.match(view,/openDiskMap/);
+  assert.match(view,/createMiniDiskMap/);
+  assert.doesNotMatch(view,/openDiskMap/);
   assert.match(view,/openBatchRename/);
   assert.match(view,/openSmartManager/);
   assert.match(view,/dkx-quick-preview/);

@@ -25,6 +25,7 @@ export const PREF_KEYS = new Set([
   "tsukimera.disk.open", "tsukimera.disk.tree", "tsukimera.disk.life.group",
   "tsukimera.disk.mdRaw", "tsukimera.disk.sections.v1",
   "tsukimera.disk.minimap.view.v1",
+  "tsukimera.disk.spatial.density.v1",
   "juunibi.disk.view", "juunibi.disk.sort", "juunibi.disk.open",
   "juunibi.disk.tree", "juunibi.disk.mdRaw", "juunibi.disk.life.group",
 ]);

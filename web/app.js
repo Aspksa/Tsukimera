@@ -63,7 +63,7 @@ const DISK_PREF_KEYS = [
   'tsukimera.disk.tiles.v1','tsukimera.disk.view','tsukimera.disk.sort',
   'tsukimera.disk.open','tsukimera.disk.tree','tsukimera.disk.life.group',
   'tsukimera.disk.mdRaw','tsukimera.disk.sections.v1',
-  'tsukimera.disk.minimap.view.v1','juunibi.disk.view','juunibi.disk.sort',
+  'tsukimera.disk.minimap.view.v1','tsukimera.disk.spatial.density.v1','juunibi.disk.view','juunibi.disk.sort',
   'juunibi.disk.open','juunibi.disk.tree','juunibi.disk.mdRaw',
   'juunibi.disk.life.group'
 ];
@@ -841,6 +841,21 @@ function setupCard(id,body) {
       [option('sharp','Строго'),option('normal','Обычно'),option('round','Кругло')],ui.radius,v=>{ui.radius=v;persistUi();}));
     body.append(choices('Размер интерфейса','Масштаб шрифтов и элементов.',
       [option('sm','Меньше'),option('md','Обычно'),option('lg','Больше')],ui.scale,v=>{ui.scale=v;persistUi();}));
+    // Spatial Disk 11.0 has one graph (no mode switching). This preference
+    // changes only the number of directly visible, labeled child nodes.
+    const spatialKey='tsukimera.disk.spatial.density.v1';
+    const density=localStorage.getItem(spatialKey)==='detailed'?'detailed':'readable';
+    const densityControl=choices('Плотность Живой карты Диска',
+      'Просторное отображение или больше объектов на карте. Список остаётся доступен всегда.',
+      [{id:'readable',label:'Просторная'},{id:'detailed',label:'Больше объектов'}],density,async value=>{
+        localStorage.setItem(spatialKey,value);
+        for(const control of densityControl.querySelectorAll('button'))
+          control.setAttribute('aria-pressed',String(control.textContent===(value==='readable'?'Просторная':'Больше объектов')));
+        setSettingsSaveState('saving','Сохраняю плотность карты…');
+        try{await savePrefChanges({[spatialKey]:value});setSettingsSaveState('saved','Настройка карты сохранена в SQLite');}
+        catch(error){setSettingsSaveState('error','Не удалось сохранить плотность карты');}
+      });
+    body.append(densityControl);
   } else if(id==='chat') {
     const option=(id,label)=>({id,label});
     body.append(choices('Плотность сообщений','Подготовлено к будущему чату.',

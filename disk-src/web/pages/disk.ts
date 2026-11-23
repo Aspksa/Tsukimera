@@ -23,7 +23,7 @@ import { btn, emptyState } from "./kit";
 import { openSheet } from "./sheet";
 import {
   readColumns,writeColumns,readSmartRules,matchesSmartRule,animateChange,
-  openColumnSettings,openSmartManager,openDiskMap,openBatchRename,
+  openColumnSettings,openSmartManager,openBatchRename,
   openDiskCommands,copyDiskLink,
   type SmartRule,type TableColumns,type RenamePlan
 } from "./disk-extras";
@@ -238,10 +238,11 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
     { icon: "chronicle", label: "Жизнь документов", run: () => life.reveal() },
     { icon: "drawer", label: "Разделы и умные папки", run: () => openSections() },
     { icon: "search", label: "Палитра команд · Ctrl+K", run: () => showCommands() },
-    { icon: "folder", label: "Живая карта файлов и связей", run: () => openDiskMap(all,folders,folder=>go({folder}),id=>{
-      const file=byId(id);if(!file)return;
-      go({folder:file.folder});reveal(id);openInfo(id);
-    }) },
+    { icon: "folder", label: "Живая карта Диска", run: ()=>{
+      if(page.classList.contains("dk-focus"))focusBtn.click();
+      miniMap.root.scrollIntoView({behavior:"smooth",block:"start"});
+      miniMap.root.querySelector<HTMLCanvasElement>(".dk-mini-map-canvas")?.focus({preventScroll:true});
+    } },
     { icon: "folderPlus", label: "Умные папки", run: () => editSmartFolders() },
     { icon: "table", label: "Колонки таблицы", run: () => customizeColumns() },
     { icon: "audit", label: "Проверка файлов", run: () => void openAudit() },
@@ -804,10 +805,11 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
       {label:"Загрузить файлы",run:chooseFiles},
       {label:"Загрузить папку",run:chooseFolder},
       {label:"Создать папку",run:()=>void createFolder(uploadFolder())},
-      {label:"Живая карта файлов и связей",run:()=>openDiskMap(all,folders,folder=>go({folder}),id=>{
-      const file=byId(id);if(!file)return;
-      go({folder:file.folder});reveal(id);openInfo(id);
-    })},
+      {label:"Живая карта Диска",run:()=>{
+      if(page.classList.contains("dk-focus"))focusBtn.click();
+      miniMap.root.scrollIntoView({behavior:"smooth",block:"start"});
+      miniMap.root.querySelector<HTMLCanvasElement>(".dk-mini-map-canvas")?.focus({preventScroll:true});
+    }},
       {label:"Умные папки",run:editSmartFolders},
       {label:"Колонки таблицы",run:customizeColumns},
       {label:"Жизнь документов",run:()=>life.reveal()},
@@ -1063,10 +1065,6 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
       onClose:()=>{sectionsRegion.hidden=sidebarPrefs.collapsed;}});
   };
   const miniMap=createMiniDiskMap({
-    openFull:()=>openDiskMap(all,folders,folder=>go({folder}),id=>{
-      const file=byId(id);if(!file)return;
-      go({folder:file.folder});reveal(id);openInfo(id);
-    }),
     openFolder:folder=>{go({folder});setDrawer(false);},
     openFile:id=>{
       const file=byId(id);if(!file)return;
@@ -1074,9 +1072,7 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
     }
   });
   const treePanel=el("div",{cls:"dk-tree-panel"},treeCommands,tree);
-  // Keep one synchronized Canvas map, but give it the complete workspace
-  // width. The file manager remains directly below it, not inside a modal
-  // or the narrow folder rail.
+  // One always-on spatial explorer, synchronized with the file manager below.
   const side = el("aside", { cls: "dk-side", attrs: { "aria-label": "Иерархия папок Диска" } },
     el("div", { cls: "dk-side-head" }, el("strong", { textContent: "Папки" }), treeCount, iconButton("x", "Закрыть", () => setDrawer(false), "icon-btn sm dk-side-close")),
     treePanel);
