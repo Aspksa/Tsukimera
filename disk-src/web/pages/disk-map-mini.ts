@@ -77,6 +77,9 @@ export function createMiniDiskMap(actions:MiniMapActions):MiniDiskMap{
     if(key===modeKey)return;
     graph=miniGraphFromCatalog(files,folders,focus,detail);
     modeKey=key;
+    canvas.dataset.layer=detail?"detail":"overview";
+    canvas.dataset.nodes=String(graph.nodes.length);
+    canvas.dataset.clusters=String(graph.nodes.filter(n=>n.kind==="cluster").length);
     const node=graph.nodes.find(n=>n.id===active?.id);
     active=node||graph.nodes.find(n=>n.kind==="folder"&&n.folder===current)||null;
   };
@@ -150,8 +153,10 @@ export function createMiniDiskMap(actions:MiniMapActions):MiniDiskMap{
       ctx.lineWidth=selected?1.7:edge.kind==="contains"?.8:1.1;
       ctx.stroke();
     }
+    let paintedNodes=0;
     for(const p of points){
       if(!inside(p))continue;
+      paintedNodes++;
       const {node,x,y,r}=p;
       const chosen=active?.id===node.id;
       const inPath=node.kind==="folder"&&(current===node.folder||
@@ -164,7 +169,7 @@ export function createMiniDiskMap(actions:MiniMapActions):MiniDiskMap{
       drawShape(ctx,p);
       ctx.fillStyle=node.kind==="root"?"#D9A441":node.kind==="cluster"?"#C6A366":
         node.kind==="folder"?(inPath?"#E9BA65":"#8CA8ED"):"#CFD5E1";
-      ctx.globalAlpha=active&&!relevant.has(node.id)&&!inPath?.48:1;
+      ctx.globalAlpha=active&&!relevant.has(node.id)&&!inPath?0.48:1;
       ctx.fill();ctx.globalAlpha=1;
       if(chosen){
         drawShape(ctx,{...p,r:r+3});
@@ -176,6 +181,7 @@ export function createMiniDiskMap(actions:MiniMapActions):MiniDiskMap{
         ctx.fillText(node.count>999?"999+":String(node.count||node.hiddenFolders),x,y,2*r);
       }
     }
+    canvas.dataset.paintedNodes=String(paintedNodes);
     if(graph.nodes.length===1){
       ctx.fillStyle="rgba(206,207,211,.6)";ctx.textAlign="center";ctx.font="11px system-ui";
       ctx.fillText("Загрузите файлы, чтобы карта выросла",width/2,height-17);
@@ -282,21 +288,16 @@ export function createMiniDiskMap(actions:MiniMapActions):MiniDiskMap{
     view.zoom=1;view.panX=0;view.panY=0;view.focus="";
     modeKey="";rebuild();selectFolder();invalidate();save();
   });
+  // Only visible, mounted pages draw. Disconnect observers after navigation
+  // to prevent retained Canvas/tree instances from accumulating.
+  let everConnected=false;
   if(typeof ResizeObserver!=="undefined"){
     const observer=new ResizeObserver(()=>{
-      if(!root.isConnected){if(root.parentNode===null)return;}
-      invalidate();
+      if(root.isConnected){everConnected=true;invalidate();}
+      else if(everConnected){observer.disconnect();if(raf)cancelAnimationFrame(raf);}
     });
     observer.observe(frame);
   }
-  const onVisibility=()=>{
-    if(!root.isConnected){
-      document.removeEventListener("visibilitychange",onVisibility);
-      if(raf)cancelAnimationFrame(raf);
-      clearTimeout(saveTimer);
-    }else if(!document.hidden)invalidate();
-  };
-  document.addEventListener("visibilitychange",onVisibility);
   return {root,update(nextFiles,nextFolders,folder){
     files=nextFiles;folders=nextFolders;current=folder;
     const nextHash=hashCatalog(files,folders);
