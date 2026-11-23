@@ -2297,3 +2297,45 @@ button.dk-crumb:hover{background:var(--hover);color:var(--fg)}
     transition:none!important;animation:none!important;
   }
 }
+
+
+/* Disk 16 — fluid graph viewport, with real resolution and CSS-pixel awareness.
+ * The same borderless Canvas remains the only child of the graph stage.
+ */
+.disk-page.dk-experience-v8.dk-map-left .dk-layout>.dk-side>.dk-graph-only .dk-graph-stage{
+  height:clamp(210px,36dvh,560px)!important;
+  min-height:min(210px,32dvh)!important;
+  flex:0 0 auto;
+}
+.disk-page.dk-map-left .dk-side>.dk-graph-only{
+  flex:0 0 auto!important;
+  min-height:0!important;
+  contain:layout style;
+}
+@media (min-width:2400px) and (min-height:1000px){
+  .disk-page.dk-experience-v8.dk-map-left .dk-layout>.dk-side>.dk-graph-only .dk-graph-stage{
+    height:clamp(420px,32dvh,660px)!important;
+    min-height:300px!important;
+  }
+}
+@media (max-height:720px) and (min-width:621px){
+  .disk-page.dk-experience-v8.dk-map-left .dk-layout>.dk-side>.dk-graph-only .dk-graph-stage{
+    height:clamp(185px,34dvh,250px)!important;
+    min-height:185px!important;
+  }
+}
+@media (max-width:620px){
+  .disk-page.dk-experience-v8.dk-map-left .dk-layout>.dk-side>.dk-graph-only .dk-graph-stage{
+    height:clamp(300px,42dvh,425px)!important;
+    min-height:min(300px,40dvh)!important;
+  }
+  .dk-graph-only.dk-graph-expanded .dk-graph-stage{
+    height:100dvh!important;min-height:100dvh!important;
+  }
+}
+@media (orientation:landscape) and (max-height:480px) and (max-width:950px){
+  .disk-page.dk-experience-v8.dk-map-left .dk-layout>.dk-side>.dk-graph-only .dk-graph-stage{
+    height:clamp(172px,55dvh,238px)!important;
+    min-height:172px!important;
+  }
+}
