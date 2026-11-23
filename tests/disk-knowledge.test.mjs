@@ -92,7 +92,9 @@ test("Disk 20 automatically indexes, cites, ranks and persists knowledge without
       "Приложение №3. Солнечная долина и подписанный договор.");
     await until(async()=>{
       const info=(await get(s.url,"/api/disk/knowledge?fileId="+one.id)).data;
-      return info.suggestions.some(x=>x.kind==="duplicate"&&x.fileId===duplicate.id);
+      const status=(await get(s.url,"/api/disk/knowledge/status")).data;
+      return status.analyzed>=3&&status.pending===0&&
+        info.suggestions.some(x=>x.kind==="duplicate"&&x.fileId===duplicate.id);
     });
     // Any schema changes remain purely additive; v3 disk catalog is untouched.
     const db=new DatabaseSync(join(dir,"tsukimera.db"),{readOnly:true});
