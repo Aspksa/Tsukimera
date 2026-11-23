@@ -121,6 +121,10 @@ export function createDiskRouter({disk,zipStream,zipLength,collectLife,uploadDir
         return send(res,200,database?.knowledgeStats()??{analyzed:0,pending:0});
       if(method==="GET"&&p==="/api/disk/knowledge/graph")
         return send(res,200,database?.knowledgeGraph(240)??{nodes:[],links:[]});
+      if(method==="GET"&&p==="/api/disk/knowledge/tiles"){
+        const ids=(url.searchParams.get("ids")||"").split(",").slice(0,150);
+        return send(res,200,database?.diskTileInsights(ids)??{items:[],coverage:"requested-files"});
+      }
       if(method==="GET"&&p==="/api/disk/knowledge"){
         const id=url.searchParams.get("fileId")||"";
         if(!/^[0-9a-f-]{36}$/.test(id))
