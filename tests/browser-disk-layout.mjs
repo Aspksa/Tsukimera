@@ -181,40 +181,45 @@ try{
   assert.match(ordering.label,/Диск · файлы и папки/);
 
 
-  // Disk 8.3: no search, pinned or sorting strip in the hierarchy; the
-  // real Canvas retains the view state and exposes bounded detail on zoom.
+  // Disk 11: a real focus-centered, accessible spatial workspace, not the
+  // former orbit mini-map. Canvas edges and native HTML nodes share one scene.
   const clean=await evaluate("(()=>({search:!!document.querySelector('.dk-tree-find'),sort:!!document.querySelector('.dk-tree-sort'),pinned:!!document.querySelector('.dk-tree .dk-pin'),control:document.querySelector('.dk-tree-panel')?.textContent.includes('Закреплённые')}))()");
-  assert.deepEqual(clean,{search:false,sort:false,pinned:false,control:false},
-    "Unwanted folder controls must not crowd the hierarchy");
-  const mapBefore=await evaluate("(()=>({layer:document.querySelector('.dk-mini-map-canvas')?.dataset.layer,nodes:Number(document.querySelector('.dk-mini-map-canvas')?.dataset.nodes),height:document.querySelector('.dk-mini-map-frame')?.getBoundingClientRect().height}))()");
-  assert.equal(mapBefore.layer,"overview");
-  assert.ok(mapBefore.height>=240&&mapBefore.height<=430,
-    "Full-width map must have room for its graph: "+JSON.stringify(mapBefore));
-  await evaluate("(()=>{const c=document.querySelector('.dk-mini-map-canvas');for(let i=0;i<6;i++)c.dispatchEvent(new WheelEvent('wheel',{bubbles:true,cancelable:true,deltaY:-110,clientX:c.getBoundingClientRect().left+c.clientWidth/2,clientY:c.getBoundingClientRect().top+c.clientHeight/2}));})()");
-  await pause(520);
-  const zoomedMap=await evaluate("(()=>({layer:document.querySelector('.dk-mini-map-canvas').dataset.layer,saved:JSON.parse(localStorage.getItem('tsukimera.disk.minimap.view.v1')||'null')}))()");
-
-  const orbitVisual=await evaluate("(()=>{const c=document.querySelector('.dk-mini-map-canvas');return {transition:c.dataset.transition,pulse:c.dataset.pulse,trail:c.dataset.trail}})()");
-  assert.equal(orbitVisual.transition,"idle","Zoom reveal should stop after a short animation");
-
-  assert.equal(zoomedMap.layer,"detail","Zooming must reveal the more detailed source-backed graph");
-  assert.ok(zoomedMap.saved?.zoom>2.1&&zoomedMap.saved?.zoom<=9,
-    "Wheel viewport should be persistently saved: "+JSON.stringify(zoomedMap));
-
+  assert.deepEqual(clean,{search:false,sort:false,pinned:false,control:false});
+  await pause(240);
+  const spatial=await evaluate("(()=>({layer:document.querySelector('.dk-mini-map-canvas')?.dataset.layer,nodes:Number(document.querySelector('.dk-mini-map-canvas')?.dataset.nodes),height:document.querySelector('.dk-mini-map-frame')?.getBoundingClientRect().height,focus:document.querySelectorAll('.dk-omni-focus').length,list:document.querySelectorAll('.dk-omni-row').length,search:!!document.querySelector('.dk-omni-search'),back:!!document.querySelector('.dk-omni-nav'),path:!!document.querySelector('.dk-omni-trail')}))()");
+  assert.equal(spatial.layer,"spatial","The old orbit map should be replaced entirely");
+  assert.ok(spatial.height>=300&&spatial.focus===1&&spatial.list>0&&spatial.search&&spatial.back&&spatial.path,
+    "Spatial workspace did not render actual folders: "+JSON.stringify(spatial));
+  await evaluate("(()=>{const c=document.querySelector('.dk-mini-map-canvas');for(let i=0;i<3;i++)c.dispatchEvent(new WheelEvent('wheel',{bubbles:true,cancelable:true,deltaY:-110}));})()");
+  await pause(490);
+  const zoomedMap=await evaluate("(()=>({saved:JSON.parse(localStorage.getItem('tsukimera.disk.minimap.view.v1')||'null'),zoom:document.querySelector('.dk-omni-zoom-label').textContent}))()");
+  assert.ok(zoomedMap.saved?.zoom>1.2&&zoomedMap.saved?.zoom<=1.65,"Spatial zoom must persist: "+JSON.stringify(zoomedMap));
   let sqliteView=null;
   for(let i=0;i<28;i++){
     const prefs=(await(await fetch(origin+"/api/preferences")).json()).preferences||{};
     try{sqliteView=JSON.parse(prefs["tsukimera.disk.minimap.view.v1"]||"null");}catch{}
-    if(sqliteView?.zoom>2.1)break;
+    if(sqliteView?.zoom>1.2)break;
     await pause(120);
   }
-  assert.ok(sqliteView?.zoom>2.1,
-    "Mini-map viewport must persist in SQLite, not only localStorage: "+JSON.stringify(sqliteView));
-
+  assert.ok(sqliteView?.zoom>1.2,"Spatial viewport must persist to SQLite");
   await evaluate("document.querySelector('.dk-mini-map-reset').click()");
-  await pause(400);
-  assert.equal(await evaluate("document.querySelector('.dk-mini-map-canvas').dataset.layer"),"overview");
-
+  await pause(360);
+  assert.equal(await evaluate("document.querySelector('.dk-omni-zoom-label').textContent"),"100%");
+  await evaluate("document.querySelector('.dk-tree-all[aria-label=\"Развернуть все папки\"]').click()");
+  assert.ok(await evaluate("!!document.querySelector('.dk-node[data-folder=\"Работа/2026\"]')"),
+    "Full folder hierarchy must remain operable");
+  await evaluate("document.querySelector('.dk-node[data-folder=\"Работа/2026\"] .dk-node-label').click()");
+  await pause(300);
+  const hierarchy=await evaluate("(()=>({selected:document.querySelector('.dk-node.current')?.dataset.folder,ancestors:[...document.querySelectorAll('.dk-node.dk-ancestor')].map(x=>x.dataset.folder),title:document.querySelector('.dk-mini-map-count')?.textContent,mapFocus:document.querySelector('.dk-mini-map-canvas')?.dataset.focus,center:document.querySelector('.dk-omni-focus strong')?.textContent,trail:document.querySelector('.dk-omni-trail')?.textContent}))()");
+  assert.equal(hierarchy.selected,"Работа/2026");
+  assert.ok(hierarchy.ancestors.includes("Работа")&&hierarchy.ancestors.includes("Работа/2026"));
+  assert.equal(hierarchy.mapFocus,"Работа/2026");
+  assert.ok(hierarchy.trail.includes("Работа")&&hierarchy.center.includes("2026"),
+    "The selected folder must be the central focus: "+JSON.stringify(hierarchy));
+  assert.match(hierarchy.title,/папок/);
+  const searchLocal=await evaluate("(()=>{const x=document.querySelector('.dk-omni-search');x.value='zzzzz-nonexistent';x.dispatchEvent(new Event('input',{bubbles:true}));return {empty:!!document.querySelector('.dk-omni-empty'),list:document.querySelectorAll('.dk-omni-row').length};})()");
+  assert.ok(searchLocal.empty&&searchLocal.list===0,"Local spatial search should not invent files");
+  await evaluate("(()=>{const x=document.querySelector('.dk-omni-search');x.value='';x.dispatchEvent(new Event('input',{bubbles:true}));})()");
   await evaluate("document.querySelector('.dk-tree-all[aria-label=\"Развернуть все папки\"]').click()");
   const expandedTree=await evaluate("(()=>({nested:!!document.querySelector('.dk-node[data-folder=\"Работа/2026\"]')}))()");
   assert.ok(expandedTree.nested,"Expand all did not reveal nested folder: "+JSON.stringify(expandedTree));
@@ -265,10 +270,8 @@ try{
   assert.equal(await evaluate("document.querySelectorAll('.dk-sections-dialog .dk-section:not(.dkx-smart)').length"),6,
     "Restoring default sections should make all categories available in their new home");
   await evaluate("document.querySelector('.mod-sheet button[aria-label=\"Закрыть\"]').click()");
-  await evaluate("document.querySelector('.dk-mini-map-open').click()");
-  assert.ok(await evaluate("!!document.querySelector('.dkx-map-canvas')"),
-    "Expand the embedded map into the preserved full Canvas view");
-  await evaluate("document.querySelector('.mod-sheet button[aria-label=\"Закрыть\"]').click()");
+  assert.equal(await evaluate("document.querySelector('.dk-mini-map-open')===null"),true,
+    "The retired secondary map must not be available");
 
 
 
@@ -352,18 +355,12 @@ try{
   await evaluate("document.querySelector('.mod-sheet button[aria-label=\"Закрыть\"]').click()");
   await evaluate("document.querySelector('.dkl-expand').click()");
   const opened=await evaluate("(()=>{document.querySelector('.dk-more-btn').click();const row=[...document.querySelectorAll('.dk-menu-item')].find(x=>x.textContent.includes('Живая карта'));if(!row)return false;row.click();return true;})()");
-  assert.ok(opened,"The existing Disk menu did not expose the new live map");
-  await pause(350);
-  const canvas=await evaluate("(()=>{const c=document.querySelector('.dkx-map-canvas');const f=document.querySelector('.dkx-map-frame');return {ready:!!c,width:c?.width,height:c?.height,context:!!c?.getContext('2d'),controls:document.querySelectorAll('.dkx-map-controls button').length,legend:document.querySelectorAll('.dkx-map-legend span').length,frame:f?.getBoundingClientRect().width};})()");
-  assert.ok(canvas.ready&&canvas.context&&canvas.width>500&&canvas.height>250&&canvas.controls===4&&canvas.legend===6,
-    "Live Canvas graph did not render with real files: "+JSON.stringify(canvas));
-  await evaluate("document.querySelector('.dkx-map-controls button[aria-label=\"Увеличить карту\"]').click()");
-  const mapSearch=await evaluate("(()=>{const x=document.querySelector('.dkx-map-search');x.value='Тест';x.dispatchEvent(new Event('input',{bubbles:true}));return document.querySelector('.dkx-map-selected').textContent;})()");
-  assert.match(mapSearch,/Найдено:/);
-  const mapActive=await evaluate("(()=>({enabled:!document.querySelector('.dkx-map-open').disabled,selection:document.querySelector('.dkx-map-selected').textContent}))()");
-  assert.ok(mapActive.enabled&&mapActive.selection.includes('выбран'),
-    "Searching the Canvas map must select an existing node and enable opening it");
-  await evaluate("document.querySelector('.mod-sheet button[aria-label=\"Закрыть\"]').click()");
+  assert.ok(opened,"The Disk menu must return to the one spatial map");
+  await pause(280);
+  assert.ok(await evaluate("document.activeElement?.classList.contains('dk-mini-map-canvas')"),
+    "The map menu should focus the actual embedded explorer");
+  assert.equal(await evaluate("document.querySelector('.dkx-map-canvas')===null"),true,
+    "Old orbit sheet should not open");
   let savedSettings;
   for(let i=0;i<25;i++){
     savedSettings=(await(await fetch(origin+"/api/preferences")).json()).preferences;
