@@ -550,6 +550,30 @@ try{
   assert.ok(savedCopy.includes('browser-legacy-note'),"Migration must retain the browser safety copy");
   console.log("SQLite browser migration verified: old note survived in DB and local backup.");
 
+  // Disk 22: navigate away and back while retaining the very same Canvas.
+  await evaluate("window.__ts22OriginalCanvas=document.querySelector('.dk-mini-map-canvas');location.hash='#/tasks'");
+  let parked22;
+  for(let attempt=0;attempt<30;attempt++){
+    parked22=await evaluate("(()=>{const host=document.getElementById('tsukimera-universe-stage');return {host:!!host,active:host?.classList.contains('ts22-background-active'),count:host?.querySelectorAll('canvas').length,original:host?.querySelector('canvas')===window.__ts22OriginalCanvas,none:host?getComputedStyle(host).pointerEvents==='none':false,tasks:document.querySelector('.content-main')?.dataset.route==='tasks'}})()");
+    if(parked22.active&&parked22.tasks)break;
+    await pause(120);
+  }
+  assert.ok(parked22.active&&parked22.count===1&&parked22.original&&
+    parked22.none&&parked22.tasks,
+    "The ONLY actual graph Canvas must park behind other pages without stealing input: "+JSON.stringify(parked22));
+  await screenshot("disk22-graph-behind-tasks");
+  await evaluate("location.hash='#/disk'");
+  let restored22;
+  for(let attempt=0;attempt<35;attempt++){
+    restored22=await evaluate("(()=>{const canvas=document.querySelector('.dk-side .dk-mini-map-canvas');return {present:!!document.querySelector('.disk-page'),same:canvas===window.__ts22OriginalCanvas,canvasCount:document.querySelectorAll('.dk-mini-map-canvas').length,hostActive:document.getElementById('tsukimera-universe-stage')?.classList.contains('ts22-background-active')}})()");
+    if(restored22.same&&restored22.present)break;
+    await pause(120);
+  }
+  assert.ok(restored22.present&&restored22.same&&
+    restored22.canvasCount===1&&!restored22.hostActive,
+    "Returning to Disk must restore exactly the original Canvas without duplicating graph state: "+JSON.stringify(restored22));
+  await screenshot("disk22-graph-restored-to-sidebar");
+
   // Settings 3.0: real Chrome exercises new controls without a paid Cloud.ru
   // inference call or a privileged tool operation.
   await evaluate("location.hash='#/settings'");
