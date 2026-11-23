@@ -81,22 +81,26 @@ test("left rail and map maintain real document data, focus, accessible controls 
 });
 
 
-test("Disk 11 keeps one spatial map above the existing file manager and connects real actions",async()=>{
+test("Disk 12 places one spatial map below the folder hierarchy (no top map)",async()=>{
  const [page,mini,css]=await Promise.all([
   readFile(join(root,"disk-src/web/pages/disk.ts"),"utf8"),
   readFile(join(root,"disk-src/web/pages/disk-map-mini.ts"),"utf8"),
-  readFile(join(root,"web/disk.css"),"utf8"),
+  readFile(join(root,"web/disk.css"),"utf8")
  ]);
- assert.match(page,/bar,miniMap\.root,filesHeading,layout,/);
+ assert.match(page,/treePanel,miniMap\.root\)/);
+ assert.match(page,/bar,filesHeading,layout,/);
+ assert.doesNotMatch(page,/bar,miniMap\.root,filesHeading/);
+ assert.match(page,/dk-map-left/);
  assert.match(page,/miniMap\.update\(all,folders,current\)/);
  assert.match(page,/createMiniDiskMap/);
- assert.doesNotMatch(page,/openDiskMap/,"The retired graph must not be exposed as a second map");
- for(const x of ["spatialScene(files,folders,current,page,limit,filter)",
+ assert.doesNotMatch(page,/openDiskMap/);
+ for(const wanted of ["spatialScene(files,folders,current,page,limit,filter)",
   "actions.openFile(item.id.slice(5))","actions.openFolder(folder)",
   "dk-omni-trail","dk-omni-workspace","dk-omni-list","dk-omni-search",
-  "touchmove","pointermove","canvas.dataset.layer=\"spatial\""])
-   assert.ok(mini.includes(x),"Missing spatial navigation contract "+x);
- assert.match(css,/\.dk-omni-explorer/);
+  "touchmove","pointermove",'canvas.dataset.layer="spatial"'])
+   assert.ok(mini.includes(wanted),"Missing interactive spatial navigation "+wanted);
+ assert.match(css,/\.dk-map-left \.dk-side/);
+ assert.match(css,/\.dk-layout>.dk-side>.dk-tree-panel/);
  assert.match(css,/@media\(prefers-reduced-motion:reduce\)/);
 });
 
@@ -240,29 +244,58 @@ test("Disk 11 spatial scene renders a bounded real folder neighborhood and searc
   assert.deepEqual(slots,mod.spatialSlots(10));
 });
 
-test("Disk 11 replaces orbit lines with focus-centered controls, bounded painting and accessibility",async()=>{
+test("Disk 12 compact spatial navigation keeps genuine data and keyboard controls",async()=>{
  const source=await readFile(join(root,"disk-src/web/pages/disk-map-mini.ts"),"utf8");
  for(const token of ["dk-omni-focus","dk-omni-node","dk-omni-row",
-  "stepBack()","navigate(parentOf(current))","scene.items.forEach",
+  "backHistory()","navigate(parentOf(current))","scene.items.forEach",
   "ctx.moveTo(cx,cy)","canvas.dataset.nodes",
-  "aria-label","role:\"status\"","reduced","ResizeObserver"])
-   assert.ok(source.includes(token),"Missing spatial explorer behavior: "+token);
- assert.ok(!source.includes("orbitLayout("),"Previous orbital layout must not render");
+  "aria-label","role:\"status\"","ResizeObserver","spatialNeighbor(",
+  "spatialChanges(","spatialAge(","spatialFileType(","diskRawUrl(file)","updatePreview()",
+  "renderPeek(","renderSiblings(","dk-omni-overflow","highlightFile(",
+  "ctx.strokeStyle=picked","localStorage.getItem(SPATIAL_DENSITY_KEY)"])
+   assert.ok(source.includes(token),"Missing selected Disk 12 feature: "+token);
+ assert.ok(!source.includes("orbitLayout("),"Retired orbital layout must stay inactive");
 });
 
-test("Disk 11 all Disk entry points use the replacement spatial map without changing files",async()=>{
+test("Disk 12 binds left map to existing file manager without changing file operations",async()=>{
  const [page,css,mini]=await Promise.all([
    readFile(join(root,"disk-src/web/pages/disk.ts"),"utf8"),
    readFile(join(root,"web/disk.css"),"utf8"),
-   readFile(join(root,"disk-src/web/pages/disk-map-mini.ts"),"utf8"),
+   readFile(join(root,"disk-src/web/pages/disk-map-mini.ts"),"utf8")
  ]);
- assert.match(page,/page\.append\(el\("h1"[\s\S]*?bar,miniMap\.root,filesHeading,layout,/);
+ assert.match(page,/page\.append\(el\("h1"[\s\S]*?bar,filesHeading,layout,/);
  assert.match(page,/layout\.append\(side,panes\.left,main,panes\.right,life\.root,info\)/);
+ assert.match(page,/treePanel,miniMap\.root/);
  assert.match(page,/miniMap\.update\(all,folders,current\)/);
+ assert.match(page,/filesBox\.addEventListener\("pointerover"/);
  assert.doesNotMatch(page,/openDiskMap/);
  assert.match(page,/miniMap\.root\.scrollIntoView/);
  assert.match(mini,/actions\.openFile\(item\.id\.slice\(5\)\)/);
- assert.match(css,/\.dk-omni-workspace\{display:grid/);
- assert.match(css,/\.dk-map-first\.dk-focus>.dk-omni-explorer/);
- assert.match(css,/@container diskspace \(max-width:720px\)/);
+ assert.match(css,/\.disk-page\.dk-map-left \.dk-side \.dk-omni-workspace/);
+ assert.match(css,/\.disk-page\.dk-map-left\.dk-focus \.dk-layout>.dk-side/);
+ assert.match(css,/@container diskspace \(max-width:760px\)/);
+});
+
+test("Disk 12 real SHA duplicates, changes, age and spatial directions are deterministic",async()=>{
+ const built=await prepareDisk(root);
+ const m=await import(pathToFileURL(join(built.outputRoot,"web/pages/disk-map-spatial.js")).href);
+ const hash="a".repeat(64);
+ const before=[{id:"1",name:"Doc.pdf",folder:"Work",size:90,sha256:hash,revision:1,uploadedAt:"2026-11-22T00:00:00Z"}];
+ const next=[{...before[0],size:100,revision:2},{id:"2",name:"Other.pdf",folder:"",size:12,sha256:hash}];
+ const scene=m.spatialScene(next,["Work"],"Work");
+ assert.equal(scene.items[0].duplicates,1);
+ assert.equal(m.spatialScene(next,["Work"],"").items.find(f=>f.id==="file:2").duplicates,1);
+ assert.equal(m.spatialChanges(null,next).size,0);
+ assert.equal(m.spatialChanges(before,next).get("1"),"modified");
+ assert.equal(m.spatialChanges(before,next).get("2"),"added");
+ assert.equal(m.spatialChanges(next,before).get("2"),"removed");
+ assert.equal(m.spatialFileType("x.JPG"),"image");
+ assert.equal(m.spatialFileType("x.zip"),"archive");
+ assert.equal(m.spatialFileType("x.py"),"code");
+ assert.equal(m.spatialAge("2026-11-20T00:00:00Z",Date.parse("2026-11-20T12:00:00Z")),"today");
+ assert.equal(m.spatialAge("bad"),"unknown");
+ const points=[{x:0,y:0},{x:50,y:0},{x:0,y:60},{x:-40,y:0}];
+ assert.equal(m.spatialNeighbor(points,0,"right"),1);
+ assert.equal(m.spatialNeighbor(points,0,"down"),2);
+ assert.equal(m.spatialNeighbor(points,0,"left"),3);
 });

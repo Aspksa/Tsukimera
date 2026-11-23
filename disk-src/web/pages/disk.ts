@@ -240,7 +240,8 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
     { icon: "search", label: "Палитра команд · Ctrl+K", run: () => showCommands() },
     { icon: "folder", label: "Живая карта Диска", run: ()=>{
       if(page.classList.contains("dk-focus"))focusBtn.click();
-      miniMap.root.scrollIntoView({behavior:"smooth",block:"start"});
+      if(getComputedStyle(side).position==="fixed")setDrawer(true);
+      miniMap.root.scrollIntoView({behavior:"smooth",block:"nearest"});
       miniMap.root.querySelector<HTMLCanvasElement>(".dk-mini-map-canvas")?.focus({preventScroll:true});
     } },
     { icon: "folderPlus", label: "Умные папки", run: () => editSmartFolders() },
@@ -807,7 +808,8 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
       {label:"Создать папку",run:()=>void createFolder(uploadFolder())},
       {label:"Живая карта Диска",run:()=>{
       if(page.classList.contains("dk-focus"))focusBtn.click();
-      miniMap.root.scrollIntoView({behavior:"smooth",block:"start"});
+      if(getComputedStyle(side).position==="fixed")setDrawer(true);
+      miniMap.root.scrollIntoView({behavior:"smooth",block:"nearest"});
       miniMap.root.querySelector<HTMLCanvasElement>(".dk-mini-map-canvas")?.focus({preventScroll:true});
     }},
       {label:"Умные папки",run:editSmartFolders},
@@ -1065,17 +1067,30 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
       onClose:()=>{sectionsRegion.hidden=sidebarPrefs.collapsed;}});
   };
   const miniMap=createMiniDiskMap({
-    openFolder:folder=>{go({folder});setDrawer(false);},
+    openFolder:folder=>{go({folder});},
     openFile:id=>{
       const file=byId(id);if(!file)return;
       go({folder:file.folder});reveal(id);openInfo(id);setDrawer(false);
     }
   });
+  // Bidirectional selection: a row in the real file manager highlights the
+  // corresponding object on the left map. No second file state is persisted.
+  filesBox.addEventListener("pointerover",event=>{
+    const target=event.target as HTMLElement;
+    const card=target.closest<HTMLElement>(".dk-file[data-file-id]");
+    if(card)miniMap.highlightFile(card.dataset.fileId||null);
+  });
+  filesBox.addEventListener("focusin",event=>{
+    const target=event.target as HTMLElement;
+    const card=target.closest<HTMLElement>(".dk-file[data-file-id]");
+    if(card)miniMap.highlightFile(card.dataset.fileId||null);
+  });
   const treePanel=el("div",{cls:"dk-tree-panel"},treeCommands,tree);
-  // One always-on spatial explorer, synchronized with the file manager below.
-  const side = el("aside", { cls: "dk-side", attrs: { "aria-label": "Иерархия папок Диска" } },
+  // The spatial map follows the hierarchy in the *same* left rail.
+  // Nothing is mounted above the ordinary file manager.
+  const side = el("aside", { cls: "dk-side", attrs: { "aria-label": "Папки и Живая карта Диска" } },
     el("div", { cls: "dk-side-head" }, el("strong", { textContent: "Папки" }), treeCount, iconButton("x", "Закрыть", () => setDrawer(false), "icon-btn sm dk-side-close")),
-    treePanel);
+    treePanel,miniMap.root);
   const scrim = el("div", { cls: "dk-scrim" });
   const setDrawer = (open: boolean) => { page.classList.toggle("drawer-open", open); if (open) side.querySelector<HTMLElement>(".dk-node.current .dk-node-label, .dk-side-close")?.focus({ preventScroll: true }); };
   drawerBtn.addEventListener("click", () => setDrawer(true));
@@ -1842,9 +1857,9 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
   const filesHeading=el("div",{cls:"dk-files-section-head"},
     el("h2",{textContent:"Диск · файлы и папки"}),
     el("small",{textContent:"Управление документами"}));
-  page.classList.add("dk-experience-v8","dk-map-first");
+  page.classList.add("dk-experience-v8","dk-map-left");
   page.append(el("h1", { cls: "sr-only", textContent: "Диск" }),
-    bar,miniMap.root,filesHeading,layout,moveHint,scrim,uploader.root,picker,folderPicker,restorePicker,chatDrop);
+    bar,filesHeading,layout,moveHint,scrim,uploader.root,picker,folderPicker,restorePicker,chatDrop);
   const scrollHost=document.querySelector<HTMLElement>(".content");
   scrollHost?.addEventListener("scroll",()=>{
     if(!page.isConnected){autoMoreObserver?.disconnect();return;}
