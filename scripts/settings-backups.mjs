@@ -78,21 +78,24 @@ export function createSettingsBackupService({
       await mkdir(directory,{recursive:true});
       const name=timeName(clock(),randomUUID().slice(0,8));
       const destination=join(directory,name),temp=destination+".tmp";
-      const db=new DatabaseSync(file,{readOnly:true});
+      let db=null;
       try{
+        db=new DatabaseSync(file,{readOnly:true});
         await sqliteBackup(db,temp);
-      }finally{
-        db.close();
-      }
-      try{
+        db.close();db=null;
         const snapshot=await stat(temp);
         if(!snapshot.size)throw Error("SQLite backup is empty");
         await rename(temp,destination);
       }catch(error){
+        if(db)db.close();
         await rm(temp,{force:true}).catch(()=>{});
         throw error;
       }
-      const latest=await entries();
+      const all=await entries();
+      // Protect this exact new snapshot even if the filesystem reports
+      // identical timestamps for multiple sequential backups.
+      const latest=[...all.filter(row=>row.name===name),
+        ...all.filter(row=>row.name!==name)];
       let total=latest.reduce((sum,row)=>sum+row.bytes,0);
       let retained=latest.length;
       // Keep at least the just-created newest copy even when it alone is near
