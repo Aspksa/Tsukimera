@@ -6,7 +6,7 @@ import type {DiskFile} from "../api";
 import type {SemanticIndex} from "./disk-map-semantic";
 import {spatialFileType} from "./disk-map-spatial";
 export type GraphKind="folder"|"file"|"tag"|"topic"|"person"|"organization"|"date"|"project"|"revision";
-export type LinkKind="contains"|"duplicate"|"tag"|"lexical"|"entity"|"reference"|"revision";
+export type LinkKind="contains"|"duplicate"|"tag"|"lexical"|"entity"|"reference"|"revision"|"co_mention";
 export type GraphNode={
   id:string;kind:GraphKind;name:string;folder:string;size:number;depth:number;
   fileId?:string;sha256?:string;count?:number;revision?:number;fileType?:string;
@@ -17,7 +17,7 @@ export type GraphScene={
   totalCandidates:number;hidden:number;folders:number;files:number;duplicates:number;
 };
 export type GraphOptions={depth?:number;limit?:number;includeTags?:boolean;includeDuplicates?:boolean;
- perFolder?:number;detailLevel?:"overview"|"standard"|"detail";
+ perFolder?:number;detailLevel?:"overview"|"standard"|"detail";global?:boolean;
  semantic?:SemanticIndex|null;viewMode?:"all"|"meaning"|"versions"|"entities";};
 export type GraphPoint={x:number;y:number;vx:number;vy:number;pinned?:boolean};
 
@@ -33,6 +33,10 @@ export function graphFromCatalog(
   options:GraphOptions={}
 ):GraphScene{
   const depth=Math.max(1,Math.min(3,Math.trunc(options.depth??2)));
+  const global=options.global===true;
+  // A global view does not change the file-manager folder selection.
+  // It only changes graph coverage, with bounded visible objects.
+  const scope=global?"":folder;
   const limit=Math.max(8,Math.min(240,Math.trunc(options.limit??96)));
   const active=files.filter(f=>!f.deletedAt);
   const allFolders=new Set<string>();
@@ -57,38 +61,48 @@ export function graphFromCatalog(
   }
 
   const folderCandidates=[...allFolders].filter(f=>{
-    if(!within(f,folder))return false;
-    return f.slice(folder?folder.length+1:0).split("/").length<=depth;
+    if(global)return true;
+    if(!within(f,scope))return false;
+    return f.slice(scope?scope.length+1:0).split("/").length<=depth;
   }).sort((a,b)=>{
+    if(global)return (counts.get(b)||0)-(counts.get(a)||0)||
+      a.split("/").length-b.split("/").length||compare(a,b);
     const da=a.split("/").length,db=b.split("/").length;
     return da-db||compare(a,b);
   });
-  const parent=folder?parentOf(folder):"";
-  const focusId="folder:"+folder;
+  const parent=scope?parentOf(scope):"";
+  const focusId="folder:"+scope;
   const byId=new Map<string,GraphNode>();
   const add=(node:GraphNode)=>{
     if(!byId.has(node.id)&&byId.size<limit)byId.set(node.id,node);
   };
-  add({id:focusId,kind:"folder",name:last(folder),folder,size:0,depth:0,count:counts.get(folder)||0});
-  if(folder)add({id:"folder:"+parent,kind:"folder",name:last(parent),folder:parent,size:0,depth:-1,count:counts.get(parent)||0});
+  add({id:focusId,kind:"folder",name:last(scope),folder:scope,size:0,depth:0,count:counts.get(scope)||0});
+  if(scope)add({id:"folder:"+parent,kind:"folder",name:last(parent),folder:parent,size:0,depth:-1,count:counts.get(parent)||0});
   // Reserve graph capacity for documents, even in a root with hundreds of folders.
   // Without this, folder nodes consume the whole limit before files appear.
   let shownFolderCandidates=0;
   const folderBudget=Math.max(3,Math.floor(limit*.55));
   for(const path of folderCandidates){
     if(shownFolderCandidates>=folderBudget)break;
-    const relative=folder?path.slice(folder.length+1):path;
-    const d=relative.split("/").length;
-    add({id:"folder:"+path,kind:"folder",name:last(path),folder:path,size:0,depth:d,count:counts.get(path)||0});
-    shownFolderCandidates++;
+    const ancestors=global?
+      path.split("/").map((_,i)=>path.split("/").slice(0,i+1).join("/")):[path];
+    const missing=ancestors.filter(f=>!byId.has("folder:"+f));
+    // Global branches always include their real ancestors, or remain hidden.
+    if(shownFolderCandidates+missing.length>folderBudget)continue;
+    for(const f of missing){
+      const relative=scope?f.slice(scope.length+1):f;
+      const d=relative.split("/").length;
+      add({id:"folder:"+f,kind:"folder",name:last(f),folder:f,size:0,depth:d,count:counts.get(f)||0});
+      shownFolderCandidates++;
+    }
   }
-  const depthOf=(path:string)=>folder?
-    (path===folder?0:path.slice(folder.length+1).split("/").length):
+  const depthOf=(path:string)=>scope?
+    (path===scope?0:path.slice(scope.length+1).split("/").length):
     (path?path.split("/").length:0);
-  const visibleFiles=active.filter(f=>within(f.folder,folder)&&depthOf(f.folder)<depth)
+  const visibleFiles=active.filter(f=>global||within(f.folder,scope)&&depthOf(f.folder)<depth)
     .sort((a,b)=>depthOf(a.folder)-depthOf(b.folder)||compare(a.name,b.name)||
       compare(a.id,b.id));
-  const fullCandidates=1+(folder?1:0)+folderCandidates.length+visibleFiles.length;
+  const fullCandidates=1+(scope?1:0)+folderCandidates.length+visibleFiles.length;
   const perFolder=Math.max(1,Math.min(96,Math.trunc(options.perFolder??
     (options.detailLevel==="overview"?4:options.detailLevel==="detail"?72:28))));
   // Balanced reveal by real folder: one enormous directory cannot starve
@@ -100,7 +114,9 @@ export function graphFromCatalog(
     const group=byFolder.get(f.folder)||[];
     group.push(f);byFolder.set(f.folder,group);
   }
-  const paths=[...byFolder.keys()].sort((a,b)=>depthOf(a)-depthOf(b)||compare(a,b));
+  const paths=[...byFolder.keys()].sort((a,b)=>
+    global?(counts.get(b)||0)-(counts.get(a)||0)||compare(a,b):
+      depthOf(a)-depthOf(b)||compare(a,b));
   const chosen=new Map<string,number>();
   let any=true,round=0;
   while(any&&byId.size<limit&&round<perFolder){
@@ -183,7 +199,8 @@ export function graphFromCatalog(
   const evidence=options.semantic;
   if(evidence&&options.viewMode!=="versions"){
     for(const n of evidence.nodes){
-      if(!evidence.links.some(l=>l.source===n.id&&byId.has(l.target)))continue;
+      if(!evidence.links.some(l=>(l.source===n.id&&byId.has(l.target))||
+        (l.target===n.id&&byId.has(l.source))))continue;
       if(!byId.has(n.id))add({id:n.id,kind:n.kind,name:n.name,folder:"",size:0,
         depth:2,count:n.count});
     }
@@ -214,9 +231,9 @@ export function graphFromCatalog(
   // Exclude metadata-only tag hubs from hidden source-object count.
   return {
     nodes:[...byId.values()],links:links.filter(l=>{
-      if(options.viewMode==="meaning")return ["lexical","entity","reference"].includes(l.kind);
+      if(options.viewMode==="meaning")return ["lexical","entity","reference","co_mention"].includes(l.kind);
       if(options.viewMode==="versions")return ["duplicate","revision"].includes(l.kind);
-      if(options.viewMode==="entities")return l.kind==="entity";
+      if(options.viewMode==="entities")return l.kind==="entity"||l.kind==="co_mention";
       return true;
     }),focus:focusId,
     totalCandidates:fullCandidates,
