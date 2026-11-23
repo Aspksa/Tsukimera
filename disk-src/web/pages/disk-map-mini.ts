@@ -89,7 +89,7 @@ export function createMiniDiskMap(actions:MiniMapActions):MiniDiskMap{
       revealOrigin=origin?{x:origin.x,y:origin.y}:{x:width/2,y:height/2};
       revealStart=performance.now();
     }else{revealStart=0;revealFrom.clear();}
-    graph=orbitLayout(miniGraphFromCatalog(files,folders,focus,detail));
+    graph=orbitLayout(miniGraphFromCatalog(files,folders,focus,detail,current));
     modeKey=key;
     canvas.dataset.layer=detail?"detail":"overview";
     canvas.dataset.nodes=String(graph.nodes.length);
@@ -163,6 +163,9 @@ export function createMiniDiskMap(actions:MiniMapActions):MiniDiskMap{
     });
     canvas.dataset.transition=revealProgress<1?"revealing":"idle";
     const byId=new Map(points.map(p=>[p.node.id,p]));
+    const centered=active?byId.get(active.id):null;
+    canvas.dataset.centerError=centered?
+      String(Math.round(Math.hypot(centered.x-width/2,centered.y-height/2))):"";
     const margin=22;
     const inside=(p:Point)=>p.x>=-margin&&p.y>=-margin&&p.x<=width+margin&&p.y<=height+margin;
     const trail=active?containmentTrail(graph,active.id):[];
@@ -239,6 +242,7 @@ export function createMiniDiskMap(actions:MiniMapActions):MiniDiskMap{
       }
     }
     canvas.dataset.paintedNodes=String(paintedNodes);
+    canvas.dataset.pulse=pulse>0?"active":"idle";
     if((revealProgress<1||pulse>0)&&!document.hidden)invalidate();
     if(graph.nodes.length===1){
       ctx.fillStyle="rgba(206,207,211,.6)";ctx.textAlign="center";ctx.font="11px system-ui";
@@ -368,7 +372,7 @@ export function createMiniDiskMap(actions:MiniMapActions):MiniDiskMap{
     // same-folder refresh leaves the user's saved/manual pan untouched.
     if(lastFolder!==folder){
       centerOn(active);
-      if(lastFolder)pulseStart=performance.now();
+      if(folder)pulseStart=performance.now();
     }
     lastFolder=folder;
     const sampled=graph.shownFiles<graph.totalFiles||graph.shownFolders<graph.totalFolders;
