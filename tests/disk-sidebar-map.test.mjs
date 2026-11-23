@@ -830,7 +830,7 @@ test("Disk 19 keeps one borderless graph with multi-pass 4K-friendly Canvas",asy
   "ctx.quadraticCurveTo(","ctx.createLinearGradient(","ctx.createRadialGradient(",
   "ctx.ellipse(","ctx.shadowBlur=","artDepth(","artImportance(",
   "cameraRaf=requestAnimationFrame(step)","inertiaRaf=requestAnimationFrame(glide)",
-  "routePulseUntil=performance.now()+950","canvas.dataset.communities=",
+  "routePulseUntil=reduced()?0:performance.now()+950","canvas.dataset.communities=",
   "if(zoom>=1.2)"]){
   assert.ok(mini.includes(needle),"Missing living-constellation feature "+needle);
  }
