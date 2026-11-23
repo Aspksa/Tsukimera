@@ -16,6 +16,7 @@ import {normalizeMiniView,MINI_VIEW_KEY,clampView} from "./disk-map-mini-model";
 import {SPATIAL_DENSITY_KEY} from "./disk-map-spatial";
 import {graphRoute,graphNeighbors,graphEdgeAt,graphEdgeExplanation,type GraphRoute}
   from "./disk-map-explore";
+import {graph22ToSemantic} from "./disk-map-python";
 import {graphDocumentChain,graphEntryPoint} from "./disk-map-chain";
 import {graphArtLayout,artCommunityColor,artRgb,artDepth,artImportance,
   artBundleEdges,artCurve,artCurvePoint,artCurveHit,artClouds,artClusterStep,
@@ -31,6 +32,9 @@ export interface MiniDiskMap{
   update:(files:DiskFile[],folders:string[],current:string)=>void;
   highlightFile:(id:string|null)=>void;
   highlightFolder:(folder:string|null)=>void;
+  centerFile:(id:string)=>void;
+  collapse:()=>void;
+  repaint:()=>void;
 }
 type Mode="all"|"meaning"|"versions"|"entities";
 const shades:Record<string,string>={
@@ -76,7 +80,7 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
   let knowledgeTimer=0,knowledgeRequest=0;
   let coords=new Map<string,GraphPoint>(),appearing=new Map<string,number>();
   let art:ArtLayout=graphArtLayout(scene),renderBundles:ArtBundle[]=[];
-  let hoverBundle:ArtBundle|null=null,routePulseUntil=0;
+  let hoverBundle:ArtBundle|null=null,routePulseUntil=0,focusPulseUntil=0;
   let cameraRaf=0,inertiaRaf=0,dragVelocityX=0,dragVelocityY=0;
   let bounds:GraphBounds=graphBounds([]),screen:GraphScreen=graphScreen(320,280);
   let lastScreenKey="",highlightTimer=0,pointerInsideGraph=false;
@@ -139,6 +143,15 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
     if(id&&!node)return;
     selected=node?.id||null;hovered=selected;
     fileHighlight(node||null);draw();
+  }
+  // Explicit tile selection moves the same camera and emits a single short
+  // light pulse over ACTUAL graph edges; mere hover does not move anything.
+  function centerFile(id:string){
+    const node=scene.nodes.find(n=>n.fileId===id);
+    if(!node)return;
+    selected=node.id;hovered=node.id;
+    focusPulseUntil=reduced()?0:performance.now()+760;
+    centerNode(node.id,false);schedule();
   }
   // Folder rows highlight the corresponding real graph community. This is
   // visual-only: never switches the user's folder or changes file selection.
@@ -355,18 +368,33 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
   async function refreshKnowledge(){
     if(!root.isConnected||document.visibilityState!=="visible")return;
     const generation=++knowledgeRequest;
-    const response=await api.diskKnowledgeGraph();
+    // Prefer Python's bounded SQLite scene. Existing source-backed Disk 20
+    // index is the safe fallback on a machine without Python installed.
+    const python=await api.diskGraph22View({
+      folder:globalGraph?"":current,limit:240,
+      level:zoom<.9?"far":zoom>1.6?"near":"medium"});
+    if(generation!==knowledgeRequest||!root.isConnected)return;
+    const response=python.ok?python:await api.diskKnowledgeGraph();
     if(!response.ok||generation!==knowledgeRequest||!root.isConnected)return;
-    const candidate=response.value as SemanticIndex;
+    const candidate=python.ok?graph22ToSemantic(python.value):
+      response.value as SemanticIndex;
     if(!Array.isArray(candidate.nodes)||!Array.isArray(candidate.links))return;
+    canvas.dataset.graphEngine=python.ok?"python":"local-fallback";
+    if(python.ok){
+      canvas.dataset.hiddenNodes=String(python.value.omitted||0);
+      canvas.dataset.graphPending=String(python.value.progress?.pending||0);
+    }
     const signature=JSON.stringify([candidate.nodes,candidate.links]);
     if(signature!==knowledgeSignature){
       knowledgeSignature=signature;persistedSemantic=candidate;
       if(!semantic)rebuild();
     }
-    const status=await api.diskKnowledgeStatus();
-    if(status.ok&&status.value.pending>0&&root.isConnected)
-      scheduleKnowledge(6500);
+    if(python.ok){
+      if(python.value.progress?.pending>0&&root.isConnected)scheduleKnowledge(4200);
+    }else{
+      const status=await api.diskKnowledgeStatus();
+      if(status.ok&&status.value.pending>0&&root.isConnected)scheduleKnowledge(6500);
+    }
   }
   function rebuild(){
     const oldNodes=new Map(scene.nodes.map(n=>[n.id,n]));
@@ -442,7 +470,9 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
     const now=performance.now();
     // Three passes: deep black space, grounded colour-cloud communities,
     // then factual curves and high-DPI luminous nodes. No DOM overlays.
-    ctx.fillStyle="#07090e";ctx.fillRect(0,0,w,h);
+    // Same black as the site's --bg. No rectangular visual boundary where
+    // the single Canvas moves between Disk and the persistent page backdrop.
+    ctx.fillStyle="#09090c";ctx.fillRect(0,0,w,h);
     const camera={cx,cy,scale};
     const clouds=artClouds(art,coords,camera,11);
     for(const cloud of clouds){
@@ -572,6 +602,13 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
           ctx.arc(p.x,p.y,clamp(2.2*markerScale,1.8,4),0,Math.PI*2);
           ctx.fill();ctx.restore();
         }
+      }
+      if(highlighted&&!onRoute&&now<focusPulseUntil&&!reduced()){
+        const phase=1-(focusPulseUntil-now)/760;
+        const p=artCurvePoint(curve,Math.max(0,Math.min(1,phase)));
+        ctx.save();ctx.fillStyle="#eac99a";ctx.shadowColor="#eac99a";
+        ctx.shadowBlur=11;ctx.beginPath();ctx.arc(p.x,p.y,1.7,0,Math.PI*2);
+        ctx.fill();ctx.restore();
       }
     }
     fading=fading.filter(x=>x.until>now);
@@ -746,7 +783,7 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
       const transitions=!reduced()&&([...appearing.values()].some(t=>now-t<360)||
         fading.some(t=>t.until>now));
       if((physicsFrame<budget&&(kinetic>.04||transitions))||
-        (!reduced()&&routePulseUntil>now))
+        (!reduced()&&(routePulseUntil>now||focusPulseUntil>now)))
         raf=requestAnimationFrame(step);
     };
     raf=requestAnimationFrame(step);
@@ -945,7 +982,9 @@ export function createMiniDiskMap(actions:Actions):MiniDiskMap{
     });
     observer.observe(frame);
   }
-  return {root,highlightFile,highlightFolder,update(newFiles,newFolders,folder){
+  return {root,highlightFile,highlightFolder,centerFile,
+    collapse:()=>setExpanded(false),repaint:()=>rebuild(),
+    update(newFiles,newFolders,folder){
     if(files!==newFiles){
       analysisGeneration++;semantic=null;analysisBusy=false;
       persistedSemantic=null;knowledgeSignature="";
