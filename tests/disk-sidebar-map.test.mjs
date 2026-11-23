@@ -699,3 +699,143 @@ test("Disk 18 header and long names use real file metadata without duplicating c
  assert.ok(css.includes("overflow:visible; /* file virtualization uses the parent scroll host */"),
   "Stable scrolling cannot break windowed file virtualization");
 });
+
+
+test("Disk 19 creates stable actual-source communities with harmonious colours",async()=>{
+ const built=await prepareDisk(root);
+ const art=await import(pathToFileURL(join(built.outputRoot,"web/pages/disk-map-art.js")).href);
+ const nodes=[
+  {id:"folder:",kind:"folder",folder:"",name:"Диск",depth:0,count:4},
+  {id:"folder:Работа",kind:"folder",folder:"Работа",name:"Работа",depth:1},
+  {id:"folder:Работа/Акты",kind:"folder",folder:"Работа/Акты",name:"Акты",depth:2},
+  {id:"file:a",kind:"file",folder:"Работа/Акты",name:"Договор",size:200},
+  {id:"file:b",kind:"file",folder:"Работа/Акты",name:"Акт",size:200},
+  {id:"folder:Личное",kind:"folder",folder:"Личное",name:"Личное",depth:1},
+  {id:"file:c",kind:"file",folder:"Личное",name:"Письмо",size:200},
+  {id:"person:ivan",kind:"person",folder:"",name:"Иван"}
+ ];
+ const edges=[
+  {source:"folder:",target:"folder:Работа",kind:"contains"},
+  {source:"folder:Работа",target:"folder:Работа/Акты",kind:"contains"},
+  {source:"folder:Работа/Акты",target:"file:a",kind:"contains"},
+  {source:"folder:Работа/Акты",target:"file:b",kind:"contains"},
+  {source:"folder:",target:"folder:Личное",kind:"contains"},
+  {source:"folder:Личное",target:"file:c",kind:"contains"},
+  {source:"file:a",target:"person:ivan",kind:"entity",evidence:"Источник"}
+ ];
+ const layout=art.graphArtLayout({nodes,links:edges});
+ assert.equal(layout.membership.get("file:a"),layout.membership.get("file:b"));
+ assert.notEqual(layout.membership.get("file:a"),layout.membership.get("file:c"));
+ assert.equal(layout.membership.get("person:ivan"),layout.membership.get("file:a"),
+  "Person satellite follows actual document link; not an invented relation");
+ assert.ok(layout.communities.length>=3);
+ assert.ok(layout.children.get("folder:Работа").includes("folder:Работа/Акты"));
+ assert.ok(art.artCommunityColor(layout,"file:a").startsWith("#"));
+ const revised=art.graphArtLayout({nodes:[
+  ...nodes,{id:"file:z",kind:"file",folder:"Новая",name:"Новая",size:20}],
+  links:edges});
+ assert.equal(art.artCommunityColor(layout,"file:a"),
+  art.artCommunityColor(revised,"file:a"),
+  "Uploading an unrelated file must not recolour existing community");
+ assert.equal(art.artCommunityColor(layout,"file:c"),
+  art.artCommunityColor(revised,"file:c"));
+ assert.ok(art.artImportance(nodes[3],layout)>=1);
+ assert.ok(art.artDepth("file:c",layout)>.8);
+ assert.equal(art.artRgb("#91b9e4"),"145,185,228");
+});
+
+test("Disk 19 bundles only evidenced links and reveals each at close zoom",async()=>{
+ const built=await prepareDisk(root);
+ const art=await import(pathToFileURL(join(built.outputRoot,"web/pages/disk-map-art.js")).href);
+ const nodes=Array.from({length:7},(_,i)=>({
+  id:"file:"+i,kind:"file",folder:"Работа/2026",name:"Файл "+i,size:200}));
+ const edges=Array.from({length:6},(_,i)=>({
+  source:"file:0",target:"file:"+(i+1),kind:"reference",weight:1,
+  evidence:"Буквальное имя файла "+(i+1)}));
+ const layout=art.graphArtLayout({nodes,links:edges});
+ const far=art.artBundleEdges(edges,layout,.72);
+ assert.equal(far.length,1,"Same-type same-community lines fold at distant zoom");
+ assert.equal(far[0].count,6);
+ assert.ok(edges.includes(far[0].edge),"Bundled line must be one real source edge");
+ assert.deepEqual(far[0].edges.map(e=>e.evidence),
+  edges.map(e=>e.evidence),"Every underlying source evidence must remain attached");
+ const medium=art.artBundleEdges(edges,layout,1.2);
+ const close=art.artBundleEdges(edges,layout,2);
+ assert.equal(medium.length,6);
+ assert.equal(close.length,6);
+ assert.equal(close.reduce((n,b)=>n+b.count,0),edges.length);
+ const selected=art.artBundleEdges(edges,layout,.7,new Set([edges[2]]));
+ assert.ok(selected.some(b=>b.edge===edges[2]&&b.count===1),
+  "Selected evidence must never be collapsed into another line");
+ assert.equal(selected.reduce((n,b)=>n+b.count,0),6,
+  "Bundling may not fabricate or drop source links");
+});
+
+test("Disk 19 curved evidence hover, separation, camera easing and inertia",async()=>{
+ const built=await prepareDisk(root);
+ const art=await import(pathToFileURL(join(built.outputRoot,"web/pages/disk-map-art.js")).href);
+ const nodes=[
+  {id:"file:a",kind:"file",folder:"A",name:"A",size:1},
+  {id:"file:b",kind:"file",folder:"B",name:"B",size:1},
+  {id:"file:c",kind:"file",folder:"A",name:"C",size:1}
+ ];
+ const e={source:"file:a",target:"file:b",kind:"reference",weight:1};
+ const layout=art.graphArtLayout({nodes,links:[e]});
+ const points=new Map([
+  ["file:a",{x:0,y:0,vx:0,vy:0}],
+  ["file:b",{x:150,y:40,vx:0,vy:0}],
+  ["file:c",{x:1,y:1,vx:0,vy:0}]
+ ]);
+ const camera={cx:30,cy:60,scale:1.5};
+ const curve=art.artCurve(e,points,camera,layout);
+ assert.ok(curve);
+ assert.equal(curve.x1,30);
+ assert.equal(curve.y1,60);
+ assert.equal(curve.x2,255);
+ assert.equal(curve.y2,120);
+ const half=art.artCurvePoint(curve,.5);
+ assert.ok(Number.isFinite(half.x)&&Number.isFinite(half.y));
+ assert.notEqual(half.y,(curve.y1+curve.y2)/2,
+  "Cross-community edges have visual curvature");
+ const bundles=art.artBundleEdges([e],layout,2);
+ assert.equal(art.artCurveHit(bundles,points,camera,layout,half.x,half.y),bundles[0]);
+ assert.equal(art.artCurveHit(bundles,points,camera,layout,-400,-300),null,
+  "Hover must reflect the drawn curved line, not a fabricated shortcut");
+ const clouds=art.artClouds(layout,points,camera);
+ assert.ok(clouds.every(x=>x.rx>=25&&x.ry>=25));
+ const pinned=points.get("file:c");
+ pinned.pinned=true;
+ const before={...pinned};
+ for(let i=0;i<20;i++)art.artClusterStep(layout,nodes,points,.16);
+ assert.deepEqual(pinned,before,"Pinned nodes may not move under cluster physics");
+ assert.equal(art.artEase(0),0);
+ assert.equal(art.artEase(1),1);
+ assert.ok(art.artEase(.5)>.5);
+ assert.equal(art.artLerp(0,100,.25),25);
+ let v={vx:18,vy:9,done:false};
+ for(let i=0;i<100&&!v.done;i++)v=art.artInertia(v.vx,v.vy);
+ assert.equal(v.done,true,"Kinetic panning must always come to rest");
+});
+
+test("Disk 19 keeps one borderless graph with multi-pass 4K-friendly Canvas",async()=>{
+ const mini=await readFile(join(root,"disk-src/web/pages/disk-map-mini.ts"),"utf8");
+ const responsive=await readFile(join(root,"disk-src/web/pages/disk-map-responsive.ts"),"utf8");
+ const css=await readFile(join(root,"web/disk.css"),"utf8");
+ const rootMarkup=mini.match(/const root=el\("section"[\s\S]*?,frame\);/)?.[0]||"";
+ assert.ok(rootMarkup.includes("dk-graph-only"));
+ assert.ok(!rootMarkup.includes("dk-graph-controls"));
+ assert.ok(css.includes("Disk 18 — single layout contract"));
+ for(const needle of ["graphArtLayout(scene)","artClouds(","artBundleEdges(",
+  "artCurve(","artCurveHit(","artClusterStep(","artInertia(",
+  "ctx.quadraticCurveTo(","ctx.createLinearGradient(","ctx.createRadialGradient(",
+  "ctx.ellipse(","ctx.shadowBlur=","artDepth(","artImportance(",
+  "cameraRaf=requestAnimationFrame(step)","inertiaRaf=requestAnimationFrame(glide)",
+  "routePulseUntil=performance.now()+950","canvas.dataset.communities=",
+  "if(zoom>=1.2)"]){
+  assert.ok(mini.includes(needle),"Missing living-constellation feature "+needle);
+ }
+ assert.ok(responsive.includes("Math.sqrt(10_000_000/area)"),
+  "4K Canvas backing memory remains capped");
+ assert.ok(mini.includes("ctx.setTransform(dpr,0,0,dpr,0,0)"),
+  "Rendering must retain device-pixel alignment");
+});
