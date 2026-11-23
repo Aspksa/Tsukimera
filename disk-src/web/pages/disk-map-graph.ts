@@ -73,8 +73,12 @@ export function graphFromCatalog(
   const parent=scope?parentOf(scope):"";
   const focusId="folder:"+scope;
   const byId=new Map<string,GraphNode>();
+  const semanticReserve=options.semantic?Math.min(36,Math.max(8,Math.round(limit*.2))):0;
+  const fileBudget=limit-semanticReserve;
   const add=(node:GraphNode)=>{
-    if(!byId.has(node.id)&&byId.size<limit)byId.set(node.id,node);
+    const cap=node.kind==="file"||node.kind==="tag"||node.kind==="revision"?
+      fileBudget:limit;
+    if(!byId.has(node.id)&&byId.size<cap)byId.set(node.id,node);
   };
   add({id:focusId,kind:"folder",name:last(scope),folder:scope,size:0,depth:0,count:counts.get(scope)||0});
   if(scope)add({id:"folder:"+parent,kind:"folder",name:last(parent),folder:parent,size:0,depth:-1,count:counts.get(parent)||0});
@@ -119,7 +123,7 @@ export function graphFromCatalog(
       depthOf(a)-depthOf(b)||compare(a,b));
   const chosen=new Map<string,number>();
   let any=true,round=0;
-  while(any&&byId.size<limit&&round<perFolder){
+  while(any&&byId.size<fileBudget&&round<perFolder){
     any=false;
     for(const path of paths){
       const group=byFolder.get(path)!;
@@ -130,7 +134,7 @@ export function graphFromCatalog(
         size:f.size,sha256:f.sha256,revision:f.revision,
         fileType:spatialFileType(f.name),depth:depthOf(f.folder)+1});
       chosen.set(path,index+1);any=true;
-      if(byId.size>=limit)break;
+      if(byId.size>=fileBudget)break;
     }
     round++;
   }
@@ -198,7 +202,10 @@ export function graphFromCatalog(
   // The extraction is opt-in and ephemeral; this model never reads file text.
   const evidence=options.semantic;
   if(evidence&&options.viewMode!=="versions"){
-    for(const n of evidence.nodes){
+    // Person co-mentions must remain visible on a bounded, busy graph.
+    for(const n of [...evidence.nodes].sort((a,b)=>
+      Number(b.kind==="person")-Number(a.kind==="person")||
+      b.count-a.count||compare(a.name,b.name))){
       if(!evidence.links.some(l=>(l.source===n.id&&byId.has(l.target))||
         (l.target===n.id&&byId.has(l.source))))continue;
       if(!byId.has(n.id))add({id:n.id,kind:n.kind,name:n.name,folder:"",size:0,
