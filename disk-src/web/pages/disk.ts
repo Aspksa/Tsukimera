@@ -137,7 +137,6 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
   let anchorId: string | null = null, focusId: string | null = null, infoId: string | null = null;
   let clipboard: { ids: string[]; cut: boolean } | null = null;
   const expanded = new Set<string>(JSON.parse(store.get("juunibi.disk.open") ?? "[]") as string[]);
-  let treeSort: "pinned" | "name" | "files" | "size" | "created" = "pinned", treeQuery = "";
   let treeHidden = store.get("juunibi.disk.tree") === "hidden";
   let sidebarPrefs:SidebarPrefs=readSidebarPrefs();
   let draggingFolder="";
@@ -961,18 +960,16 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
       return b;
     }));
     drawSw();
-    const pin = el("input", { type: "checkbox", checked: st.pinned });
     const covers = all.filter((f) => f.folder === folder && hasThumb(f));
     const cover = el("select", { cls: "dk-select", attrs: { "aria-label": "Обложка" } }, el("option", { value: "", textContent: "Без обложки" }), ...covers.map((f) => el("option", { value: f.id, textContent: f.name })));
     cover.value = st.cover;
     const body = el("div", { cls: "dk-form" },
       el("span", { cls: "dk-form-label", textContent: "Цвет" }), swatches,
-      el("label", { cls: "dk-check-line" }, pin, " Закрепить наверху"),
       el("span", { cls: "dk-form-label", textContent: "Обложка" }), covers.length ? cover : el("small", { cls: "muted", textContent: "В папке нет картинок для обложки." }),
       el("div", { cls: "dk-form-actions" }, btn("Отмена", () => sheet.close()), btn("Сохранить", async () => {
-        const r = await api.diskFolderStyle(folder, color || "#b89cff", pin.checked, covers.length ? cover.value : "");
+        const r = await api.diskFolderStyle(folder, color || "#b89cff", st.pinned, covers.length ? cover.value : "");
         if (!r.ok) { showToast(r.error.message); return; }
-        styles[folder] = { ...st, color, pinned: pin.checked, cover: covers.length ? cover.value : "" };
+        styles[folder] = { ...st, color, pinned: st.pinned, cover: covers.length ? cover.value : "" };
         sheet.close(); renderTree();
       }, { primary: true })));
     const sheet = openSheet({ title: "Оформление «" + folderName(folder) + "»", icon: "palette", content: body });
@@ -981,11 +978,6 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
 
   /* ---------------------------------------------------------------- tree */
   const tree = el("div", { cls: "dk-tree", attrs: { role: "tree", "aria-label": "Папки" } });
-  const treeFind = el("input", { type: "search", cls: "dk-tree-find", placeholder: "Найти папку", attrs: { "aria-label": "Найти папку" } });
-  treeFind.addEventListener("input", () => { treeQuery = treeFind.value.trim().toLocaleLowerCase(); renderTree(); });
-  const treeSortSel = el("select", { cls: "dk-select dk-tree-sort", attrs: { "aria-label": "Порядок папок" } },
-    ...([["pinned", "Закреплённые"], ["name", "По имени"], ["files", "По числу файлов"], ["size", "По размеру"], ["created", "Новые сверху"]] as const).map(([v, t]) => el("option", { value: v, textContent: t })));
-  treeSortSel.addEventListener("change", () => { treeSort = treeSortSel.value as typeof treeSort; renderTree(); });
   const treeCount = el("small", { cls: "muted" });
   const expandAll=iconButton("maximize","Развернуть все папки",()=>{
     folders.forEach(folder=>expanded.add(folder));saveOpen();renderTree();
@@ -1081,8 +1073,7 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
       go({folder:file.folder});reveal(id);openInfo(id);setDrawer(false);
     }
   });
-  const treePanel=el("div",{cls:"dk-tree-panel"},
-    el("div",{cls:"dk-side-tools"},treeFind,treeSortSel),treeCommands,tree);
+  const treePanel=el("div",{cls:"dk-tree-panel"},treeCommands,tree);
   const side = el("aside", { cls: "dk-side", attrs: { "aria-label": "Иерархия папок и Живая карта Диска" } },
     el("div", { cls: "dk-side-head" }, el("strong", { textContent: "Папки" }), treeCount, iconButton("x", "Закрыть", () => setDrawer(false), "icon-btn sm dk-side-close")),
     treePanel,miniMap.root);
@@ -1139,20 +1130,12 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
   const renderTree = () => {
     const totals = folderTotals(all);
     const kids = folderChildren(folders);
-    const order = (a: string, b: string) => {
-      const ta = totals.get(a), tb = totals.get(b);
-      if (treeSort === "files") return (tb?.count ?? 0) - (ta?.count ?? 0);
-      if (treeSort === "size") return (tb?.bytes ?? 0) - (ta?.bytes ?? 0);
-      if (treeSort === "created") return (styles[b]?.createdAt ?? "").localeCompare(styles[a]?.createdAt ?? "");
-      if (treeSort === "pinned") return Number(!!styles[b]?.pinned) - Number(!!styles[a]?.pinned) || a.localeCompare(b, "ru", { numeric: true });
-      return a.localeCompare(b, "ru", { numeric: true });
-    };
-    const matches = (f: string) => !treeQuery || f.toLocaleLowerCase().includes(treeQuery) || folders.some((x) => x.startsWith(f + "/") && x.toLocaleLowerCase().includes(treeQuery));
+    // Calm, predictable alphabetical folder tree. No extra search/sort strip.
+    const order=(a:string,b:string)=>a.localeCompare(b,"ru",{numeric:true});
     const ancestry=new Set(view==="all"&&virtual==="none"&&!smartCurrent?folderAncestors(current):[]);
     const node = (folder: string, depth: number): HTMLElement | null => {
-      if (folder && !matches(folder)) return null;
       const children = (kids.get(folder) ?? []).sort(order);
-      const open = !folder || expanded.has(folder) || !!treeQuery;
+      const open = !folder || expanded.has(folder);
       const isCur = !smartCurrent && view === "all" && virtual === "none" && current === folder;
       const t = totals.get(folder);
       const st = styles[folder];
@@ -1169,7 +1152,6 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
         st?.cover && all.some((f) => f.id === st.cover) ? el("img", { cls: "dk-cover", alt: "", loading: "lazy", src: diskRawUrl(all.find((f) => f.id === st.cover)!) })
           : el("span", { cls: "dk-node-ic" }, folder ? dIcon(isCur ? "folderOpen" : "folder", 17) : dIcon("disk", 17)),
         el("span", { cls: "dk-node-name", textContent: folder ? folderName(folder) : "Диск" }),
-        st?.pinned ? el("span", { cls: "dk-pin", title: "Закреплена" }, dIcon("pin", 12)) : null,
         el("small", { cls: "dk-node-n", textContent: t ? t.count + " · " + human(t.bytes) : "пусто" }));
       if (st?.color && st.color !== "#b89cff") label.style.setProperty("--fc", st.color);
       label.addEventListener("click", () => { go({ folder }); setDrawer(false); });
