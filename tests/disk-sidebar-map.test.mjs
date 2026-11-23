@@ -93,7 +93,7 @@ test("Disk rail swaps Sections for an interactive, bounded source-backed mini Ca
   assert.match(page,/sectionsRegion\.hidden=false/);
   assert.match(page,/miniMap\.update\(all,folders,current\)/);
   assert.match(page,/title:"Разделы и умные папки"/);
-  for(const wanted of ["miniGraphFromCatalog(files,folders,focus,detail)",
+  for(const wanted of ["miniGraphFromCatalog(files,folders,focus,detail,current)",
     "mapNodeRadius(n,graph.bytes)","canvas.addEventListener(\"wheel\"",
     "canvas.addEventListener(\"pointermove\"","canvas.addEventListener(\"click\"",
     "canvas.addEventListener(\"dblclick\"","canvas.addEventListener(\"keydown\"",
