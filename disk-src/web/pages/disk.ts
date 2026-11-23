@@ -677,6 +677,8 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
     if (t.closest(".dk-more")) { openMenu(t.closest<HTMLElement>(".dk-more")!, fileMenu(f), "Действия с файлом"); return; }
     if (t.closest(".dk-check")) { if (t instanceof HTMLInputElement) pick(f.id, e, true); return; }
     focusId = f.id;
+    if(view!=="trash"&&!e.shiftKey&&!e.ctrlKey&&!e.metaKey)
+      miniMap.centerFile(f.id);
     if (e.shiftKey || e.ctrlKey || e.metaKey || selected.size || view === "trash") { e.preventDefault(); pick(f.id, e, !e.shiftKey); return; }
     openInfo(f.id);
   });
@@ -1181,6 +1183,34 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
   const side = el("aside", { cls: "dk-side", attrs: { "aria-label": "Папки и Живая карта Диска" } },
     el("div", { cls: "dk-side-head" }, el("strong", { textContent: "Папки" }), treeCount, iconButton("x", "Закрыть", () => setDrawer(false), "icon-btn sm dk-side-close")),
     treePanel,miniMap.root);
+  // The same Canvas is parked in the shell backdrop during navigation and
+  // returned to its ordinary, interactive position below the folder tree.
+  const universeHost=(()=>{
+    let host=document.getElementById("tsukimera-universe-stage");
+    if(!host){
+      host=document.createElement("div");
+      host.id="tsukimera-universe-stage";
+      host.setAttribute("aria-hidden","true");
+      document.body.append(host);
+    }
+    return host;
+  })();
+  Object.assign(window,{__tsukimeraGraph22:{
+    park:()=>{
+      if(miniMap.root.parentElement===universeHost)return;
+      miniMap.collapse();
+      universeHost.append(miniMap.root);
+      universeHost.classList.add("ts22-background-active");
+      document.documentElement.classList.add("ts22-universe-visible");
+      miniMap.repaint();
+    },
+    restore:()=>{
+      if(miniMap.root.parentElement!==side)side.append(miniMap.root);
+      universeHost.classList.remove("ts22-background-active");
+      document.documentElement.classList.remove("ts22-universe-visible");
+      miniMap.repaint();
+    }
+  }});
   const scrim = el("div", { cls: "dk-scrim" });
   const setDrawer = (open: boolean) => { page.classList.toggle("drawer-open", open); if (open) side.querySelector<HTMLElement>(".dk-node.current .dk-node-label, .dk-side-close")?.focus({ preventScroll: true }); };
   drawerBtn.addEventListener("click", () => setDrawer(true));
@@ -2016,6 +2046,9 @@ export function diskPage(deps: DiskDeps = {}): HTMLElement {
   page.classList.add("dk-experience-v8","dk-map-left");
   page.append(el("h1", { cls: "sr-only", textContent: "Диск" }),
     bar,filesHeading,layout,moveHint,scrim,uploader.root,picker,folderPicker,restorePicker,chatDrop);
+  page.addEventListener("tsukimera:disk-resume",()=>{
+    if(page.isConnected)void loadCatalog(false);
+  });
   const scrollHost=document.querySelector<HTMLElement>(".content");
   scrollHost?.addEventListener("scroll",()=>{
     if(!page.isConnected){autoMoreObserver?.disconnect();return;}
