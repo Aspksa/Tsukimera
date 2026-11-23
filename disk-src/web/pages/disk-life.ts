@@ -55,18 +55,23 @@ export function diskLifePanel(isEmpty:()=>boolean=()=>false):{
 }{
   const root=el("section",{cls:"dkl dkl-compact",attrs:{id:"disk-life","aria-label":"Жизнь документов"}});
   let data:DiskLife|null=null,error="",loading=false,stale=true,visible=false,timer=0;
-  let group=savedGroup(),expanded=false;
+  let group=savedGroup(),expanded=false,showAll=false;
   let query="",availability:LifeAvailability="all";
   let chartObserver:IntersectionObserver|null=null;
   const body=el("div",{cls:"dkl-body"});
   const refreshBtn=iconButton("refresh","Пересчитать показатели",()=>void load(),"icon-btn dkl-refresh");
   const expandBtn=iconButton("maximize","Развернуть аналитику на всю ширину",()=>expand(!expanded),"icon-btn dkl-expand");
+  const allBtn=el("button",{type:"button",cls:"dkl-all-toggle",hidden:true,
+    attrs:{"aria-pressed":"false","aria-label":"Показать все 150 показателей"}}, "Все 150");
+  allBtn.addEventListener("click",()=>{
+    showAll=!showAll;query="";search.value="";render();
+  });
   const status=el("small",{cls:"dkl-tally",textContent:"150 показателей · 15 разделов"});
   const heading=el("div",{cls:"dkl-toolbar"},
     el("div",{cls:"dkl-toolbar-text"},
       el("strong",{textContent:"Жизнь Диска"}),
       status),
-    el("div",{cls:"dkl-toolbar-actions"},refreshBtn,expandBtn));
+    el("div",{cls:"dkl-toolbar-actions"},allBtn,refreshBtn,expandBtn));
   const search=el("input",{type:"search",cls:"dkl-search",attrs:{
     placeholder:"Найти показатель из 150…","aria-label":"Поиск по всем показателям Жизни Диска"}});
   const searchBox=el("div",{cls:"dkl-discover"},
@@ -88,6 +93,7 @@ export function diskLifePanel(isEmpty:()=>boolean=()=>false):{
 
   function expand(value:boolean):void{
     expanded=value;
+    if(!value)showAll=false;
     root.classList.toggle("dkl-expanded",value);
     root.classList.toggle("dkl-compact",!value);
     searchBox.hidden=!value;
@@ -104,6 +110,7 @@ export function diskLifePanel(isEmpty:()=>boolean=()=>false):{
   function navigate(id:string){
     if(!data?.groups.some(g=>g.id===id))return;
     group=id;keepGroup(id);
+    showAll=false;
     query="";search.value="";
     render();
   }
@@ -202,6 +209,9 @@ export function diskLifePanel(isEmpty:()=>boolean=()=>false):{
     chartObserver=null;
     refreshBtn.classList.toggle("spin",loading);
     refreshBtn.disabled=loading;
+    allBtn.hidden=!expanded;
+    allBtn.setAttribute("aria-pressed",String(showAll));
+    allBtn.textContent=showAll?"Вернуться к разделам":"Все 150";
     for(const {value,button} of filterButtons)button.setAttribute("aria-pressed",String(availability===value));
     if(isEmpty()){
       body.replaceChildren(el("div",{cls:"dkl-blank"},
@@ -287,14 +297,16 @@ export function diskLifePanel(isEmpty:()=>boolean=()=>false):{
     const searching=expanded&&!!query.trim();
     const scoped=searching
       ?searchLifeMetrics(d.metrics,d.groups,query,availability)
+      :showAll&&expanded?searchLifeMetrics(d.metrics,d.groups,"",availability)
       :searchLifeMetrics(groupMetrics,d.groups,"",availability);
     const shown=expanded?scoped:groupMetrics.slice(0,3);
     const groupHeader=el("div",{cls:"dkl-group-head"},
       el("span",{cls:"dkl-ic lg"},lifeGlyph(searching?"search":g.icon,g.id,24)),
       el("div",{cls:"dkl-group-text"},
-        el("h3",{textContent:searching?"Поиск по всем разделам":g.title}),
-        el("p",{textContent:searching?"Показатели из любых 15 разделов, исходные данные не изменяются":g.note})),
-      el("small",{cls:"dkl-group-count",textContent:shown.length+" из "+(searching?d.metrics.length:groupMetrics.length)}));
+        el("h3",{textContent:searching?"Поиск по всем разделам":showAll?"Все 150 показателей":g.title}),
+        el("p",{textContent:searching?"Показатели из любых 15 разделов, исходные данные не изменяются":
+          showAll?"15 разделов · все показатели в одной ленте, исходные расчёты без изменений":g.note})),
+      el("small",{cls:"dkl-group-count",textContent:shown.length+" из "+((searching||showAll)?d.metrics.length:groupMetrics.length)}));
     groupHeader.style.setProperty("--g",g.color);
     if(expanded&&typeof IntersectionObserver==="function"){
       chartObserver=new IntersectionObserver(entries=>{
@@ -317,7 +329,7 @@ export function diskLifePanel(isEmpty:()=>boolean=()=>false):{
     body.replaceChildren(highlights,areas,tabs,groupHeader,grid);
     if(!expanded){
       const more=el("button",{type:"button",cls:"dkl-show-all",
-        textContent:"Показать все "+groupMetrics.length+" показателей"});
+        textContent:"Открыть аналитику · все 150 показателей"});
       more.addEventListener("click",()=>expand(true));
       body.append(more);
     }
