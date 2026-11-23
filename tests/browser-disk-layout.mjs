@@ -150,6 +150,10 @@ try{
   assert.ok(wide.files.width>490,"File grid too narrow: "+JSON.stringify(wide));
   assert.equal(wide.leftDisplay,"flex");
   assert.equal(wide.rightDisplay,"flex");
+  const fullHdGeometry=await assertAlignment("Full HD 1920");
+  assert.ok(fullHdGeometry.filesWidth>490);
+  const fullHdScreenshot=await screenshot("disk-full-hd-1920x1080");
+  assert.ok(fullHdScreenshot.width>=1800);
   const x=wide.left.x+wide.left.width/2,y=wide.left.y+Math.min(100,wide.left.height/2);
   await send("Input.dispatchMouseEvent",{type:"mouseMoved",x,y});
   await send("Input.dispatchMouseEvent",{type:"mousePressed",x,y,button:"left",clickCount:1});
@@ -166,12 +170,15 @@ try{
   const middle=await evaluate(metrics);
   assert.equal(middle.rightDisplay,"none","Right divider should disappear on a laptop");
   assert.ok(middle.files.width>390,"Laptop file grid too narrow: "+JSON.stringify(middle));
+  await assertAlignment("Laptop 1366");
+  await screenshot("disk-laptop-1366x900");
   await device(390,844);
   const mobile=await evaluate(metrics);
   assert.equal(mobile.leftDisplay,"none","Folder divider should disappear on mobile");
   assert.ok(mobile.files.width>300,"Mobile file grid too narrow: "+JSON.stringify(mobile));
   assert.ok(mobile.scrollWidth<=mobile.width+3,"Unexpected horizontal scroll: "+JSON.stringify(mobile));
   assert.equal(mobile.sidePosition,"fixed","Folders should become a mobile drawer");
+  await screenshot("disk-mobile-files-390x844");
 
   // Disk 12: mobile files remain immediately visible; the map lives INSIDE
   // the folders drawer, directly below the hierarchy, not above documents.
@@ -182,6 +189,8 @@ try{
     "Mobile map must be accessible from the folder drawer: "+JSON.stringify(mobileFlow));
   assert.ok(mobileFlow.mapWidth<=mobileFlow.sideWidth+3&&mobileFlow.frameHeight>=300&&mobileFlow.frameHeight<=440,
     "Compact mobile map should fit the folder drawer: "+JSON.stringify(mobileFlow));
+  await assertAlignment("Mobile drawer",true);
+  await screenshot("disk-mobile-drawer-390x844");
   await evaluate("document.querySelector('.dk-side-close').click()");
 
   // Disk 8.0: reversible Focus mode, sticky path, real file cards and no
