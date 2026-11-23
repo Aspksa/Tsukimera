@@ -703,3 +703,55 @@ button,input,textarea,select{font-family:inherit}
 @media(prefers-reduced-motion:reduce){
   .settings-page.settings-40 .set-toc-link{transition:none}
 }
+
+
+/* Tsukimera 22: the SAME Disk graph Canvas survives page navigation.
+ * Parked behind the shell it is strictly decorative/pointer-inert. On Disk
+ * it returns to its original keyboard-accessible position beneath the tree.
+ */
+#tsukimera-universe-stage{
+  position:fixed;inset:-5%;z-index:0;pointer-events:none;
+  opacity:0;visibility:hidden;overflow:hidden;isolation:isolate;
+  transform:translate3d(0,var(--ts22-shift,0px),0);
+  transition:opacity .35s ease,visibility .35s ease;
+  background:var(--bg,#09090c);
+}
+#tsukimera-universe-stage.ts22-background-active{
+  visibility:visible;opacity:.32;
+}
+#tsukimera-universe-stage,
+#tsukimera-universe-stage *{pointer-events:none!important;user-select:none!important}
+#tsukimera-universe-stage :is(.dk-mini-map,.dk-mini-map-frame,.dk-graph-stage){
+  position:absolute!important;inset:0!important;
+  width:100%!important;height:100%!important;
+  max-width:none!important;max-height:none!important;
+  min-width:0!important;min-height:0!important;
+  margin:0!important;padding:0!important;border:0!important;
+  border-radius:0!important;box-shadow:none!important;
+  outline:0!important;overflow:hidden!important;
+  background:transparent!important;
+}
+#tsukimera-universe-stage .dk-graph-canvas{
+  position:absolute!important;inset:0!important;
+  width:100%!important;height:100%!important;
+  border:0!important;background:transparent!important;
+}
+html.ts22-universe-visible .app{
+  position:relative;z-index:1;background:transparent;
+}
+html.ts22-universe-visible .content,
+html.ts22-universe-visible .content-main,
+html.ts22-universe-visible .page{
+  background:transparent;
+}
+html.ts22-universe-visible :is(.nav,.topbar,.pg-card,.set-card,.modal-ts){
+  backdrop-filter:blur(5px);
+}
+@media(prefers-reduced-motion:reduce){
+  #tsukimera-universe-stage{
+    transition:none!important;transform:none!important;
+  }
+}
+@media(max-width:760px){
+  #tsukimera-universe-stage.ts22-background-active{opacity:.18}
+}
