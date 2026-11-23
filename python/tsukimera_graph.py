@@ -100,7 +100,13 @@ def upsert_node(conn,id,kind,name,folder="",sha="",origin="catalog",confidence=1
     conn.execute("""INSERT INTO graph22_nodes VALUES(?,?,?,?,?,?,?,?)
        ON CONFLICT(id) DO UPDATE SET kind=excluded.kind,name=excluded.name,
        folder=excluded.folder,sha=excluded.sha,origin=excluded.origin,
-       confidence=excluded.confidence,updated_at=excluded.updated_at""",
+       confidence=excluded.confidence,updated_at=excluded.updated_at
+       WHERE graph22_nodes.kind<>excluded.kind OR
+         graph22_nodes.name<>excluded.name OR
+         graph22_nodes.folder<>excluded.folder OR
+         graph22_nodes.sha<>excluded.sha OR
+         graph22_nodes.origin<>excluded.origin OR
+         graph22_nodes.confidence<>excluded.confidence""",
        (id,kind,name[:180],folder,sha,origin,confidence,utc()))
 def canonical_edge(source,target,kind,token,evidence,confidence,origin,sha1="",sha2=""):
     # Direction is meaningful for folder->file, file->entity, not duplicates.
@@ -113,7 +119,11 @@ def insert_edge(conn,*edge):
     conn.execute("""INSERT INTO graph22_edges VALUES(?,?,?,?,?,?,?,?,?)
         ON CONFLICT(source,target,kind,token) DO UPDATE SET
         evidence=excluded.evidence,confidence=excluded.confidence,
-        origin=excluded.origin,source_sha=excluded.source_sha,target_sha=excluded.target_sha""",edge)
+        origin=excluded.origin,source_sha=excluded.source_sha,target_sha=excluded.target_sha
+        WHERE graph22_edges.evidence<>excluded.evidence OR
+         graph22_edges.confidence<>excluded.confidence OR
+         graph22_edges.source_sha<>excluded.source_sha OR
+         graph22_edges.target_sha<>excluded.target_sha""",edge)
 def folder_paths(path):
     seg=path.split("/") if path else []
     return ["/".join(seg[:i]) for i in range(1,len(seg)+1)]
@@ -196,6 +206,12 @@ def sync(conn,batch=25):
         for row in live.values():
             names.update(folder_paths(row["folder"]))
         names.update(r[0] for r in conn.execute("SELECT name FROM disk_folders"))
+        active_folders={folder_node(path) for path in names}
+        for old in conn.execute("SELECT id FROM graph22_nodes WHERE kind='folder'"):
+            if old["id"] not in active_folders:
+                conn.execute("DELETE FROM graph22_edges WHERE source=? OR target=?",
+                             (old["id"],old["id"]))
+                conn.execute("DELETE FROM graph22_nodes WHERE id=?",(old["id"],))
         for path in sorted(names):
             upsert_node(conn,folder_node(path),"folder",
                 path.rsplit("/",1)[-1] if path else "Диск",path,origin="disk_folders")
@@ -366,6 +382,39 @@ def impact(conn,id):
       FROM graph22_edges WHERE source=? OR target=?
       ORDER BY confidence DESC LIMIT 80""",(id,id)).fetchall()
     return {"node":id,"connections":[dict(r) for r in rows]}
+def contradictions(conn,limit=35):
+    """Review candidates only, never certified legal contradictions."""
+    rows=conn.execute("""SELECT f.file_id,f.value_key,f.value,
+       f.evidence, c.value_key AS contract
+       FROM disk_knowledge_facts f
+       JOIN disk_knowledge_facts c ON c.file_id=f.file_id
+       JOIN disk_files d ON d.id=f.file_id AND d.deleted_at IS NULL
+       WHERE f.kind='amount' AND c.kind='contract'
+       ORDER BY c.value_key,f.file_id LIMIT 2200""").fetchall()
+    by_contract=collections.defaultdict(list)
+    for r in rows:
+        by_contract[r["contract"]].append(dict(r))
+    suggestions=[]
+    for contract in sorted(by_contract):
+        files=by_contract[contract]
+        by_amount=collections.defaultdict(list)
+        for f in files:by_amount[f["value_key"]].append(f)
+        if len(by_amount)<2:continue
+        different=list(by_amount.values())
+        if different[0][0]["file_id"]==different[1][0]["file_id"]:
+            continue
+        first,second=different[0][0],different[1][0]
+        suggestions.append({
+          "kind":"possible-amount-conflict","contract":contract,
+          "documentIds":[first["file_id"],second["file_id"]],
+          "values":[first["value"],second["value"]],
+          "evidence":[first["evidence"],second["evidence"]],
+          "confidence":"review-only",
+          "explanation":"Разные суммы с общим номером договора; допустимы разные акты и редакции"
+        })
+        if len(suggestions)>=max(1,min(100,int(limit))):break
+    return {"candidates":suggestions,"confirmed":0,"automaticChanges":0}
+
 def command(db_path,action,**opts):
     conn=connect(db_path)
     try:
@@ -384,12 +433,13 @@ def command(db_path,action,**opts):
         if action=="impact":return impact(conn,opts.get("source",""))
         if action=="timeline":return {"events":timeline(conn,opts.get("limit",40))}
         if action=="diagnose":return diagnosis(conn)
+        if action=="contradictions":return contradictions(conn,opts.get("limit",35))
         raise ValueError("unsupported operation")
     finally:conn.close()
 def main():
     parser=argparse.ArgumentParser(description="Local source-backed Tsukimera graph engine")
     parser.add_argument("--db",required=True)
-    parser.add_argument("--action",choices=["sync","view","path","impact","timeline","diagnose"],
+    parser.add_argument("--action",choices=["sync","view","path","impact","timeline","diagnose","contradictions"],
                         default="view")
     parser.add_argument("--batch",type=int,default=20)
     parser.add_argument("--limit",type=int,default=120)
