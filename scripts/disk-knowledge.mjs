@@ -10,7 +10,7 @@ const normalize=s=>String(s).normalize("NFKC").toLocaleLowerCase("ru-RU")
 const key=s=>normalize(s).replace(/[№#«»"'.,:;()]/g,"").replace(/\s+/g," ").slice(0,120);
 const sample=(text,pos)=>text.slice(Math.max(0,pos-65),Math.min(text.length,pos+145))
   .replace(/\s+/g," ").trim().slice(0,200);
-const cap=(v,max=12)=>[...new Map(v.map(x=>[x.key,x])).values()].slice(0,max);
+const cap=(v,max=12)=>[...new Map(v.map(x=>[x.kind+":"+x.key,x])).values()].slice(0,max);
 export function extractDiskFacts(name,raw){
   const text=String(raw||"").slice(0,192000);
   const title=String(name||"").slice(0,200);
