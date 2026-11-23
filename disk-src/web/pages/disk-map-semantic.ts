@@ -5,7 +5,7 @@
 import type {DiskFile} from "../api";
 export type SemanticKind="topic"|"person"|"organization"|"date"|"project";
 export type SemanticNode={id:string;kind:SemanticKind;name:string;count:number};
-export type SemanticLink={source:string;target:string;kind:"lexical"|"entity"|"reference";weight:number;evidence:string;confidence:number};
+export type SemanticLink={source:string;target:string;kind:"lexical"|"entity"|"reference"|"co_mention";weight:number;evidence:string;confidence:number};
 export type SemanticRecord={id:string;name:string;preview:string;keywords:string[];people:string[];organizations:string[];dates:string[];projects:string[];references:string[]};
 export type SemanticIndex={records:Record<string,SemanticRecord>;nodes:SemanticNode[];links:SemanticLink[];processed:number;unreadable:number;truncated:number};
 const common=new Set(("и в на по с со к а но за из от до для или это что как не да те " +
@@ -65,11 +65,34 @@ export function semanticFromRecords(records:readonly SemanticRecord[]):SemanticI
    if(!entry.members.includes(rec.id))entry.members.push(rec.id);
    groups.set(key,entry);
   }
-  for(const [name,group] of [...groups].filter(([,g])=>g.members.length>=2)
-   .sort((a,b)=>b[1].members.length-a[1].members.length).slice(0,kind==="topic"?10:8)){
+  // Mention candidates can appear in a single document. Make person nodes
+  // visible only if two different names co-occur there, or a name appears
+  // in at least two documents. Do not claim the candidates are identified.
+  const coMentions=new Set<string>();
+  if(kind==="person")for(const rec of docs){
+   const candidates=unique(rec.people.map(norm),12);
+   if(candidates.length>=2)for(const candidate of candidates)coMentions.add(id(kind,candidate));
+  }
+  for(const [name,group] of [...groups].filter(([key,g])=>
+   g.members.length>=2||(kind==="person"&&coMentions.has(key)))
+   .sort((a,b)=>b[1].members.length-a[1].members.length||
+     a[0].localeCompare(b[0],"ru")).slice(0,kind==="person"?16:kind==="topic"?10:8)){
    nodes.push({id:name,kind,name:group.name,count:group.members.length});
    for(const member of group.members)edge(name,fileId(member),"entity",kind==="topic"?.45:.85,
     explain+": "+group.name,kind==="person"?.52:.89);
+  }
+ }
+ // A person-person line is supported only by explicit co-occurrence of two
+ // candidate strings in the SAME readable text. It makes no claim about
+ // friendship, employment, family, identity resolution or real interaction.
+ const visiblePeople=new Set(nodes.filter(n=>n.kind==="person").map(n=>n.id));
+ for(const rec of docs){
+  const individuals=unique(rec.people.map(name=>id("person",name)),12)
+   .filter(key=>visiblePeople.has(key)).slice(0,6);
+  for(let a=0;a<individuals.length;a++)for(let b=a+1;b<individuals.length;b++){
+   edge(individuals[a]!,individuals[b]!,"co_mention",.55,
+    "Совместное упоминание в документе «"+rec.name+
+    "»; личная связь между людьми не установлена",.48);
   }
  }
  for(let i=0;i<docs.length;i++)for(let j=i+1;j<docs.length;j++){
