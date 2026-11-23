@@ -86,10 +86,11 @@ export function graphArtLayout(scene:Pick<GraphScene,"nodes"|"links">):ArtLayout
     const key=membership.get(node.id)!;
     const members=groups.get(key)||[];members.push(node.id);groups.set(key,members);
   }
+  // Colour never depends on how many other groups are in the scene;
+  // uploading an unrelated folder cannot recolour existing communities.
   const communities=[...groups.entries()].sort((a,b)=>a[0].localeCompare(b[0]))
-    .map(([key,members],i)=>({id:key,parent:"root",members,
-      count:members.length,color:colorSet[(i+hash(key)%3)%colorSet.length]!,
-      layer:hash(key)%3}));
+    .map(([key,members])=>({id:key,parent:"root",members,
+      count:members.length,color:artColor(key),layer:hash(key)%3}));
   // Real folder nesting is a separate refinement; no phantom subfolders.
   const children=new Map<string,string[]>();
   for(const n of nodes){
@@ -221,9 +222,30 @@ export function artClusterStep(layout:ArtLayout,nodes:readonly GraphNode[],
     c.x+=p.x;c.y+=p.y;c.count++;centers.set(key,c);
   }
   for(const c of centers.values()){c.x/=c.count;c.y/=c.count;}
+  // Soft whole-community repulsion makes dense groups readable without
+  // manufacturing links between them or disturbing pinned coordinates.
+  const keys=[...centers.keys()].sort(),separation=new Map<string,{x:number;y:number}>();
+  for(let i=0;i<keys.length;i++)for(let j=i+1;j<keys.length;j++){
+    const a=centers.get(keys[i]!)!,b=centers.get(keys[j]!)!;
+    const dx=a.x-b.x,dy=a.y-b.y;
+    const distance=Math.max(1,Math.hypot(dx,dy));
+    const desired=clamp(95+Math.sqrt(a.count+b.count)*6,115,190);
+    if(distance>=desired)continue;
+    const angle=hash(keys[i]!+"|"+keys[j]!)%360*Math.PI/180;
+    const nx=distance<2?Math.cos(angle):dx/distance,
+      ny=distance<2?Math.sin(angle):dy/distance;
+    const f=clamp((desired-distance)/desired,0,1)*.4;
+    const ap=separation.get(keys[i]!)||{x:0,y:0},
+      bp=separation.get(keys[j]!)||{x:0,y:0};
+    ap.x+=nx*f;ap.y+=ny*f;bp.x-=nx*f;bp.y-=ny*f;
+    separation.set(keys[i]!,ap);separation.set(keys[j]!,bp);
+  }
   for(const node of nodes){
     const p=points.get(node.id);if(!p||p.pinned||node.id==="folder:")continue;
-    const c=centers.get(layout.membership.get(node.id)||"root");
+    const key=layout.membership.get(node.id)||"root";
+    const drift=separation.get(key);
+    if(drift){p.vx+=drift.x*strength;p.vy+=drift.y*strength;}
+    const c=centers.get(key);
     if(!c||c.count<2)continue;
     const dx=c.x-p.x,dy=c.y-p.y,dist=Math.hypot(dx,dy);
     if(dist<35||dist>500)continue;
