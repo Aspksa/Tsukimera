@@ -19,7 +19,7 @@ export function extractDiskFacts(name,raw){
   const put=(kind,value,at,certainty=.86)=>{
     if(!value||facts.length>180)return;
     const k=key(value);
-    if(k.length<2||k.length>120)return;
+    if((k.length<2&&!(kind==="appendix"&&/^[0-9]$/.test(k)))||k.length>120)return;
     facts.push({kind,key:k,value:String(value).trim().slice(0,120),
       position:Math.max(0,at-title.length-1),
       evidence:sample(intro,at),certainty});
